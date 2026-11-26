@@ -31,7 +31,7 @@ find "$p$share/classic" -type d -exec chmod 755 {} +
 find "$p$share/classic" -type f -exec chmod 644 {} +
 printf '%s\n' "$release" >"$p$share/RELEASE"
 install -m644 "$(dirname "$root")/staging/server.py" "$p$lib/server.py"
-ln -s "$share/classic/operator" "$p$lib/dist"
+ln -s ../../share/pistar-dashboard/classic/operator "$p$lib/dist"
 for unit in psdash-stage pistar-panel pistar-wizard; do
   case $unit in
     psdash-stage) src=staging/$unit.service; cmd="/usr/bin/python3 -IB $lib/server.py" ;;

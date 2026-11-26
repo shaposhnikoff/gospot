@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Exercise the actual operator entry point from the unpacked Debian layout.
+set -euo pipefail
+d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+dpkg-deb -x "${1:?path to .deb}" "$d"
+python3 -IB - "$d" <<'PY'
+import http.client, importlib.util, pathlib, sys, threading
+base=pathlib.Path(sys.argv[1])
+spec=importlib.util.spec_from_file_location('stage',base/'usr/lib/pistar-dashboard/server.py')
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+with m.ThreadingHTTPServer(('127.0.0.1',0),m.Handler) as s:
+    threading.Thread(target=s.serve_forever,daemon=True).start()
+    c=http.client.HTTPConnection('127.0.0.1',s.server_port,timeout=5)
+    c.request('GET','/'); r=c.getresponse()
+    assert r.status==200 and r.read()==(base/'usr/share/pistar-dashboard/classic/operator/index.html').read_bytes()
+    s.shutdown()
+print("PASS Debian operator path: GET / serves the packaged index")
+PY

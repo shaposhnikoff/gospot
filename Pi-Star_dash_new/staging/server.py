@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 
 # Resolve the release once: files and server always come from the same build.
-ROOT = Path(__file__).resolve().parent / "dist"
+ROOT = (Path(__file__).resolve().parent / "dist").resolve()
 TYPES = {
     ".html": "text/html; charset=utf-8", ".js": "text/javascript",
     ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png",

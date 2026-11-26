@@ -4,10 +4,19 @@ import { execFileSync, spawn } from 'node:child_process';
 import { X509Certificate, createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
+import {checkPackaged} from './packaged_edit.mjs';
 
 const board='192.168.210.194', root=`http://${board}:8789`, admin=`https://${board}:8788`;
+const mode=process.argv[2];
+assert([undefined,'--deb-readonly','--deb-fixture-write'].includes(mode));
+const write=mode==='--deb-fixture-write';
+if(write){
+  assert.deepEqual(JSON.parse(execFileSync('ip',['-j','link'])).map(i=>i.ifname),['lo']);
+  assert.equal(JSON.parse(execFileSync('ip',['-j','route','get',board]))[0].dev,'lo');
+}
 const ssh = cmd => execFileSync('ssh',['-T','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','pistar3',cmd],{encoding:'utf8'}).trim();
 assert.equal(ssh('hostname -s'),'pistar3');
+if(write) assert.equal(ssh('sudo -n cat /run/qa-isolated-dashboard'),'isolated synthetic radio INIs');
 const radio = () => ssh('sudo -n sha256sum /etc/MMDVM-Host.ini /etc/DMRGateway.ini && systemctl show -p InvocationID --value mmdvmhost dmrgateway');
 const before=radio();
 const pin=createHash('sha256').update(new X509Certificate(ssh('sudo -n cat /etc/pistar-wizard/tls-cert.pem')).publicKey.export({type:'spki',format:'der'})).digest('base64');
@@ -51,14 +60,16 @@ try {
   const page=(await (await fetch('http://'+debug+'/json/list')).json()).find(t=>t.type==='page');
   ws=new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});
-  let seq=0; const pending=new Map(), blocked=[];
+  let seq=0; const pending=new Map(), blocked=[],posts=[];
   const cdp=(method,params={})=>new Promise((r,j)=>{pending.set(++seq,{r,j});ws.send(JSON.stringify({id:seq,method,params}));});
   ws.onmessage=({data})=>{
     const {id,result,error,method,params:p}=JSON.parse(data);
     if(id){const q=pending.get(id);pending.delete(id);error?q.j(Error(error.message)):q.r(result);return;}
     if(method==='Fetch.requestPaused'){
       const u=new URL(p.request.url);
-      const ok=['GET','HEAD'].includes(p.request.method) && [root,admin].includes(u.origin);
+      const save=write && p.request.method==='POST' && u.href===admin+'/manage/api/services';
+      const ok=(['GET','HEAD'].includes(p.request.method) && [root,admin].includes(u.origin)) || save;
+      if(save)posts.push({id:p.networkId,csrf:Object.entries(p.request.headers).some(([k,v])=>k.toLowerCase()==='x-pistar-csrf'&&/^[0-9a-f]{64}$/.test(v)),body:JSON.parse(p.request.postData)});
       if(!ok)blocked.push(p.request.method+' '+u.origin+u.pathname);
       void cdp(ok?'Fetch.continueRequest':'Fetch.failRequest',ok?{requestId:p.requestId}:{requestId:p.requestId,errorReason:'BlockedByClient'});
     } else if(method==='Fetch.authRequired'){
@@ -66,6 +77,8 @@ try {
       const allow=a.source==='Server' && a.origin===admin && a.realm==='Pi-Star' && a.scheme==='basic' && new URL(p.request.url).pathname.startsWith('/manage/');
       void cdp('Fetch.continueWithAuth',{requestId:p.requestId,authChallengeResponse:allow?
         {response:'ProvideCredentials',username:'admin',password:ssh('sudo -n cat /etc/pistar-wizard/admin-password')}:{response:'CancelAuth'}});
+    } else if(method==='Network.responseReceived' && posts.some(x=>x.id===p.requestId)){
+      posts.find(x=>x.id===p.requestId).status=p.response.status;
     } else if(method==='Network.responseReceived' && p.type==='Document'){
       console.log(`Document ${p.response.status} ${p.response.url.split('?')[0]}`);
     } else if(method==='Network.requestWillBeSent' && p.redirectResponse && p.type==='Document'){
@@ -73,6 +86,10 @@ try {
     }
   };
   await cdp('Network.enable'); await cdp('Fetch.enable',{handleAuthRequests:true});
+  if(mode){
+    await checkPackaged({write,wd,js,click,until,ssh,root,admin,posts});
+    assert.deepEqual(blocked,[]);
+  }else{
   let failures=0;
   for (const [width,height,mobile] of [[1366,900,false],[390,844,true]]) {
     console.log(`\n${mobile?'Mobile':'Desktop'} ${width}x${height}`);
@@ -108,10 +125,13 @@ try {
   assert.deepEqual(blocked,[]);
   console.log('Read-only browser guard: GET/HEAD only, no blocked requests.');
   if(failures){console.log(`Navigation/section parity failures: ${failures}`);process.exitCode=1;}
+  }
 } finally {
   ws?.close();
   if(session)await wire('/session/'+session,undefined,'DELETE').catch(()=>{});
   driver.kill();
-  assert.equal(radio(),before);
-  console.log('Before/after: radio INI checksums and mmdvmhost/dmrgateway InvocationIDs unchanged.');
+  if(!write){
+    assert.equal(radio(),before);
+    console.log('Before/after: radio INI checksums and mmdvmhost/dmrgateway InvocationIDs unchanged.');
+  }
 }

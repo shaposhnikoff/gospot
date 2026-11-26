@@ -39,6 +39,7 @@ jobs:
           test "${#packages[@]}" -eq 1
           test "$(dpkg-deb -f "${packages[0]}" Version)" = "$DEB_VERSION"
           test "$(dpkg-deb -f "${packages[0]}" Architecture)" = armhf
+          bash scripts/test-deb-entry "${packages[0]}"
           mkdir "$RUNNER_TEMP/release"
           cp "${packages[0]}" "$RUNNER_TEMP/release/"
           cd "$RUNNER_TEMP/release"

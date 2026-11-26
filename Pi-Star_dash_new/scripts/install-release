@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Install only the published, verified Debian package; no source sync or rebuild.
+set -euo pipefail
+tag=${1:?usage: install-release deb-RUN-COMMIT}
+[[ $tag =~ ^deb-[0-9]+-[0-9a-f]{12}$ ]]
+d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+cd "$d"
+url=https://github.com/shaposhnikoff/pi-star-dashboard-new/releases/download/$tag
+curl -fsSL --retry 2 "$url/SHA256SUMS" -o SHA256SUMS
+read -r sha deb < SHA256SUMS
+[[ $(wc -l < SHA256SUMS) == 1 && $sha =~ ^[0-9a-f]{64}$ && $deb =~ ^pistar-dashboard_[0-9][0-9a-z.+~-]*_armhf\.deb$ ]]
+curl -fsSL --retry 2 "$url/${deb//+/%2B}" -o "$deb"
+sha256sum -c SHA256SUMS
+test "$(dpkg-deb -f "$deb" Package)" = pistar-dashboard
+test "$(dpkg-deb -f "$deb" Architecture)" = armhf
+echo "GitHub Release $tag; SHA256=$sha"
+ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes pistar3 "set -eu
+  test \"\$(hostname -s)\" = pistar3 && test \"\$(dpkg --print-architecture)\" = armhf
+  state() { sudo -n sha256sum /etc/MMDVM-Host.ini /etc/DMRGateway.ini; stat -c '%n %U:%G %a' /etc/MMDVM-Host.ini /etc/DMRGateway.ini; systemctl show -p InvocationID mmdvmhost dmrgateway; }
+  before=\$(state)
+  f=\$(mktemp); trap 'rm -f \"\$f\"' EXIT
+  cat >\"\$f\"; echo '$sha  '\"\$f\" | sha256sum -c -
+  sudo -n dpkg -i \"\$f\"
+  dpkg-query -W pistar-dashboard; sudo -n dpkg -V pistar-dashboard
+  systemctl is-active psdash-stage pistar-wizard pistar-panel mmdvmhost dmrgateway
+  curl --retry 5 --retry-connrefused --noproxy '*' -fsS http://192.168.210.194:8789/ | cmp - /usr/share/pistar-dashboard/classic/operator/index.html
+  after=\$(state); test \"\$before\" = \"\$after\"
+  echo 'PASS package installed: operator bytes match; both radio INIs, ownership, modes and InvocationIDs unchanged'
+" < "$deb"

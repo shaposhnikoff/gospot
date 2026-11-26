@@ -28,8 +28,13 @@ export async function checkPackaged({write,wd,js,click,until,ssh,root,admin,post
     const sel=`input[name="${field}"]`;
     async function open(){
       await menu(id);
-      await until(()=>js('return !!document.querySelector(arguments[0])?.getClientRects().length',sel));
-      assert.equal(await js('return location.href'),admin+'/manage/#'+(i?'expert-dmrgateway':'settings'));
+      try {
+        await until(()=>js('return !!document.querySelector(arguments[0])?.getClientRects().length',sel));
+      } catch(e) {
+        console.log('Editor diagnostics:',await js('return [...document.querySelectorAll("h1,h2,[role=alert]")].map(n=>n.innerText)'));
+        throw e;
+      }
+      assert.equal(await js('return location.href'),admin+'/manage/#'+(i?'expert-dmrgateway':'configuration'));
       console.log(`Menu → ${id}${i?' → DMRGateway':''}: ${field} visible`);
     }
     await open();

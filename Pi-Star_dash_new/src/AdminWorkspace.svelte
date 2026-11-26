@@ -6,7 +6,7 @@
   import LogView from './LogView.svelte';
   import Backup from './Backup.svelte';
   const pages = [
-    ['settings','Configuration'], ['expert','Expert'], ['services','Сервисы · DMR'], ['system','Система'], ['logs','Live Logs'], ['backup','Backup / Restore']
+    ['configuration','Configuration'], ['settings','Настройки станции'], ['expert','Expert'], ['services','Сервисы · DMR'], ['system','Система'], ['logs','Live Logs'], ['backup','Backup / Restore']
   ] as const;
   const current = () => ['#expert-dmrgateway','#expert-mmdvmhost'].includes(location.hash) ? location.hash.slice(1) : pages.find(([id]) => '#'+id === location.hash)?.[0] || 'settings';
   let page = $state(current());
@@ -26,13 +26,16 @@
       <li><a href="#expert-mmdvmhost">MMDVMHost · DMR</a></li>
       <li><a href="#expert-dmrgateway">DMRGateway · сеть 1</a></li>
     </ul></section>
+  {:else if page === 'configuration'}
+    <section><h1>Configuration</h1><a href="#settings">Общие настройки станции</a></section>
+    <Services editor="host" />
   {:else if page === 'expert-dmrgateway'}<Services editor="gateway" />
   {:else if page === 'expert-mmdvmhost'}<Services editor="host" />
   {:else if page === 'services'}<Services />
   {:else if page === 'system'}<SystemInfo />
   {:else if page === 'logs'}<LogView />
   {:else if page === 'backup'}<Backup />
-  {:else}<StationSettings /><Services editor="host" />{/if}
+  {:else}<StationSettings />{/if}
 </div>
 <style>
   :global(body){margin:0;color:#291e2b;background:#f7f4f6;font:15px/1.5 system-ui,sans-serif}

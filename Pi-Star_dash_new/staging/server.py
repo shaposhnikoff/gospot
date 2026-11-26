@@ -22,7 +22,7 @@ if not 0 <= CLASSIC_PORT <= 65535:
     raise ValueError("Invalid PISTAR_CLASSIC_HTTPS_PORT")
 PUBLIC_ALIASES = {"/index.php": "/#overview", "/mmdvmhost/lh.php": "/#heard-all",
                   "/mmdvmhost/localtx.php": "/#heard-rf", "/mmdvmhost/repeaterinfo.php": "/#overview"}
-ADMIN_ALIASES = {"/admin/": "", "/admin/index.php": "", "/admin/configure.php": "#settings",
+ADMIN_ALIASES = {"/admin/": "", "/admin/index.php": "", "/admin/configure.php": "#configuration",
                  "/admin/expert/": "#expert",
                  "/admin/live_modem_log.php": "#logs", "/admin/config_backup.php": "#backup",
                  "/admin/sysinfo.php": "#system", "/admin/download_modem_log.php": "api/log/download"}

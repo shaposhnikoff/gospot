@@ -79,6 +79,8 @@ try {
         {response:'ProvideCredentials',username:'admin',password:ssh('sudo -n cat /etc/pistar-wizard/admin-password')}:{response:'CancelAuth'}});
     } else if(method==='Network.responseReceived' && posts.some(x=>x.id===p.requestId)){
       posts.find(x=>x.id===p.requestId).status=p.response.status;
+    } else if(method==='Network.responseReceived' && p.response.url===admin+'/manage/api/services'){
+      console.log('DMR settings GET HTTP',p.response.status);
     } else if(method==='Network.responseReceived' && p.type==='Document'){
       console.log(`Document ${p.response.status} ${p.response.url.split('?')[0]}`);
     } else if(method==='Network.requestWillBeSent' && p.redirectResponse && p.type==='Document'){

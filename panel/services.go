@@ -57,15 +57,26 @@ func serveDMRServices(w http.ResponseWriter, r *http.Request, helper wizardHelpe
 		http.Error(w, "Метод не поддерживается", 405)
 		return
 	}
-	select {
-	case slot <- struct{}{}:
-		defer func() { <-slot }()
-	default:
-		http.Error(w, "Настройки заняты", 503)
-		return
-	}
 	ctx, cancel := context.WithTimeout(parent, limit)
 	defer cancel()
+	if r.Method == http.MethodGet {
+		// A reopened editor can overlap the previous page's post-save read.
+		// Share one timeout for waiting and reading; never repeat a write.
+		select {
+		case slot <- struct{}{}:
+		case <-ctx.Done():
+			http.Error(w, "Настройки заняты", 503)
+			return
+		}
+	} else {
+		select {
+		case slot <- struct{}{}:
+		default:
+			http.Error(w, "Настройки заняты", 503)
+			return
+		}
+	}
+	defer func() { <-slot }()
 	out, err := helper(ctx, action, data)
 	if err != nil {
 		var exit *exec.ExitError

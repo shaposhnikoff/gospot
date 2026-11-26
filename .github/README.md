@@ -1,6 +1,7 @@
 # Pi-Star Dashboard New
 
 Панель оператора и HTTPS-админка для Pi-Star на Raspberry Pi OS Bookworm.
+[Бэклог функций и критерии приёмки](../Pi-Star_dash_new/docs/BACKLOG.md).
 Готовые `.deb` и `SHA256SUMS` — в [Releases](https://github.com/shaposhnikoff/pi-star-dashboard-new/releases).
 После каждого push GitHub Actions тестирует код и публикует отдельный релиз
 для этого коммита. Повтор того же запуска обновляет его файлы.

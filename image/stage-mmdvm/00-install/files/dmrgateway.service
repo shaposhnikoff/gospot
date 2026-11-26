@@ -1,0 +1,21 @@
+[Unit]
+Description=DMR gateway
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/var/lib/pistar-provisioned
+
+[Service]
+User=dmrgateway
+Group=dmrgateway
+ExecStart=/usr/local/bin/DMRGateway /etc/DMRGateway.ini
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

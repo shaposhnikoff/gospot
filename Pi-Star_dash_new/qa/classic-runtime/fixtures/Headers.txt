@@ -1,0 +1,1 @@
+2020-01-02 12:00:10: Repeater header - My: N0DSTAR /DEMO  Your: CQCQCQ    Rpt1: N0DEMO B  Rpt2: N0DEMO G  Flags: 00 00 00

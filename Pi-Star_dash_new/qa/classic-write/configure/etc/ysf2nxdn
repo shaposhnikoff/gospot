@@ -1,0 +1,45 @@
+[Enabled]
+Enabled=0
+
+[YSF Network]
+Callsign=N0DEMO
+DstAddress=127.0.0.1
+LocalAddress=127.0.0.1
+Suffix=ND
+LocalPort=42014
+DstPort=42000
+Daemon=1
+EnableWiresX=1
+WiresXMakeUpper=1
+DT1=1,34,97,95,43,3,17,0,0,0
+DT2=0,0,0,0,108,32,28,32,3,8
+
+[Info]
+RXFrequency=430000000
+TXFrequency=430000000
+Power=1
+Latitude=0.0
+Longitude=0.0
+Height=3
+Location="Demo"
+Description=N0DEMO_Pi-Star
+URL=http://fixture.invalid/
+
+[aprs.fi]
+Server=fixture.invalid
+Enable=0
+Password=13528
+Description=N0DEMO_Pi-Star
+
+[NXDN Id Lookup]
+File=/usr/local/etc/NXDN.csv
+
+[NXDN Network]
+TGListFile=/usr/local/etc/TGList_NXDN.txt
+
+[Log]
+DisplayLevel=0
+FileLevel=0
+FilePath=/var/log/pi-star
+FileRoot=YSF2NXDN
+

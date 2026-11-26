@@ -1,0 +1,7 @@
+#!/bin/sh
+# Stand-only sudo. Never invoke an updater or modify a log file.
+case "$*" in
+  'truncate -s 0 /var/log/pi-star/pi-star_update.log'|'truncate -s 0 /var/log/pi-star/pi-star_upgrade.log'|/usr/local/sbin/pistar-update|/usr/local/sbin/pistar-upgrade)
+    printf 'sudo %s\n' "$*" >>/work/effects ;;
+  *) printf 'DENIED %s\n' "$*" >>/work/effects; exit 64 ;;
+esac

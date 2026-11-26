@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Pi-Star · Hoseline</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f7f4f6;color:#27212b;font:16px/1.5 system-ui,sans-serif}
+main{max-width:1060px;margin:auto;padding:clamp(14px,3vw,32px)}nav a,a{color:#762342}h1{margin:.5em 0 0;line-height:1.1}
+section{margin:1.2rem 0;padding:1rem;border:1px solid #dfd5dc;border-radius:12px;background:white}
+form{display:flex;gap:.7em;align-items:end;flex-wrap:wrap}label{font-weight:650}input,button{font:inherit;padding:.45em .75em;border-radius:6px;border:1px solid #b9aab2}input{display:block;width:10em}
+button{cursor:pointer;background:#732444;color:white}button.secondary{color:#51263a;background:white}iframe{border:1px solid #dbd4da;border-radius:9px;height:65vh;min-height:290px;width:100%}small{display:block;margin-top:1em}
+</style></head><body><main><nav><a href="./">← Обзор узла</a></nav>
+<h1>Hoseline</h1><p>Прослушивание групп BrandMeister в браузере. По умолчанию выбрана всемирная группа TG91.</p>
+<section><label>Разговорная группа (TG)<input id="tg" name="tg" type="number" min="91" max="16777215" step="1" required value="91"></label>
+<p><a id="external" href="https://hose.brandmeister.network/?subscribe=91" rel="noopener noreferrer" target="_blank">Слушать TG91 в Hoseline ↗</a></p>
+<p>Официальный плеер откроется в отдельной вкладке. Для звука нажмите Player / Play.</p></section>
+<section><h2>Что принял этот узел</h2><p id="seen" role="status">Чтение Last Heard…</p><ol id="heard"></ol></section>
+<small>Hoseline воспроизводит звук на устройстве, в браузере которого открыт плеер. Список ниже плеера сверяется отдельно с журналом Raspberry: звук в Hoseline сам по себе не подтверждает приём на хотспоте. Прослушивание не меняет подписки хотспота.</small>
+</main><script>
+const tg=document.getElementById('tg'),link=document.getElementById('external'),seen=document.getElementById('seen'),list=document.getElementById('heard');let snapshot=null;
+function sync(){const valid=tg.checkValidity();link.hidden=!valid;list.replaceChildren();if(!valid){seen.textContent='Введите корректный номер группы.';return}link.href='https://hose.brandmeister.network/?subscribe='+String(tg.valueAsNumber);link.textContent='Слушать TG'+tg.valueAsNumber+' в Hoseline ↗';
+if(!snapshot || !snapshot.HeardAvailable){seen.textContent='Нет доступного журнала этого узла.';return}
+const rows=(snapshot.Heard||[]).filter(r=>r.Source==='Net'&&String(r.To).replace(/^TG\s*/i,'')===String(tg.valueAsNumber));
+seen.textContent=snapshot.Node+' · '+(rows.length?'Недавние входящие вызовы TG'+tg.valueAsNumber+':':'В недавнем журнале нет сетевых вызовов TG'+tg.valueAsNumber+'.');
+for(const row of rows){const li=document.createElement('li');li.textContent=new Date(row.At).toLocaleString('ru-RU')+' · '+row.From+' · TS'+row.Slot;list.append(li)}}
+tg.addEventListener('input',sync);
+async function refresh(){try{const res=await fetch('/api/status',{cache:'no-store',mode:'same-origin',signal:AbortSignal.timeout(4000)});if(!res.ok)throw Error();const data=await res.json();snapshot=data&&typeof data.Node==='string'&&Array.isArray(data.Heard??[]) ? data:null}catch{snapshot=null}sync();setTimeout(refresh,10000)}refresh();
+</script></body></html>

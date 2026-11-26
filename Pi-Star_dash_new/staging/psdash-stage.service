@@ -1,0 +1,27 @@
+[Unit]
+Description=Pi-Star dashboard staging (pistar3:8789)
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+User=psdash-stage
+Group=psdash-stage
+ExecStart=/usr/bin/python3 -IB /opt/psdash-stage/current/server.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET
+CapabilityBoundingSet=
+UMask=0077
+TasksMax=64
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+# Dashboard sources only. This working directory also contains private board
+# keys, installation logs and independent OS-build work.
+/*
+!/.gitignore
+!/.gitmodules
+!/.github/
+!/Pi-Star_dash_new/
+!/Pi-Star_DV_Dash
+!/panel/
+!/image/
+/image/*
+!/image/stage-mmdvm/
+/image/stage-mmdvm/*
+!/image/stage-mmdvm/00-install/
+/image/stage-mmdvm/00-install/*
+!/image/stage-mmdvm/00-install/files/
+**/__pycache__/
+**/*.pyc
+**/node_modules/
+**/dist/
+**/build/
+**/*.deb
+**/*.pem
+**/id_ed25519*
+/Pi-Star_dash_new/qa/evidence/
+/Pi-Star_dash_new/docs/TEST-REPORT.md

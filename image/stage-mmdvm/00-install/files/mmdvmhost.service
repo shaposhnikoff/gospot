@@ -1,0 +1,22 @@
+[Unit]
+Description=MMDVM host
+Wants=dmrgateway.service
+After=network-online.target dmrgateway.service
+ConditionPathExists=/var/lib/pistar-provisioned
+
+[Service]
+User=mmdvm
+Group=mmdvm
+SupplementaryGroups=dialout
+WorkingDirectory=/var/lib/mmdvm
+ExecStart=/usr/local/bin/MMDVM-Host /etc/MMDVM-Host.ini
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

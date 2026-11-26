@@ -1,0 +1,16 @@
+[Unit]
+Description=Pi-Star configuration wizard
+After=network.target
+
+[Service]
+User=pistar-wizard
+Group=pistar-wizard
+UMask=0077
+LoadCredential=admin-password:/etc/pistar-wizard/admin-password
+LoadCredential=tls-key:/etc/pistar-wizard/tls-key.pem
+ExecStart=/usr/local/bin/pistar-wizard -admin-listen :8788 -tls-cert /etc/pistar-wizard/tls-cert.pem -tls-key %d/tls-key
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

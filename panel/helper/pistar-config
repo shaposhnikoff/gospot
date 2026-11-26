@@ -1,0 +1,312 @@
+#!/usr/bin/python3 -I
+"""Privileged Pi panel entry point. No caller-selected paths or commands."""
+import fcntl
+import hashlib
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+
+HOST = Path("/etc/MMDVM-Host.ini")
+GW = Path("/etc/DMRGateway.ini")
+STATE = Path("/var/lib/pistar-panel-config")
+LIMIT = 1024 * 1024
+KEYS = {"callsign", "radio_id", "frequency", "uart", "claim", "master", "port", "password"}
+USB = r"/dev/tty(?:ACM|USB)[0-9]+"
+NETWORK = "DMR Network 1"
+
+
+class Error(Exception):
+    """Only constant, non-secret diagnostics go to the caller."""
+
+
+class Stale(Error):
+    pass
+
+
+class InvalidSettings(Error):
+    pass
+
+
+def require(ok, message):
+    if not ok:
+        raise Error(message)
+
+
+def pairs(items):
+    result = dict(items)
+    require(len(result) == len(items), "duplicate JSON field")
+    return result
+
+
+def validate(d, check_device=False):
+    require(type(d) is dict and set(d) == KEYS, "incorrect settings fields")
+    for key, lo, hi in (("radio_id", 1, 16777215), ("claim", 1, 4294967295),
+                        ("frequency", 1000000, 1300000000), ("port", 1, 65535)):
+        require(type(d[key]) is int and lo <= d[key] <= hi, "invalid " + key)
+    for key in ("callsign", "uart", "master", "password"):
+        require(type(d[key]) is str, "invalid " + key)
+    require(re.fullmatch(r"[A-Z0-9]{1,10}", d["callsign"]), "invalid callsign")
+    uart = d["uart"]
+    if uart != "/dev/ttyAMA0":
+        require(re.fullmatch(USB, uart) or
+                re.fullmatch(r"/dev/serial/by-id/[A-Za-z0-9][A-Za-z0-9_.:+-]{0,254}", uart),
+                "invalid uart")
+        if check_device:
+            require(re.fullmatch(USB, os.path.realpath(uart)) and Path(uart).is_char_device(),
+                    "USB serial device unavailable")
+    master = d["master"]
+    try:
+        ipaddress.IPv4Address(master)
+    except ValueError:
+        labels = master.split(".")
+        require(len(master) <= 253 and not labels[-1].isdigit() and all(
+            re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label)
+            for label in labels), "invalid master")
+    require(re.fullmatch(r"[ -~]{0,128}", d["password"]), "invalid password")
+
+
+class Ini:
+    def __init__(self, text):
+        self.lines = text.splitlines(keepends=True)
+        self.index = {}
+        section = None
+        for i, line in enumerate(self.lines):
+            s = line.strip()
+            if s.startswith("["):
+                require(re.fullmatch(r"\[[^\[\]]+\]", s), "malformed INI section")
+                section = s[1:-1]
+            elif s and s[0] not in "#;" and "=" in s:
+                key = s.partition("=")[0].strip()
+                self.index.setdefault((section, key), []).append(i)
+
+    def field(self, section, key, value=None):
+        indexes = self.index.get((section, key), ())
+        require(len(indexes) == 1, "missing or ambiguous INI field: " + section + "/" + key)
+        idx = indexes[0]
+        line = self.lines[idx]
+        prefix, _, rest = line.partition("=")
+        body = rest.rstrip("\r\n")
+        # g4klx recognizes whole quoted values and unquoted # comments.
+        quoted = len(body) >= 2 and body.startswith('"') and body.endswith('"')
+        token = body if quoted else body.partition("#")[0].rstrip()
+        old = token[1:-1] if quoted else token.strip()
+        if value is not None and str(value) != old:
+            new = str(value)
+            if key == "Password" and (new != new.strip() or "#" in new or '"' in new):
+                new = '"' + new + '"'
+                # A quoted value must occupy the entire line.
+                suffix = rest[len(body):]
+            else:
+                suffix = rest[len(token):]
+            self.lines[idx] = prefix.rstrip() + "=" + new + suffix
+        return old
+
+
+def configure(texts, settings=None):
+    host, gw = map(Ini, texts)
+    fields = (
+        ("callsign", host, "General", "Callsign"), ("radio_id", host, "General", "Id"),
+        ("frequency", host, "Modem", "RXFrequency"), ("uart", host, "Modem", "UARTPort"),
+        ("claim", gw, NETWORK, "Id"), ("master", gw, NETWORK, "Address"),
+        ("port", gw, NETWORK, "Port"),
+    )
+    public = {}
+    for name, ini, section, key in fields:
+        old = ini.field(section, key, settings[name] if settings else None)
+        if settings is None:
+            public[name] = int(old) if name in ("radio_id", "frequency", "claim", "port") else old
+    if settings is None:
+        validate(dict(public, password=""))
+        return public
+    host.field("Modem", "TXFrequency", settings["frequency"])
+    host.field("General", "Duplex", 0)
+    host.field("Modem", "Protocol", "uart")
+    gw.field("General", "Id", settings["claim"])
+    gw.field(NETWORK, "Password", settings["password"] or None)
+    return ["".join(ini.lines) for ini in (host, gw)]
+
+
+def service_config(texts, settings=None):
+    """Edit only DMR controls and existing Network 1 mappings, under the transaction lock."""
+    host, gw = map(Ini, texts)
+    fields = [("dmr", host, "DMR", "Enable"), ("cc", host, "DMR", "ColorCode"),
+              ("network", host, "DMR Network", "Enable"), ("ts1", host, "DMR Network", "Slot1"),
+              ("ts2", host, "DMR Network", "Slot2"), ("gateway", gw, NETWORK, "Enabled"),
+              ("master", gw, NETWORK, "Address"), ("port", gw, NETWORK, "Port")]
+    public = {}
+    for key, ini, section, name in fields:
+        value = ini.field(section, name)
+        public[key] = value if key == "master" else int(value)
+    # Address rules by physical line, not just by key: repeated TGRewrite0 is legal.
+    rules = sorted(i for (section, key), indexes in gw.index.items() if section == NETWORK
+                   and re.fullmatch(r"TGRewrite[0-9]*", key) for i in indexes)
+    require(len(rules) <= 64, "too many TG mappings")
+    pattern = re.compile(r"([^=\r\n]+=[ \t]*)([0-9]+(?:[ \t]*,[ \t]*[0-9]+){4})([ \t]*(?:#[^\r\n]*)?)(\r?\n)?")
+    matches = [pattern.fullmatch(gw.lines[i]) for i in rules]
+    require(all(matches), "unsupported TG mapping format")
+    public["rules"] = [",".join(x.strip() for x in m[2].split(",")) for m in matches]
+    revision = hashlib.sha256(json.dumps(public, sort_keys=True).encode()).hexdigest()
+    if settings is None:
+        return dict(public, revision=revision)
+    require(type(settings) is dict and set(settings) == set(public) | {"revision"}, "incorrect DMR settings")
+    if revision != settings["revision"]:
+        raise Stale("service settings changed; reload")
+    for key in ("dmr", "cc", "network", "ts1", "ts2", "gateway", "port"):
+        lo, hi = (0, 15) if key == "cc" else (1, 65535) if key == "port" else (0, 1)
+        require(type(settings[key]) is int and lo <= settings[key] <= hi, "invalid " + key)
+    master = settings["master"]
+    require(type(master) is str and 1 <= len(master) <= 253, "invalid master")
+    try:
+        ipaddress.IPv4Address(master)
+    except ValueError:
+        require(not master.split(".")[-1].isdigit() and all(re.fullmatch(
+            r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", x) for x in master.split(".")), "invalid master")
+    require(type(settings["rules"]) is list and len(settings["rules"]) == len(rules), "invalid TG mapping count")
+    for idx, (i, m, rule) in enumerate(zip(rules, matches, settings["rules"])):
+        require(type(rule) is str and re.fullmatch(r"[12],[0-9]{1,8},[12],[0-9]{1,8},[0-9]{1,8}", rule), "invalid TG mapping")
+        _, src, _, dst, count = map(int, rule.split(","))
+        require(min(src, dst, count) > 0 and max(src, dst) + count - 1 <= 16777215, "invalid TG range")
+        if rule != public["rules"][idx]:
+            gw.lines[i] = m[1] + rule + m[3] + (m[4] or "")
+    for key, ini, section, name in fields:
+        ini.field(section, name, settings[key])
+    return ["".join(ini.lines) for ini in (host, gw)]
+
+
+def read_file(path, limit):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(fd)
+        require(stat.S_ISREG(st.st_mode) and st.st_size <= limit, "invalid configuration file")
+        data = f.read(limit + 1)
+        require(len(data) <= limit, "configuration too large")
+        return data.decode(), st
+
+
+def replace(path, text, uid, gid, mode):
+    fd, tmp = tempfile.mkstemp(dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.encode())
+            f.flush()
+            os.fchown(fd, uid, gid)
+            os.fchmod(fd, mode)
+            os.fsync(fd)
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def restart(unit):
+    subprocess.run(["/usr/bin/systemctl", "restart", unit], check=True, timeout=60,
+                   cwd="/", env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"},
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def transaction(command, settings, run):
+    paths = [HOST, GW]
+    units = ["mmdvmhost.service", "dmrgateway.service"]
+    originals, stats = zip(*(read_file(p, LIMIT) for p in paths))
+    if command == "read":
+        return configure(originals)
+    if command == "services-read":
+        return service_config(originals)
+    backup = STATE / "previous.json"
+    if command == "rollback":
+        require(backup.exists(), "no rollback available")
+        target = json.loads(read_file(backup, 12 * LIMIT + 128)[0])
+        require(type(target) is list and len(target) == 2 and
+                all(type(x) is str for x in target), "invalid backup")
+    elif command == "services-apply":
+        require(settings is not None, "missing services form")
+        try:
+            target = service_config(originals, settings)
+        except Stale:
+            raise
+        except Error as exc:
+            raise InvalidSettings(str(exc)) from None
+    else:
+        target = configure(originals, settings)
+    modes = [stat.S_IMODE(stats[0].st_mode), stats[1].st_mode & 0o600]
+    if command == "services-apply":
+        # This editor never writes credentials. Keep the existing service
+        # metadata, including when only the other file was edited.
+        modes[1] = stat.S_IMODE(stats[1].st_mode)
+    changed = []
+    attempted = []
+    pending = STATE / "pending.json"
+    require(not pending.exists(), "interrupted operation; inspect private pending backup")
+    if any(originals[i] != target[i] or stat.S_IMODE(stats[i].st_mode) != modes[i]
+           for i in range(2)):
+        replace(pending, json.dumps(originals), os.geteuid(), os.getegid(), 0o600)
+    try:
+        for i, path in enumerate(paths):
+            if originals[i] != target[i] or stat.S_IMODE(stats[i].st_mode) != modes[i]:
+                replace(path, target[i], stats[i].st_uid, stats[i].st_gid, modes[i])
+                changed.append(i)
+        for i in reversed(changed):
+            if originals[i] != target[i]:
+                attempted.append(i)
+                run(units[i])
+        if command in ("apply", "services-apply") and any(originals[i] != target[i] for i in changed):
+            os.replace(pending, backup)
+        elif command == "rollback":
+            backup.unlink()
+    except Exception:
+        errors = []
+        for i in reversed(changed):
+            try:
+                replace(paths[i], originals[i], stats[i].st_uid, stats[i].st_gid, modes[i])
+            except Exception:
+                errors.append(i)
+        for i in attempted:
+            try:
+                run(units[i])
+            except Exception:
+                errors.append(i)
+        require(not errors, "recovery incomplete; check configurations and services")
+        pending.unlink(missing_ok=True)
+        raise Error("operation failed; previous settings restored") from None
+    pending.unlink(missing_ok=True)
+    return {"ok": True}
+
+
+def execute(command, settings=None, run=restart):
+    require(command in ("read", "apply", "rollback", "services-read", "services-apply"), "unknown command")
+    if command == "apply":
+        validate(settings, check_device=True)
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    st = STATE.lstat()
+    require(stat.S_ISDIR(st.st_mode) and stat.S_IMODE(st.st_mode) == 0o700 and
+            st.st_uid == os.geteuid(), "unsafe helper state directory")
+    with os.fdopen(os.open(STATE / "lock", os.O_CREAT | os.O_NOFOLLOW | os.O_RDWR, 0o600), "r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return transaction(command, settings, run)
+
+
+def main():
+    require(len(sys.argv) == 2, "expected one settings command")
+    settings = None
+    if sys.argv[1] in ("apply", "services-apply"):
+        raw = sys.stdin.buffer.read(8193)
+        require(len(raw) <= 8192, "settings too large")
+        settings = json.loads(raw.decode(), object_pairs_hook=pairs)
+    print(json.dumps(execute(sys.argv[1], settings)))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Stale:
+        sys.exit(3)
+    except InvalidSettings:
+        sys.exit(4)
+    except (Error, OSError, ValueError, RecursionError) as exc:
+        sys.exit(str(exc) if isinstance(exc, Error) else "invalid input or configuration unavailable")

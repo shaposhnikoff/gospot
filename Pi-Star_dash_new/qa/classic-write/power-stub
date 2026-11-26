@@ -1,0 +1,6 @@
+#!/bin/sh
+# Installed as sudo on the disposable Power stand only. Never execute arguments.
+case "$*" in
+  sync|'mount -o remount,ro /'|reboot|'shutdown -h now') printf 'sudo %s\n' "$*" >>/work/effects ;;
+  *) printf 'DENIED %s\n' "$*" >>/work/effects; exit 64 ;;
+esac

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+if [ "$1" = remove ] && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    # Older standalone pilot units, if installed, become effective again.
+    for unit in pistar-panel pistar-wizard psdash-stage; do
+        if [ -f "/etc/systemd/system/$unit.service" ] && systemctl is-enabled --quiet "$unit.service"; then
+            systemctl start "$unit.service"
+        fi
+    done
+fi

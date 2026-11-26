@@ -1,0 +1,141 @@
+#!/bin/bash
+# Test sudo target; installed only in the disposable chroot. All successful
+# installs are real coreutils operations; the radio/service probes are modeled.
+set -euo pipefail
+log() { printf '%s\n' "$*" >> /work/effects; }
+deny() { log "DENIED ${1:-missing}"; exit 64; }
+case "${1:-}" in
+  -n)
+    [[ $# == 3 && $2 == cat && $3 == /etc/hostapd/hostapd.conf && ! -L $3 ]] || deny read
+    log "read $2 $3"; exec /bin/cat "$3" ;;
+  install)
+    if [[ $# == 9 && $2 == -m && $3 == 600 && $4 == -o && $5 == root && $6 == -g && $7 == root &&
+          $8 =~ ^/tmp/pistar_cw_[a-zA-Z0-9]{6}$ && $9 == /etc/hostapd/hostapd.conf &&
+          -f $8 && ! -L $8 && $(stat -c %U "$8") == www-data && ! -L $9 ]]; then
+      if [[ -f /work/fail-hostapd-install ]]; then
+        sha256sum <"$8" >/work/attempted-hostapd.sha256
+        log "injected install exit=1 $9"; exit 1
+      fi
+      /usr/bin/install -m600 -o root -g root -- "$8" "$9"; log "install $9"; exit 0
+    fi
+    [[ $# == 9 && $2 == -m && $3 == 644 && $4 == -o && $5 == root && $6 == -g && $7 == root ]] || deny install
+    src=$8 dst=$9
+    case "$src:$dst" in
+      /tmp/bW1kdm1ob3N0DQo.tmp:/etc/mmdvmhost|/tmp/eXNmZ2F0ZXdheQ.tmp:/etc/ysfgateway|\
+      /tmp/kXKwkDKy793HF5.tmp:/etc/nxdngateway|/tmp/sJSySkheSgrelJX.tmp:/etc/p25gateway|/tmp/spNcSdRUEmySTo9.tmp:/etc/m17gateway|\
+      /tmp/dsWGR34tHRrSFFGA.tmp:/etc/ysf2dmr|/tmp/dsWGR34tHRrSFFGb.tmp:/etc/ysf2nxdn|\
+      /tmp/dsWGR34tHRrSFFGc.tmp:/etc/ysf2p25|/tmp/dhJSgdy7755HGc.tmp:/etc/dmr2ysf|\
+      /tmp/lsHWie734HS.tmp:/etc/dapnetgateway|/tmp/k4jhdd34jeFr8f.tmp:/etc/dmrgateway|\
+       /tmp/sja7hFRkw4euG7.tmp:/etc/dstar-radio.mmdvmhost|/tmp/sja7hFRkw4euG7.tmp:/etc/dstar-radio.dstarrepeater) ;;
+      *)
+        if [[ $src =~ ^/tmp/pistar-cfg-[a-zA-Z0-9]{6}$ ]]; then
+          case "$dst" in
+            /etc/ircddbgateway|/etc/dstarrepeater|/etc/starnetserver|/etc/timeserver|/etc/aprsgateway|\
+            /etc/dstar-radio.mmdvmhost|/etc/mmdvmhost|/etc/dmrgateway|/etc/ysfgateway|/etc/p25gateway|/etc/nxdngateway|/etc/m17gateway|\
+            /etc/ysf2dmr|/etc/ysf2nxdn|/etc/ysf2p25|/etc/dmr2ysf|/var/www/dashboard/config/ircddblocal.php) ;;
+            *) deny "install $dst" ;;
+          esac
+         elif [[ $src =~ ^/tmp/pistar_tz_[a-zA-Z0-9]{6}$ && $dst == /etc/timezone ]]; then :
+         elif [[ $src =~ ^/tmp/pistar_cfg_[a-zA-Z0-9]{6}$ && $dst == /var/www/dashboard/config/config.php ]]; then :
+        elif [[ $src =~ ^/tmp/pistar_cw_[a-zA-Z0-9]{6}$ ]]; then
+          case "$dst" in /etc/ircddbgateway|/etc/aprsgateway|/etc/timeserver|/etc/starnetserver|/etc/dstarrepeater|/var/www/dashboard/config/ircddblocal.php|/var/www/dashboard/config/language.php) ;; *) deny "install $dst" ;; esac
+        else deny "install $dst"; fi ;;
+    esac
+    [[ -f $src && ! -L $src && $(stat -c %U "$src") == www-data && ! -L $dst ]] || deny install
+    /usr/bin/install -m644 -o root -g root -- "$src" "$dst" || { log "FAIL install $dst"; exit 1; }
+    log "install $dst" ;;
+  mount)
+    [[ $# == 4 && $2 == -o && $4 == / && ( $3 == remount,rw || $3 == remount,ro ) ]] || deny mount
+    log "$*" ;;
+  sync)
+    [[ $# == 1 ]] || deny sync
+    log sync ;;
+  mv)
+    [[ $# == 5 && $2 == -nT && $3 == -- && -f $4 && ! -L $4 && ! -e $5 && ! -L $5 ]] || deny mv
+    case "$4:$5" in
+      /etc/dstar-radio.mmdvmhost:/etc/dstar-radio.dstarrepeater|/etc/dstar-radio.dstarrepeater:/etc/dstar-radio.mmdvmhost) ;;
+      *) deny mv ;;
+    esac
+    /bin/mv -nT -- "$4" "$5"; log "$*" ;;
+  rm)
+    if [[ $# == 4 && $2 == -f && $3 == -- && ( $4 == /etc/dstar-radio.mmdvmhost || $4 == /etc/dstar-radio.dstarrepeater ) ]]; then
+      /bin/rm -f -- "$4"; log "$*"; exit 0
+    fi
+    [[ $# -ge 3 && $2 == -rf ]] || deny rm
+    for path in "${@:3}"; do
+      case "$path" in /etc/dstar-radio.mmdvmhost|/etc/dstar-radio.qa-keep) ;; *) deny rm ;; esac
+    done
+    /bin/rm -rf -- "${@:3}"; log "$*" ;;
+  touch)
+    [[ $# == 2 && ( $2 == /etc/dstar-radio.mmdvmhost || $2 == /etc/dstar-radio.dstarrepeater ) ]] || deny touch
+    /usr/bin/touch -- "$2"; log "$*" ;;
+  timedatectl)
+    [[ $# == 3 && $2 == set-timezone && ( $3 == UTC || $3 == Europe/Berlin ) ]] || deny timedatectl
+    # Model timedated's localtime link only inside /stand; never access host D-Bus.
+    zone=/usr/share/zoneinfo/$3
+    [[ -f $zone ]] || deny zoneinfo
+    [[ $(readlink -f /etc/localtime) == "$(readlink -f "$zone")" ]] || ln -snf "$zone" /etc/localtime
+    log "$*" ;;
+  sed)
+    [[ $# == 4 && $2 == -i ]] || deny sed
+    case "$3:$4" in
+      '/OnStartupSec=/c\OnStartupSec=30:/lib/systemd/system/dstarrepeater.timer'|\
+      '/OnStartupSec=/c\OnStartupSec=30:/lib/systemd/system/mmdvmhost.timer'|\
+      '/pistar-upnp.service/ s/^#*/#/:/etc/crontab'|\
+      '/$ipVar 80 80/ s/^#*/#/:/usr/local/sbin/pistar-upnp.service'|\
+      '/$ipVar 10022 10022/ s/^#*/#/:/usr/local/sbin/pistar-upnp.service'|\
+      '/$ipVar 22 22/ s/^#*/#/:/usr/local/sbin/pistar-upnp.service') ;;
+      *) deny "sed $4" ;;
+    esac
+    /bin/sed -i "$3" "$4" || { log "FAIL sed $4"; exit 1; }
+    log "$*" ;;
+  systemctl)
+    if [[ $# == 2 && $2 == daemon-reload ]]; then :
+    elif [[ $# == 3 && $2 == restart && $3 == mmdvmhost.service ]]; then :
+    elif [[ $# == 3 && ( ( $2 == disable && $3 == pistar-upnp.timer ) || ( $2 == stop && $3 == pistar-upnp.service ) ) ]]; then :
+    elif [[ $# == 3 && ( $2 == stop || $2 == start ) ]]; then
+      case "$3" in
+        cron.service|dstarrepeater.service|mmdvmhost.service|ircddbgateway.service|timeserver.service|\
+        pistar-watchdog.service|pistar-remote.service|ysfgateway.service|ysf2dmr.service|ysf2nxdn.service|\
+        ysf2p25.service|nxdn2dmr.service|ysfparrot.service|p25gateway.service|p25parrot.service|\
+        nxdngateway.service|nxdnparrot.service|m17gateway.service|dmr2ysf.service|dmr2nxdn.service|\
+        dmrgateway.service|dapnetgateway.service|aprsgateway.service) ;; *) deny systemctl ;; esac
+    else deny systemctl; fi
+    if [[ -f /work/controller-active && ${3:-} =~ ^(dstarrepeater|mmdvmhost)\.service$ ]]; then
+      case "$2" in
+        stop) if [[ $(cat /work/controller-active) == "$3" ]]; then : >/work/controller-active; fi ;;
+        start) echo "$3" >/work/controller-active ;;
+      esac
+    fi
+    log "$*" ;;
+  grep)
+    [[ $# == 3 && $2 == country && $3 == /etc/wpa_supplicant/wpa_supplicant.conf ]] || deny grep
+    log "read $*"; exec /bin/grep country /etc/wpa_supplicant/wpa_supplicant.conf ;;
+  probe)
+    shift
+    if [[ ${1:-} == systemctl ]]; then
+      [[ $# == 4 && $2 == is-active && $3 == --quiet ]] || deny 'probe systemctl'
+      case "$4" in
+        mmdvmhost.service) status=0 ;;
+        ircddbgateway.service|dstarrepeater.service|starnetserver.service|timeserver.service|\
+        aprsgateway.service|dmrgateway.service|ysfgateway.service|p25gateway.service|nxdngateway.service|m17gateway.service|\
+        ysf2dmr.service|ysf2nxdn.service|ysf2p25.service|dmr2ysf.service) status=3 ;;
+        *) deny 'probe systemctl unit' ;;
+       esac
+       if [[ -f /work/controller-active && $4 =~ ^(dstarrepeater|mmdvmhost)\.service$ ]]; then
+         if [[ $(cat /work/controller-active) == "$4" ]]; then status=0; else status=3; fi
+       fi
+       log "read $*"; exit "$status"
+    fi
+    case "$*" in
+      'platformDetect.sh') out='QA Raspberry Pi' ;;
+      'uptime -p') out='up 1 hour' ;;
+      'timedatectl list-timezones') out=$'UTC\nEurope/Berlin' ;;
+      'DMRGateway -v'|'P25Gateway -v'|'NXDNGateway -v'|'YSFGateway -v') out="$1 version 20240201" ;;
+      'ifconfig wlan0') out='wlan0 HWaddr 02:00:00:00:00:01' ;;
+      'iwconfig wlan0'|'iw dev wlan0 link') out='Not connected' ;;
+      *) deny "probe $*" ;;
+    esac
+    log "read $*"; printf '%s\n' "$out" ;;
+  *) deny "${1:-missing}" ;;
+esac

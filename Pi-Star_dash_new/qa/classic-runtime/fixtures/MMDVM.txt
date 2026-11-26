@@ -1,0 +1,4 @@
+M: 2020-01-02 12:00:01.000 DMR Slot 2, received network voice header from N0NET to TG 91
+M: 2020-01-02 12:00:03.000 DMR Slot 2, received network end of voice transmission, 2.0 seconds, 1% packet loss, BER: 0.0%
+M: 2020-01-02 12:00:10.000 DMR Slot 2, received RF voice header from N0RF to TG 9
+M: 2020-01-02 12:00:13.000 DMR Slot 2, received RF end of voice transmission, 3.0 seconds, BER: 0.2%

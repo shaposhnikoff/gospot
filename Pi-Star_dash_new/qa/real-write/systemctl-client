@@ -1,0 +1,24 @@
+#!/usr/bin/python3 -I
+"""Test-only transport: redirect exactly two restart targets to disposable systemd units."""
+import pathlib
+import socket
+import sys
+
+assert len(sys.argv) == 3 and sys.argv[1] == "restart"
+unit = sys.argv[2]
+assert unit in ("dmrgateway.service", "mmdvmhost.service")
+qa = pathlib.Path("/run/pistar-qa")
+fault = qa / ("fail-next-" + unit.removesuffix(".service"))
+fail = fault.exists()
+fault.unlink(missing_ok=True)
+with socket.socket(socket.AF_UNIX) as sock:
+    sock.settimeout(10)
+    sock.connect("/qa-bridge/control")
+    sock.sendall((unit + (" fail" if fail else " ok") + "\n").encode())
+    sock.shutdown(socket.SHUT_WR)
+    result = sock.makefile("rb").read(16).decode().strip()
+if result not in ("ok", "fail"):
+    sys.exit("no reply from isolated service manager")
+with (qa / "events").open("a") as events:
+    print(unit, result, file=events)
+sys.exit(0 if result == "ok" else 1)

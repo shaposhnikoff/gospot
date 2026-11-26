@@ -1,0 +1,2 @@
+2020-01-02 12:04:12: CCS link - Rptr: N0DEMO B Remote: QA7PEER  Dir: Incoming
+2020-01-02 12:05:34: DCS link - Type: Repeater Rptr: N0DEMO B Refl: DCS023 C Dir: Outgoing

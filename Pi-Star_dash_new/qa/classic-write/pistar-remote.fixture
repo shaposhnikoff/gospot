@@ -1,0 +1,9 @@
+# Synthetic PiStar-Remote configuration for the Full Edit stand.
+[enable]
+enabled=false
+
+[keeper]
+callsign=N0DEMO
+
+; Keep the commented example, quotes and spacing as entered.
+; callsign = "N0OTHER"

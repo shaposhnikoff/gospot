@@ -1,0 +1,6 @@
+network={
+	ssid="Fixture Remove"
+	key_mgmt=NONE
+	id_str="8"
+	priority=8
+}

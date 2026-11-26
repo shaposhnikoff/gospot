@@ -1,0 +1,7 @@
+# System Cron fixture: both jobs are inert.
+SHELL=/bin/sh
+PATH=/usr/bin:/bin
+
+# Keep the spacing and the other schedule unchanged.
+15 4 * * * nobody /bin/true
+42  5 * * 1 nobody /bin/true

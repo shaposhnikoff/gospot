@@ -1,0 +1,524 @@
+/* Pi-Star dashboard skin. Selectors follow the PHP output, including fragments
+   replaced by jQuery. Protocol, link, temperature and BER colours belong to
+   those fragments; never paint over a data cell or a coloured row. */
+:root {
+  color-scheme: light;
+  --ps-page: #f6f5f8;
+  --ps-panel: #fff;
+  --ps-ink: #252334;
+  --ps-muted: #605b6b;
+  --ps-line: #e3dfe7;
+  --ps-tint: #f8f6fa;
+  --ps-dark: #22202e;
+  --ps-berry: #ad245b;
+  --ps-link: #92214f;
+  --ps-ring: #ac2862;
+  --ps-radius: 14px;
+  --ps-gap: clamp(.65rem, 1.5vw, 1.1rem);
+  --ps-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ps-mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--ps-page); }
+html body {
+  margin: 0;
+  background: var(--ps-page);
+  color: var(--ps-ink);
+  font: .9375rem/1.5 var(--ps-sans);
+}
+font:not([color]) { font: inherit; color: inherit; }
+body a:link, body a:visited {
+  color: var(--ps-link);
+  text-decoration: underline;
+  text-underline-offset: .18em;
+  text-decoration-thickness: 1px;
+}
+body a:hover { text-decoration-thickness: 2px; }
+:focus-visible, .nice-select:focus-visible, .toggle + label:focus-visible {
+  outline: 3px solid var(--ps-ring);
+  outline-offset: 2px;
+}
+
+/* Admin inserts a full-width system report ahead of the two dashboard
+   columns. D-Star-only installations and editor pages have no sidebar. */
+.container {
+  display: grid;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ps-gap);
+  width: min(calc(100% - 2rem), 1240px);
+  margin: clamp(.65rem, 2vw, 1.75rem) auto;
+  background: transparent;
+  box-shadow: none;
+  text-align: start;
+}
+.container > * { min-width: 0; grid-column: 1 / -1; }
+.header {
+  padding: clamp(.9rem, 2vw, 1.5rem) clamp(1rem, 3vw, 2rem);
+  border-radius: var(--ps-radius);
+  background:
+    radial-gradient(ellipse at top right, #8b2453 0, transparent 60%),
+    linear-gradient(115deg, #22202e, #402438);
+  color: #fff;
+  font-family: var(--ps-sans);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+/* Hostname/version are the header's only divs and hard-code 8px inline. */
+.header > div[style] {
+  color: #ebdce6;
+  font: .75rem/1.5 var(--ps-mono) !important;
+  padding-inline: 0 !important;
+}
+.header > h1 {
+  clear: both;
+  margin: .65rem 0 .85rem;
+  color: #fff;
+  font: 740 clamp(1.55rem, 3.7vw, 2.65rem)/1.13 var(--ps-sans);
+  letter-spacing: -.045em;
+  text-align: start;
+  text-shadow: none;
+}
+.header > h1 + h1 { font-size: clamp(1rem, 2vw, 1.4rem); }
+.header > p { margin: .4rem 0 0; }
+.header > p:has(a) {
+  border-top: 1px solid #ffffff30;
+  padding: .5rem 0 0 !important;
+  text-align: start !important;
+  line-height: 1.7;
+}
+.header a:link, .header a:visited {
+  display: inline-block;
+  padding: .25rem .55rem;
+  margin-block: .1rem;
+  border-radius: 6px;
+  background: #ffffff12;
+  color: #fff;
+  font-size: .86rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+.header a:hover, .header a:focus-visible { background: #ffffff2c; text-decoration: underline; }
+.header :focus-visible, .footer :focus-visible { outline-color: #ffb9d5; }
+.header p > b { color: #ffd3e7; }
+.footer {
+  padding: 1rem;
+  border-radius: var(--ps-radius);
+  background: var(--ps-dark);
+  color: #e3dfe8;
+  font: .8rem/1.65 var(--ps-sans);
+  text-align: center;
+}
+.footer a:link, .footer a:visited { color: #fff; }
+.nav, .content, .contentwide {
+  float: none;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  color: var(--ps-ink);
+  background: transparent;
+  font: inherit;
+}
+.nav { display: block; padding: 0; }
+.content, .contentwide {
+  padding: clamp(.7rem, 1.8vw, 1.35rem);
+  border: 1px solid var(--ps-line);
+  border-radius: var(--ps-radius);
+  background: var(--ps-panel);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+@media (min-width: 58rem) {
+  .container { grid-template-columns: clamp(13.25rem, 19vw, 15.5rem) minmax(0, 1fr); }
+  .container > .nav { grid-column: 1; }
+  .container > .nav + .content { grid-column: 2; }
+}
+
+/* Data tables keep their native table model, colspans and align attributes.
+   Zebra stripes sit on rows, underneath inline data-cell backgrounds. */
+body table {
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  border: 1px solid var(--ps-line);
+  border-radius: 9px;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--ps-panel);
+  color: var(--ps-ink);
+  font: .875rem/1.42 var(--ps-sans);
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+  text-align: center;
+}
+table tr:nth-child(odd):not([bgcolor]) { background-color: var(--ps-panel); }
+table tr:nth-child(even):not([bgcolor]) { background-color: #faf9fb; }
+table th, table td {
+  padding: .49rem .6rem;
+  border: 0;
+  border-bottom: 1px solid var(--ps-line);
+  vertical-align: middle;
+  overflow: visible;
+}
+table th {
+  background: var(--ps-tint);
+  color: #514b60;
+  font: 650 .8rem/1.35 var(--ps-sans);
+  text-shadow: none;
+}
+table td { color: inherit; font-family: inherit; }
+tr:first-child > :first-child { border-top-left-radius: 8px; }
+tr:first-child > :last-child { border-top-right-radius: 8px; }
+tr:last-child > :first-child { border-bottom-left-radius: 8px; }
+tr:last-child > :last-child { border-bottom-right-radius: 8px; }
+tr:last-child > td, tr:last-child > th { border-bottom-width: 0; }
+/* Full-row section bars sometimes contain an inline-white editor/download link. */
+table th:only-child {
+  padding-block: .55rem;
+  background: #494050;
+  color: #fff;
+  font-size: .89rem;
+  text-align: start;
+}
+table th:only-child a { color: inherit; }
+td[role="alert"] { border-inline-start: 4px solid #b12c40; }
+td[role="status"] { border-inline-start: 4px solid #187657; }
+.content > b, .contentwide > b, .content > div[id] > b, .contentwide > div[id] > b,
+.content h2, .contentwide h2, #config > h2 {
+  display: block;
+  margin: .1rem 0 .65rem;
+  padding: 0 0 0 .65rem;
+  border-inline-start: 3px solid var(--ps-berry);
+  color: var(--ps-ink);
+  font: 720 clamp(1rem, 2vw, 1.23rem)/1.3 var(--ps-sans);
+  text-align: start;
+  letter-spacing: -.025em;
+}
+.content h1, .contentwide h1 { font-size: 1.55rem; text-shadow: none; }
+:is(#lastHerd, #localTxs, #lh, #localTx) td {
+  font: .82rem/1.5 var(--ps-mono);
+  white-space: nowrap;
+}
+#Pages td { overflow-wrap: anywhere; }
+
+/* Br elements between the sidebar's independent tables are just spacers. */
+#repeaterInfo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11.75rem), 1fr));
+  gap: .65rem;
+  align-items: start;
+}
+#repeaterInfo > br { display: none; }
+#repeaterInfo table { table-layout: auto; font-size: .82rem; }
+#repeaterInfo :is(th, td) { padding: .32rem .4rem; overflow-wrap: anywhere; }
+#repeaterInfo th[colspan] {
+  padding: .55rem .65rem;
+  background: var(--ps-dark);
+  color: #fff;
+  font-size: .86rem;
+  text-align: start;
+}
+#repeaterInfo td { font-family: var(--ps-mono); }
+#repeaterInfo table:nth-of-type(-n+2) td {
+  width: 50%;
+  border: 1px solid #ffffff66;
+  font: 650 .77rem/1.35 var(--ps-sans);
+}
+
+/* Legacy anchors contain the full translated tooltip as their child span.
+   Keep both focus and hover paths, including keyboard focus on ARIA labels. */
+body a:is(.tooltip, .tooltip2):any-link {
+  position: relative;
+  color: inherit;
+  font-weight: 650;
+  text-decoration: underline dotted;
+  text-decoration-color: #a59ba8;
+  text-underline-offset: .22em;
+  cursor: help;
+}
+a:is(.tooltip, .tooltip2) > span { display: none; }
+body a:is(.tooltip, .tooltip2):is(:hover, :focus) > span {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  right: auto;
+  display: block;
+  width: max-content;
+  max-width: min(18rem, 80vw);
+  padding: .55rem .7rem;
+  border: 1px solid #514655;
+  border-radius: 8px;
+  background: var(--ps-dark);
+  color: #fff;
+  box-shadow: 0 4px 16px #211a2926;
+  font: .82rem/1.5 var(--ps-sans);
+  text-align: start;
+  text-shadow: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+body :is(th, td):last-child:not(:first-child) a:is(.tooltip, .tooltip2):is(:hover, :focus) > span {
+  left: auto;
+  right: 0;
+}
+body a:is(.tooltip, .tooltip2) > span b {
+  display: block;
+  padding: 0;
+  border: 0;
+  color: #ffd3e7;
+  background: none;
+  font: 700 .82rem/1.5 var(--ps-sans);
+}
+
+/* Settings, link managers, expert editors and native form widgets. */
+button, input, select, textarea { max-width: 100%; font: inherit; accent-color: var(--ps-berry); }
+body :is(select, textarea, input:not([type]), input[type="text"], input[type="password"],
+         input[type="number"], input[type="email"], input[type="search"], input[type="url"]) {
+  min-height: 2.25rem;
+  margin-block: .12rem;
+  padding: .35rem .5rem;
+  border: 1px solid #aaa3b2;
+  border-radius: 6px;
+  background-color: #fff;
+  color: var(--ps-ink);
+  font-size: .91rem;
+}
+body textarea { width: 100%; resize: vertical; font: .88rem/1.55 var(--ps-mono); }
+input[type="radio"], input[type="checkbox"] { vertical-align: middle; }
+input[type="radio"] + label { display: inline-block; padding: .2rem; }
+body :is(button, input[type="button"], input[type="submit"], input[type="reset"]),
+input[type="file"]::file-selector-button {
+  min-height: 2.25rem;
+  padding: .35rem .8rem;
+  margin-block: .15rem;
+  border: 1px solid #b3a9b5;
+  border-radius: 7px;
+  background-color: #fff;
+  color: #4a3546;
+  font: 650 .86rem/1.35 var(--ps-sans);
+  white-space: normal;
+  cursor: pointer;
+}
+body input[type="submit"], #config input[onclick="submitform()"] {
+  border-color: var(--ps-berry);
+  background: var(--ps-berry);
+  color: #fff;
+}
+body :is(button, input[type="button"], input[type="submit"], input[type="reset"]):enabled:hover {
+  box-shadow: 0 0 0 2px #c582a1;
+}
+body :is(button, input, textarea, select):disabled { opacity: .67; cursor: not-allowed; }
+input[type="file"] { overflow-wrap: anywhere; }
+.contentwide input[size="72"], .contentwide input[size="80"] { width: min(100%, 42rem); }
+.contentwide form > table + input[type="submit"], #config > table + div > input { margin-top: .65rem; }
+.contentwide form + form { margin-top: .6rem; }
+iframe, img { max-width: 100%; }
+iframe { border: 0; }
+pre, #tail {
+  max-width: 100%;
+  padding: .8rem;
+  border-radius: 7px;
+  font: .82rem/1.5 var(--ps-mono);
+  text-align: start;
+}
+pre { background: var(--ps-tint); white-space: pre-wrap; overflow-wrap: anywhere; }
+#tail {
+  width: 100%;
+  height: min(60vh, 32rem);
+  overflow: auto;
+  background: #22202e;
+  color: #baf3ce;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.progress { background: #f0eaf1; border-radius: .35rem; text-align: start; }
+.contentwide .progress .bar { background: #dfb6cb; color: #332331; white-space: nowrap; }
+
+.switch { position: relative; }
+.toggle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  visibility: visible;
+}
+input.toggle-round-flat + label {
+  display: inline-block;
+  position: relative;
+  width: 2.55rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid #797482;
+  border-radius: 1rem;
+  background: #746f7c;
+  vertical-align: middle;
+  cursor: pointer;
+}
+input.toggle-round-flat + label::before { content: none; }
+input.toggle-round-flat + label::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  bottom: auto;
+  width: calc(1.5rem - 6px);
+  height: calc(1.5rem - 6px);
+  border-radius: 50%;
+  background: #fff;
+  transition: none;
+}
+input.toggle-round-flat:checked + label { background: var(--ps-berry); border-color: var(--ps-berry); }
+input.toggle-round-flat:checked + label::after { margin-left: 1.05rem; background: #fff; }
+input.toggle-round-flat:disabled + label { opacity: .65; cursor: not-allowed; }
+input.toggle-round-flat:focus-visible + label,
+input.toggle-round-flat + label:focus-visible { outline: 3px solid var(--ps-ring); outline-offset: 2px; }
+
+/* NiceSelect binds only some selects. Its JS owns open/closed, selection,
+   search, disabled and tabindex; never force the underlying select visible. */
+.nice-select.small {
+  max-width: 100%;
+  border-color: #aaa3b2;
+  border-radius: 6px;
+  color: var(--ps-ink);
+  font: .91rem var(--ps-sans);
+  height: auto !important;
+  min-height: 2.25rem !important;
+  line-height: 2.25rem !important;
+}
+.nice-select .current { display: block; overflow: hidden; text-overflow: ellipsis; }
+.nice-select.open { z-index: 10; }
+.nice-select .nice-select-dropdown { min-width: 100%; max-width: min(26rem, 85vw); }
+.nice-select .list { float: none; margin: 0; }
+.nice-select .nice-select-dropdown li.option {
+  display: block;
+  float: none;
+  margin: 0;
+  padding: .35rem .7rem;
+  height: auto !important;
+  min-height: 2rem !important;
+  line-height: 1.35 !important;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.nice-select .option.focus, .nice-select .option.selected.focus,
+.nice-select .list .option:hover { background: #f5e4ed; color: var(--ps-link); }
+ul.mmenu { display: flex; flex-wrap: wrap; gap: .4rem; float: none; list-style: none; padding: 0; }
+ul.mmenu li, ul.mmenu li a, ul.mmenu li a span { float: none; margin: 0; }
+ul.mmenu li a { display: inline-block; padding: .35rem .7rem; border-radius: 6px; }
+ul.mmenu li a span { padding: 0; }
+ul.mmenu li a:is(.current, :hover) { background: #f5e4ed; color: var(--ps-link); }
+ul.mmenu li a:is(.current, :hover) span { background: none; }
+
+/* wifi.php renders inside an auto-height iframe, also directly addressable. */
+body > .infobox, #wpa_conf_form .infobox, #wpa_conf_form .network {
+  width: 100%;
+  padding: .6rem;
+  background: var(--ps-panel);
+  color: var(--ps-ink);
+}
+body > .infobox {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
+  gap: .55rem;
+  font-weight: 400;
+}
+.infobox > form, .infobox > .infoheader { grid-column: 1 / -1; }
+.infobox > br { display: none; }
+.infobox > .infoheader, .infobox .intheader {
+  padding: .4rem .6rem;
+  margin: 0;
+  border: 0;
+  color: #fff;
+  background: #494050;
+  font: 650 .88rem/1.45 var(--ps-sans);
+  text-align: start;
+}
+.infobox > .infoheader { background: var(--ps-dark); border-radius: 7px; }
+.infobox > .intinfo, .infobox > .wifiinfo {
+  float: none;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--ps-line);
+  background: var(--ps-tint);
+  color: var(--ps-ink);
+  font: .82rem/1.55 var(--ps-mono);
+  overflow-wrap: anywhere;
+}
+body > .intfooter { float: none; padding: .4rem; border: 0; background: var(--ps-tint); color: var(--ps-muted); }
+body > .tail { color: transparent; background: transparent; }
+/* PHP emits NetworkBoxes, while Add Network creates Networkboxes. */
+#wpa_conf_form .network, #networkbox > [id^="Networkbox"] { border: 1px solid var(--ps-line); border-radius: 8px; }
+#networkbox > [id^="Networkbox"] { margin-top: .55rem; padding: .55rem; background: var(--ps-tint); }
+#networkbox .tableft { display: inline-block; width: 3.5rem; text-align: start; }
+#networkbox input { max-width: calc(100% - 4rem); }
+.red { color: #9d1938; }
+.green { color: #10684d; }
+
+/* Short, wide reports retain every column. Scroll the live fragment, not the
+   entire page, so refreshes of its contents don't replace the scrollport. */
+@media (max-width: 57.99rem) {
+  .content, .contentwide { overflow-x: auto; }
+  :is(#lastHerd, #localTxs, #lh, #localTx, #sysInfo, #refLinks, #cssConnects,
+      #bmConnects, #tgifConnects, #tgifStaticConnects, #Pages) {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  :is(#lastHerd, #localTxs, #localTx, #lh) table { min-width: max-content; }
+  #sysInfo table, .contentwide > table[style*="table-layout"] { min-width: 37rem; }
+  /* Avoid clipping a balloon inside a scrollport (even an empty log table). */
+  body a:is(.tooltip, .tooltip2):is(:hover, :focus) > span,
+  body :is(td, th):last-child:not(:first-child) a:is(.tooltip, .tooltip2):is(:hover, :focus) > span {
+    position: fixed;
+    inset: auto .75rem .75rem;
+    width: fit-content;
+    max-width: calc(100vw - 1.5rem);
+    margin-inline: auto;
+  }
+  .nice-select.open .nice-select-dropdown {
+    position: relative;
+    top: auto;
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+  }
+}
+@media (max-width: 40rem) {
+  .container { width: calc(100% - 1rem); margin-block: .5rem; }
+  .content, .contentwide { padding: .6rem; }
+  .header > div[style] { float: none !important; text-align: start !important; }
+  .header a:link, .header a:visited { padding: .4rem .5rem; }
+  table th, table td { padding: .4rem .35rem; }
+  #repeaterInfo { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem; }
+  #repeaterInfo :is(th, td) { padding-inline: .2rem; }
+  /* Settings have row labels and up to three value cells, some with long
+     selects. Stack each row as a unit, not the live multicolumn reports. */
+  :is(#config, #adminPassForm, #autoApPassForm) table,
+  :is(#config, #adminPassForm, #autoApPassForm) tbody { display: block; }
+  :is(#config, #adminPassForm, #autoApPassForm) tr { display: flex; flex-wrap: wrap; padding: .4rem; }
+  :is(#config, #adminPassForm, #autoApPassForm) tr + tr { border-top: 1px solid var(--ps-line); }
+  :is(#config, #adminPassForm, #autoApPassForm) td { width: 100%; border: 0; text-align: start; }
+  :is(#config, #adminPassForm, #autoApPassForm) th { width: auto; flex: auto; }
+  .contentwide form td input:not([size]), .contentwide form td select { max-width: 100%; }
+  .contentwide form table:has(td[width="30%"]) { table-layout: fixed; }
+  .contentwide table[width="800"] > tbody > tr { display: grid; grid-template-columns: minmax(0,1fr); }
+  .contentwide table[width="800"] table { height: auto; }
+  body :is(input[type="text"], input[type="password"], input[type="number"], select, textarea) { font-size: 1rem; }
+}
+@media (max-width: 21rem) {
+  #repeaterInfo { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nice-select, .nice-select::after, .nice-select .nice-select-dropdown,
+  input.toggle-round-flat + label, input.toggle-round-flat + label::after { transition: none; }
+}
+@media (forced-colors: active) {
+  input.toggle-round-flat + label { border: 2px solid ButtonText; }
+  input.toggle-round-flat + label::after { background: ButtonText; forced-color-adjust: none; }
+  :focus-visible, input.toggle-round-flat + label:focus-visible { outline-color: Highlight; }
+}

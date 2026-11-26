@@ -1,0 +1,12 @@
+#!/bin/bash
+# Private chroot only; keep modeled system operations away from the host.
+set -eu
+case "$*" in
+  refresh-native) exec /usr/bin/python3 -I /work/bridge.py refresh ;;
+  'install -m 644 -o root -g root '*)
+    [[ $# = 9 && ( $9 = /etc/mmdvmhost || $9 = /etc/dmrgateway ) ]] || exit 64
+    exec /usr/bin/python3 -I /work/bridge.py "$8" "$9" ;;
+  'cp /etc/dmrgateway '*|'chown www-data:www-data '*|'chmod 600 '*|'systemctl restart dmrgateway.service')
+    exec /work/expert-priv "$@" ;;
+  *) exec /work/configure-priv "$@" ;;
+esac

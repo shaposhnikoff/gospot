@@ -1,0 +1,88 @@
+[General]
+; Standby DMR configuration: preserve operator formatting and passthrough rules.
+Id=1
+RptAddress=127.0.0.1
+RptPort=62032
+LocalAddress=127.0.0.1
+LocalPort=62031
+Daemon=0
+RFTimeout=20
+NetTimeout=20
+
+[Log]
+DisplayLevel=2
+MQTTLevel=0
+
+[Voice]
+Enabled=0
+
+[XLX Network]
+Enabled=0
+Id=1234567
+File=/usr/local/etc/XLXHosts.txt
+Port=62030
+Password=passw0rd
+ReloadTime=60
+Slot=2
+TG=6
+Base=64000
+Startup=950
+Relink=60
+Debug=0
+UserControl=1
+
+[DMR Network 1]
+Enabled=0
+Name=GoDMRServer
+Id=1
+Address=master.invalid
+Port=62031
+Password=""
+Location=0
+TGRewrite0=2,91,2,91,1
+TGRewrite0=2,93,2,93,1
+TGRewrite1=2,92,2,92,1
+
+[Dynamic TG Control]
+Enable=0
+
+[Remote Commands]
+Enable=0
+
+[Info]
+Latitude=0.0
+Longitude=0.0
+Location="Demo"
+Description="Fixture"
+URL=http://fixture.invalid/
+RXFrequency=430000000
+TXFrequency=430000000
+Enabled=0
+Power=1
+Height=3
+
+[DMR Network 2]
+Enabled=0
+Location=0
+
+[DMR Network 3]
+Enabled=0
+Name=HBLink
+Address=1.2.3.4
+Port=5555
+TGRewrite0=2,11,2,11,1
+Password="PASSWORD"
+Location=0
+Debug=0
+
+[GPSD]
+Enable=0
+Address=127.0.0.1
+Port=2947
+
+[APRS]
+Enable=1
+Address=127.0.0.1
+Port=8673
+Description=APRS for DMRGateway
+Suffix=DMR

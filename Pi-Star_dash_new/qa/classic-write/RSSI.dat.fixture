@@ -1,0 +1,7 @@
+# Synthetic modem calibration: raw reading, dBm
+1000    -120
+1500    -110
+
+2000    -100
+2500    -90
+3000    -80

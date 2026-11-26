@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+[ "$1" = configure ] || exit 0
+for account in psdash-stage pistar-wizard pistar-panel; do
+    if ! getent passwd "$account" >/dev/null; then
+        useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$account"
+    fi
+    test "$(id -u "$account")" -ne 0
+done
+cfg=/etc/pistar-wizard
+install -d -m755 "$cfg"
+umask 077
+if [ ! -e "$cfg/admin-password" ]; then openssl rand -hex 32 >"$cfg/admin-password"; fi
+if [ ! -e "$cfg/tls-key.pem" ] && [ ! -e "$cfg/tls-cert.pem" ]; then
+    openssl req -x509 -nodes -newkey rsa:3072 -days 825 -subj /CN=pistar3 \
+        -addext 'subjectAltName=DNS:pistar3,IP:192.168.210.194' \
+        -keyout "$cfg/tls-key.pem" -out "$cfg/tls-cert.pem" 2>/dev/null
+    chmod 644 "$cfg/tls-cert.pem"
+fi
+test -s "$cfg/admin-password"
+test -s "$cfg/tls-key.pem"
+openssl x509 -in "$cfg/tls-cert.pem" -noout -checkend 0
+/usr/sbin/visudo -cf /etc/sudoers.d/pistar-dashboard
+umask 022
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    for unit in pistar-panel pistar-wizard psdash-stage; do
+        systemctl enable "$unit.service"
+        systemctl restart "$unit.service"
+        systemctl is-active --quiet "$unit.service"
+    done
+fi

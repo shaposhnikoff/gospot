@@ -1,0 +1,45 @@
+[General]
+Callsign=N0DEMO
+Id=1234567
+Duplex=0
+ModeHang=10
+RFModeHang=10
+NetModeHang=10
+Display=None
+[Info]
+RXFrequency=430000000
+TXFrequency=430000000
+[DMR]
+Enable=1
+ColorCode=1
+SelfOnly=1
+DumpTAData=0
+EmbeddedLCOnly=0
+[DMR Network]
+Enable=0
+Address=fixture.invalid
+Port=62031
+[D-Star]
+Enable=0
+[M17]
+Enable=0
+[M17 Network]
+Enable=0
+[NXDN]
+Enable=0
+[NXDN Network]
+Enable=0
+[P25]
+Enable=0
+[P25 Network]
+Enable=0
+[System Fusion]
+Enable=0
+[System Fusion Network]
+Enable=0
+[POCSAG]
+Enable=0
+[Nextion]
+ScreenLayout=0
+[Log]
+DisplayLevel=0

@@ -1,0 +1,23 @@
+{
+  "name": "pstar-dashboard-new",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "tsx --test src/*.test.ts && node --test scripts/build-classic.test.mjs",
+    "package:stock": "npm run build && node scripts/package-overlay.mjs",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.1.0",
+    "@types/node": "^22.0.0",
+    "svelte": "^5.0.0",
+    "svelte-check": "^4.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "~5.9.0",
+    "vite": "^6.3.0"
+  }
+}

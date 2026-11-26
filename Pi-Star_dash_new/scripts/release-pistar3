@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+node=('-o' 'BatchMode=yes' '-o' 'StrictHostKeyChecking=yes' 'pistar3')
+radio_ids() { ssh "${node[@]}" 'test "$(hostname -s)" = pistar3 && systemctl show mmdvmhost dmrgateway -p InvocationID'; }
+before=$(radio_ids)
+npm run check
+npm run build
+go -C ../panel test ./...
+bash ../panel/deploy.sh
+bash ../panel/deploy-wizard.sh
+# Publish hashed assets before replacing the entry point; in-flight tabs can
+# continue to reference the previous bundle. No credentials in the payload.
+tar -C dist -cf - assets index.html | ssh "${node[@]}" 'set -eu
+  test "$(hostname -s)" = pistar3
+  dst=/usr/local/share/pistar-native-ui
+  sudo -n install -d -m755 "$dst/assets"
+  tmp=$(mktemp -d)
+  trap "rm -rf -- \"$tmp\"" EXIT
+  tar -C "$tmp" -xf -
+  sudo -n install -m 644 "$tmp"/assets/* "$dst/assets/"
+  sudo -n install -m 644 "$tmp/index.html" "$dst/.new.html"
+  sudo -n mv -fT "$dst/.new.html" "$dst/index.html"'
+./scripts/deploy-pistar3
+[[ $(radio_ids) == "$before" ]] || { echo 'Radio service invocation changed' >&2; exit 1; }
+ssh "${node[@]}" 'python3 -' <qa/board.py

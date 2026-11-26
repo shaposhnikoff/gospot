@@ -1,0 +1,31 @@
+#!/bin/bash
+# Only installed in /stand. Actual copying, zip, extraction and installs;
+# no physical remounts, changes to time zone, or service actions.
+set -eu
+map=/work/backup-map.tsv
+bad() { echo "DENIED $1" >>/work/effects; exit 64; }
+[[ ${1:-} != -n ]] || shift
+known() { awk -F '\t' -v n="$1" -v p="$2" '$1==n && $2==p {ok=1} END {exit !ok}' "$map"; }
+case "$1" in
+ mkdir) [[ $# == 2 && $2 == /tmp/config_backup ]] || bad mkdir; exec /bin/mkdir -- "$2" ;;
+ rm) [[ $2 == -rf || $2 == -f ]] || bad rm; shift 2
+     for path do case "$path" in /tmp/config_backup|/tmp/config_backup.zip|/tmp/config_restore|/etc/dstar-radio.mmdvmhost|/etc/dstar-radio.dstarrepeater|/etc/dstar-radio.qa-keep|'/etc/dstar-radio.*') ;; *) bad rm ;; esac; done
+     exec /bin/rm -rf -- "$@" ;;
+ cp) [[ $# == 3 && $3 == /tmp/config_backup/"${2##*/}" ]] && known "${2##*/}" "$2" || bad cp; exec /bin/cp -- "$2" "$3" ;;
+ zip) [[ $2 == '-j' && $3 == '/tmp/config_backup.zip' && $# -ge 4 ]] || bad zip
+      for p in "${@:4}"; do [[ $p == /tmp/config_backup/* && -f $p && ! -L $p ]] || bad zip; done
+      exec /usr/bin/zip "${@:2}" ;;
+ install)
+      [[ $# == 9 && $2 == -m && $4 == -o && $6 == -g && $5 == "$7" ]] || bad install
+      if [[ $8 == /tmp/config_restore/"${9##*/}" ]] && known "${9##*/}" "$9"; then
+        case "$9" in /etc/*.key) want='600 www-data';; /etc/wpa_supplicant/*) want='600 root';; *) want='644 root';; esac
+      elif [[ $8 =~ ^/tmp/pistar_cw_[a-zA-Z0-9]+$ && $9 == '/root/.Remote Control' ]]; then want='600 root'
+      else bad install; fi
+      [[ "$3 $5" == "$want" && -f $8 && ! -L $8 ]] || bad install
+      /usr/bin/install "${@:2}"; printf 'install %s\n' "$9" >>/work/effects ;;
+ cat) [[ $# == 2 && $2 == '/root/.Remote Control' ]] || bad cat; exec /bin/cat "$2" ;;
+ mount) [[ "$*" == 'mount -o remount,rw /' || "$*" == 'mount -o remount,ro /' ]] || bad mount; echo "$*" >>/work/effects ;;
+ systemctl) [[ $# == 3 && $2 =~ ^(start|stop)$ && $3 =~ ^[a-z0-9-]+\.service$ ]] || bad systemctl; echo "$*" >>/work/effects ;;
+ timedatectl) [[ $# == 3 && $2 == set-timezone ]] || bad timedatectl; echo "$*" >>/work/effects ;;
+ *) bad "$1" ;;
+esac

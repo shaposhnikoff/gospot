@@ -1,0 +1,33 @@
+[Enabled]
+Enabled=0
+
+[YSF Network]
+Callsign=N0DEMO
+DstAddress=127.0.0.1
+LocalAddress=127.0.0.1
+Suffix=ND
+FCSRooms=/usr/local/etc/FCSHosts.txt
+DT1=1,34,97,95,43,3,17,0,0,0
+DT2=0,0,0,0,108,32,28,32,3,8
+Debug=0
+
+[Info]
+RXFrequency=430000000
+TXFrequency=430000000
+Power=1
+Latitude=0.0
+Longitude=0.0
+Height=3
+Location=Demo
+Description=N0DEMO_Pi-Star
+
+[DMR Network]
+Id=1234567
+DefaultDstTG=9
+TGUnlink=4000
+TGListFile=/usr/local/etc/TGList_YSF.txt
+
+[Log]
+DisplayLevel=0
+FileLevel=2
+

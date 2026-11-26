@@ -1,0 +1,51 @@
+#!/bin/bash
+# Fixed operations in disposable container; no remount, interface or host unit access.
+set -eu
+wpa=/etc/wpa_supplicant/wpa_supplicant.conf
+temp_re='^/tmp/pistar-edit-[a-zA-Z0-9]+$'
+if [[ -f /work/priv-commands ]]; then echo "$1" >> /work/priv-commands; fi
+expert_conf='^(/etc/((dmr|nxdn|ysf|p25|dapnet|ircddb)gateway|mmdvmhost|dstarrepeater|timeserver|starnetserver|pistar-remote)|/usr/local/etc/RSSI\.dat)$'
+credential_target() {
+  [[ ( $1 == /etc/bmapi.key && -f /work/qa-bmapikey ) || ( $1 == /etc/dapnetapi.key && -f /work/qa-dapnetapi ) || ( $1 == /etc/tgifapi.key && -f /work/qa-tgifapikey ) ]]
+}
+case "$*" in
+  "systemctl restart pistar-remote.service") echo "$*" >>/work/effects; exit 0 ;;
+  "mount -o remount,rw /"|"mount -o remount,ro /"|"sync"|"systemctl restart dmrgateway.service"|"systemctl restart nxdngateway.service"|"systemctl restart ysfgateway.service"|"systemctl restart p25gateway.service"|"systemctl restart dapnetgateway.service"|"systemctl restart mmdvmhost.service"|"systemctl restart dstarrepeater.service"|"systemctl restart ircddbgateway.service"|"systemctl restart timeserver.service"|"systemctl restart starnetserver.service"|"ip link set wlan0 down"|"ip link set wlan0 up")
+    echo "$*" >>/work/effects; exit 0 ;;
+  "cat $wpa"|"grep country $wpa") exec "/usr/bin/$1" "${@:2}" ;;
+  "install -m 600 -o root -g root /tmp/wifidata $wpa")
+    test -f /tmp/wifidata && test ! -L /tmp/wifidata
+    /usr/bin/install "${@:2}"; echo "install $wpa" >>/work/effects; exit 0 ;;
+esac
+case "$1" in
+  cp) [[ $# == 3 && $3 =~ $temp_re && ! -L $3 ]] && { [[ $2 =~ $expert_conf || $2 == "$wpa" || ( $2 == /etc/crontab && -f /work/cron-approved ) ]] || credential_target "$2"; } && exec /usr/bin/cp "$2" "$3" ;;
+  sed)
+    if [[ $# == 7 && $2 == -i && $3 == -e && $4 == '1r '* && $5 == -e && $6 == d && $7 == /etc/crontab && -f /work/cron-approved ]]; then
+      src=${4#1r }
+      [[ $src =~ $temp_re && -f $src && ! -L $src ]]
+      # Snapshot the submitted bytes with the PHP user's read permissions.
+      # Execute only the fixed sed operation and only for the inert fixture.
+      snapshot=$(mktemp /work/cron-edit-XXXXXXXX)
+      trap 'rm -f -- "$snapshot"' EXIT
+      /usr/bin/sudo -u www-data -n /bin/cat -- "$src" >"$snapshot"
+      cmp -s "$snapshot" /work/cron-approved
+      /usr/bin/sed -i -e "1r $snapshot" -e d /etc/crontab
+      echo 'sed -i -e 1r:<staged> -e d /etc/crontab' >>/work/effects
+      exit 0
+    fi ;;
+  chown) [[ $# == 3 && $2 == www-data:www-data && $3 =~ $temp_re && ! -L $3 ]] && exec /usr/bin/chown "$2" "$3" ;;
+  chmod) [[ $# == 3 && $2 == 600 && $3 =~ $temp_re && ! -L $3 ]] && exec /usr/bin/chmod "$2" "$3" ;;
+  install)
+    if [[ $# == 9 && "$2 $3 $4 $5 $6 $7" == '-m 600 -o www-data -g www-data' && $8 =~ $temp_re && -f $8 && ! -L $8 ]] && credential_target "$9"; then
+      /usr/bin/install "${@:2}"; echo "install $9" >>/work/effects; exit 0
+    fi
+    if [[ $# == 9 && "$2 $3 $4 $5 $6 $7" == '-m 600 -o root -g root' && $8 =~ $temp_re && ! -L $8 && $9 == "$wpa" ]]; then
+      /usr/bin/install "${@:2}"; echo "install $wpa" >>/work/effects; exit 0
+    fi
+    if [[ ${9:-} =~ ^/etc/(dstarrepeater|ircddbgateway|timeserver|starnetserver)$ ]]; then temp_re='^/tmp/pistar-edit-etc-[a-zA-Z0-9]+$'; fi
+    if [[ $# == 9 && "$2 $3 $4 $5 $6 $7" == '-m 644 -o root -g root' && $8 =~ $temp_re && ! -L $8 && $9 =~ $expert_conf ]]; then
+      /usr/bin/install "${@:2}"; echo "install $9" >>/work/effects; exit 0
+    fi ;;
+esac
+echo "DENIED $1" >>/work/effects
+exit 64

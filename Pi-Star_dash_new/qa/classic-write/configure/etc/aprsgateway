@@ -1,0 +1,7 @@
+[Enabled]
+Enabled=0
+[General]
+Callsign=N0DEMO
+[APRS-IS]
+Password=13528
+Server=fixture.invalid

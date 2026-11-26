@@ -1,0 +1,2 @@
+pistar-wizard ALL=(root) NOPASSWD: /usr/local/libexec/pistar-config read, /usr/local/libexec/pistar-config apply, /usr/local/libexec/pistar-config rollback
+pistar-wizard ALL=(root) NOPASSWD: /usr/local/libexec/pistar-config services-read, /usr/local/libexec/pistar-config services-apply

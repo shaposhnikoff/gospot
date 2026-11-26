@@ -1,0 +1,5 @@
+#!/bin/sh
+# Read-only board utilities intentionally absent in the private root.
+# Route via the fixture dispatcher to record the exact probe as www-data
+# cannot modify /work/effects.
+exec /usr/local/bin/sudo probe "${0##*/}" "$@"

@@ -1,0 +1,3 @@
+FROM pstar-classic-write-runtime:8.2
+RUN apt-get update && apt-get install -y --no-install-recommends zip libzip-dev \
+ && docker-php-ext-install -j2 zip && rm -rf /var/lib/apt/lists/*

@@ -1,0 +1,10 @@
+callsign=N0DEMO B
+gateway=N0DEMO G
+beaconText=N0DEMO B
+dvapFrequency=430000000
+dvmegaRXFrequency=430000000
+dvmegaTXFrequency=430000000
+mode=1
+rpt1Validation=1
+modemType=MMDVM
+restriction=1

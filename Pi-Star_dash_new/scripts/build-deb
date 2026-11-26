@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+umask 022
+npm run check
+d=$(mktemp -d)
+trap 'rm -rf "$d"' EXIT
+npm run package:stock | tee "$d/package.log"
+root=$(sed -n 's|^Stock Pi-Star docroot .*: \(/.*\)$|\1|p' "$d/package.log")
+[[ $root == "$PWD"/build/release-*/docroot && -s $root/admin/configure.php ]]
+release=$(basename "$(dirname "$root")")
+p=$d/pkg
+lib=/usr/lib/pistar-dashboard
+share=/usr/share/pistar-dashboard
+units=/lib/systemd/system
+radio=../image/stage-mmdvm/00-install/files
+install -d "$p"/DEBIAN "$p$lib" "$p$share" "$p$units"
+base=$(sed -n 's/^Version: //p' debian/control)
+version=${DEB_VERSION:-$base}
+[[ $version =~ ^[0-9][A-Za-z0-9.+~-]*$ ]]
+dpkg --validate-version "$version"
+sed "s/^Version: .*/Version: $version/" debian/control >"$p/DEBIAN/control"
+install -m755 debian/{postinst,prerm,postrm} "$p/DEBIAN/"
+install -Dm440 debian/sudoers "$p/etc/sudoers.d/pistar-dashboard"
+install -m755 ../panel/helper/{pistar-config,pistar-archive} "$p$lib/"
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go -C ../panel build -trimpath \
+  -ldflags="-s -w -X main.adminAssets=$share/classic/operator -X main.configHelper=$lib/pistar-config -X main.archiveHelperPath=$lib/pistar-archive" \
+  -o "$p$lib/panel" .
+cp -a "$root" "$p$share/classic"
+find "$p$share/classic" -type d -exec chmod 755 {} +
+find "$p$share/classic" -type f -exec chmod 644 {} +
+printf '%s\n' "$release" >"$p$share/RELEASE"
+install -m644 "$(dirname "$root")/staging/server.py" "$p$lib/server.py"
+ln -s "$share/classic/operator" "$p$lib/dist"
+for unit in psdash-stage pistar-panel pistar-wizard; do
+  case $unit in
+    psdash-stage) src=staging/$unit.service; cmd="/usr/bin/python3 -IB $lib/server.py" ;;
+    pistar-panel) src=$radio/$unit.service; cmd="$lib/panel -listen :8787" ;;
+    pistar-wizard) src=$radio/$unit.service; cmd="$lib/panel -admin-listen :8788 -tls-cert /etc/pistar-wizard/tls-cert.pem -tls-key %d/tls-key" ;;
+  esac
+  sed "s|^ExecStart=.*|ExecStart=$cmd|" "$src" >"$p$units/$unit.service"
+  # Existing pilot units are administrator files in /etc: retain them for removal.
+  install -d "$p$units/$unit.service.d"
+  printf '[Service]\nExecStart=\nExecStart=%s\n' "$cmd" >"$p$units/$unit.service.d/50-pistar-dashboard.conf"
+done
+(cd "$p" && find usr lib etc -type f -print0 | LC_ALL=C sort -z | xargs -0 md5sum >DEBIAN/md5sums)
+dest="build/$release/pistar-dashboard_${version}_armhf.deb"
+dpkg-deb --root-owner-group --build "$p" "$dest"
+sha256sum "$dest"

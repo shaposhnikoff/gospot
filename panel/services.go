@@ -26,7 +26,11 @@ type dmrServices struct {
 }
 
 func serveDMRServices(w http.ResponseWriter, r *http.Request, helper wizardHelper, slot chan struct{}) {
-	action := "services-read"
+	editor := "services"
+	if r.URL.EscapedPath() == "/manage/api/protocols" {
+		editor = "protocols"
+	}
+	action := editor + "-read"
 	var data []byte
 	parent, limit := r.Context(), 20*time.Second
 	switch r.Method {
@@ -50,7 +54,7 @@ func serveDMRServices(w http.ResponseWriter, r *http.Request, helper wizardHelpe
 			http.Error(w, "Неверные параметры", 400)
 			return
 		}
-		action = "services-apply"
+		action = editor + "-apply"
 		parent, limit = context.WithoutCancel(parent), 110*time.Second
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -95,24 +99,45 @@ func serveDMRServices(w http.ResponseWriter, r *http.Request, helper wizardHelpe
 		w.WriteHeader(204)
 		return
 	}
-	var cfg dmrServices
-	if json.Unmarshal(out, &cfg) != nil || !archiveHex(cfg.Revision) || cfg.Rules == nil {
+	var cfg any
+	valid := false
+	if editor == "protocols" {
+		var modes struct {
+			Modes    map[string]map[string]string `json:"modes"`
+			Revision string                       `json:"revision"`
+		}
+		valid = json.Unmarshal(out, &modes) == nil && archiveHex(modes.Revision) && modes.Modes != nil
+		cfg = modes
+	} else {
+		var dmr dmrServices
+		valid = json.Unmarshal(out, &dmr) == nil && archiveHex(dmr.Revision) && dmr.Rules != nil
+		cfg = dmr
+	}
+	if !valid {
 		http.Error(w, "Не удалось прочитать настройки", 502)
 		return
 	}
+	csrf := editorToken(w, r)
+	if csrf == "" {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		Config any    `json:"config"`
+		CSRF   string `json:"csrf"`
+	}{cfg, csrf})
+}
+
+func editorToken(w http.ResponseWriter, r *http.Request) string {
 	c, err := r.Cookie(wizardCookie)
 	if err != nil || !archiveHex(c.Value) {
 		var nonce [32]byte
 		if _, err := rand.Read(nonce[:]); err != nil {
 			http.Error(w, "Управление недоступно", 503)
-			return
+			return ""
 		}
 		c = &http.Cookie{Name: wizardCookie, Value: hex.EncodeToString(nonce[:]), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode}
 		http.SetCookie(w, c)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(struct {
-		Config dmrServices `json:"config"`
-		CSRF   string      `json:"csrf"`
-	}{cfg, c.Value})
+	return c.Value
 }

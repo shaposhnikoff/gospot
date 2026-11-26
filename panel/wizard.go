@@ -114,7 +114,7 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		}
 		path := r.URL.EscapedPath()
 		switch path {
-		case "/manage/api/services":
+		case "/manage/api/services", "/manage/api/protocols":
 			serveDMRServices(w, r, helper, slot)
 			return
 		case "/manage/api/system":

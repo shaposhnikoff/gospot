@@ -45,12 +45,13 @@ export async function checkPackaged({write,wd,js,click,until,ssh,root,admin,post
     const el=await wd('/element',{using:'css selector',value:sel});
     const path='/element/'+el['element-6066-11e4-a52e-4f735466cecf'];
     await wd(path+'/value',{text:'\ue009a\ue000'+next});
-    await click(`form:has(${sel}) button`);
+    await click(`form:has(${sel}) button:not([type]), form:has(${sel}) button[type=submit]`);
     await until(()=>js(`return [...document.querySelectorAll('[role=status]')].some(n=>n.innerText.includes('Настройки сохранены'))`));
     assert.equal(posts.length,i+1);
     assert.equal(posts[i].status,204);
     assert(posts[i].csrf);
-    assert.equal(posts[i].body[field==='cc'?'cc':'rules'] instanceof Array ? posts[i].body.rules[0] : String(posts[i].body.cc),next);
+    if(field==='cc')assert.deepEqual(posts[i].body.changes,{DMR:{ColorCode:next}});
+    else assert.equal(posts[i].body.rules[0],next);
     await open();
     assert.equal(await value(),next);
     const needle='\n'+from+'\n';

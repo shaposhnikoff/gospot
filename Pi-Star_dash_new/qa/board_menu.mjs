@@ -5,11 +5,12 @@ import { X509Certificate, createHash } from 'node:crypto';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import {checkPackaged} from './packaged_edit.mjs';
+import {checkYSF} from './packaged_ysf.mjs';
 
 const board='192.168.210.194', root=`http://${board}:8789`, admin=`https://${board}:8788`;
 const mode=process.argv[2];
-assert([undefined,'--deb-readonly','--deb-fixture-write'].includes(mode));
-const write=mode==='--deb-fixture-write';
+assert([undefined,'--deb-readonly','--deb-fixture-write','--deb-ysf-write'].includes(mode));
+const write=mode==='--deb-fixture-write'||mode==='--deb-ysf-write';
 if(write){
   assert.deepEqual(JSON.parse(execFileSync('ip',['-j','link'])).map(i=>i.ifname),['lo']);
   assert.equal(JSON.parse(execFileSync('ip',['-j','route','get',board]))[0].dev,'lo');
@@ -67,9 +68,9 @@ try {
     if(id){const q=pending.get(id);pending.delete(id);error?q.j(Error(error.message)):q.r(result);return;}
     if(method==='Fetch.requestPaused'){
       const u=new URL(p.request.url);
-      const save=write && p.request.method==='POST' && u.href===admin+'/manage/api/services';
+      const save=write && p.request.method==='POST' && ['/manage/api/services','/manage/api/protocols'].some(path=>u.href===admin+path);
       const ok=(['GET','HEAD'].includes(p.request.method) && [root,admin].includes(u.origin)) || save;
-      if(save)posts.push({id:p.networkId,csrf:Object.entries(p.request.headers).some(([k,v])=>k.toLowerCase()==='x-pistar-csrf'&&/^[0-9a-f]{64}$/.test(v)),body:JSON.parse(p.request.postData)});
+      if(save)posts.push({id:p.networkId,path:u.pathname,csrf:Object.entries(p.request.headers).some(([k,v])=>k.toLowerCase()==='x-pistar-csrf'&&/^[0-9a-f]{64}$/.test(v)),body:JSON.parse(p.request.postData)});
       if(!ok)blocked.push(p.request.method+' '+u.origin+u.pathname);
       void cdp(ok?'Fetch.continueRequest':'Fetch.failRequest',ok?{requestId:p.requestId}:{requestId:p.requestId,errorReason:'BlockedByClient'});
     } else if(method==='Fetch.authRequired'){
@@ -89,7 +90,7 @@ try {
   };
   await cdp('Network.enable'); await cdp('Fetch.enable',{handleAuthRequests:true});
   if(mode){
-    await checkPackaged({write,wd,js,click,until,ssh,root,admin,posts});
+    await (mode==='--deb-ysf-write'?checkYSF:checkPackaged)({write,wd,js,click,until,ssh,root,admin,posts,cdp});
     assert.deepEqual(blocked,[]);
   }else{
   let failures=0;

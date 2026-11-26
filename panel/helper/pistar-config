@@ -190,6 +190,67 @@ def read_file(path, limit):
         return data.decode(), st
 
 
+# Native MMDVMHost controls, in operator-menu order. Never enumerate arbitrary
+# INI keys (the same file can contain credentials). Missing modes are not offered.
+MODE_KEYS = {
+    "DMR": "ColorCode Beacons BeaconInterval BeaconDuration EmbeddedLCOnly DumpTAData CallHang",
+    "D-Star": "Module AckReply AckTime ErrorReply",
+    "M17": "CAN TXHang",
+    "System Fusion": "LowDeviation TXHang RemoteGateway",
+    "P25": "NAC OverrideUIDCheck RemoteGateway SoftId TXHang",
+    "NXDN": "RAN RemoteGateway TXHang",
+    "POCSAG": "Frequency",
+    "FM": "CTCSSFrequency CTCSSLevel SquelchThreshold HangTime",
+}
+NET_KEYS = "Enable GatewayAddress GatewayPort LocalAddress LocalPort ModeHang Debug"
+
+
+def validate_mode_value(key, value):
+    require(type(value) is str and 0 < len(value) <= 253, "invalid protocol value")
+    if key in ("GatewayAddress", "LocalAddress"):
+        require(all(re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label)
+                    for label in value.split(".")), "invalid gateway address")
+    elif key == "NAC":
+        require(re.fullmatch(r"[0-9A-Fa-f]{1,3}", value), "invalid P25 NAC")
+    elif key == "Module":
+        require(re.fullmatch(r"[A-Z]", value), "invalid D-Star module")
+    elif key == "CTCSSFrequency":
+        require(re.fullmatch(r"\d{1,3}(?:\.\d{1,2})?",value) and 0 <= float(value) <= 300, "invalid CTCSS")
+    else:
+        ranges = {"ColorCode":(0,15), "CAN":(0,15), "RAN":(0,63), "Frequency":(1000000,1300000000),
+                  "GatewayPort":(1,65535), "LocalPort":(1,65535), "CTCSSLevel":(0,100), "SquelchThreshold":(0,100)}
+        lo, hi = ranges.get(key,(0,65535) if key in ("AckTime","BeaconInterval","BeaconDuration","CallHang","HangTime","ModeHang","TXHang","Jitter") else (0,1))
+        require(re.fullmatch(r"[0-9]{1,10}",value) and lo <= int(value) <= hi,"invalid "+key)
+
+
+def protocol_config(texts, changes=None):
+    host = Ini(texts[0])
+    modes = {}
+    for mode, specific in MODE_KEYS.items():
+        if (mode,"Enable") not in host.index:
+            continue
+        keys = "Enable "+specific+" SelfOnly ModeHang"
+        net = NET_KEYS+(" Jitter Slot1 Slot2" if mode=="DMR" else "")
+        modes[mode] = {prefix+key:host.field(section,key)
+                       for section,prefix,fields in ((mode,"",keys),(mode+" Network","net.",net))
+                       for key in fields.split() if (section,key) in host.index}
+    rev = hashlib.sha256(json.dumps(modes,sort_keys=True).encode()).hexdigest()
+    if changes is None:
+        return {"revision":rev,"modes":modes}
+    require(type(changes) is dict and set(changes)=={"revision","changes"}, "invalid protocol form")
+    if changes["revision"] != rev:
+        raise Stale("protocol settings changed; reload")
+    diff = changes["changes"]
+    require(type(diff) is dict and diff.keys() <= modes.keys(),"unknown protocol")
+    for mode, values in diff.items():
+        require(type(values) is dict and values.keys() <= modes[mode].keys(),"unknown protocol field")
+        for field,value in values.items():
+            key=field.removeprefix("net.")
+            validate_mode_value(key,value)
+            host.field(mode+" Network" if field.startswith("net.") else mode,key,value)
+    return ["".join(host.lines), texts[1]]
+
+
 def replace(path, text, uid, gid, mode):
     fd, tmp = tempfile.mkstemp(dir=path.parent)
     try:
@@ -218,16 +279,18 @@ def transaction(command, settings, run):
         return configure(originals)
     if command == "services-read":
         return service_config(originals)
+    if command == "protocols-read":
+        return protocol_config(originals)
     backup = STATE / "previous.json"
     if command == "rollback":
         require(backup.exists(), "no rollback available")
         target = json.loads(read_file(backup, 12 * LIMIT + 128)[0])
         require(type(target) is list and len(target) == 2 and
                 all(type(x) is str for x in target), "invalid backup")
-    elif command == "services-apply":
+    elif command in ("services-apply","protocols-apply"):
         require(settings is not None, "missing services form")
         try:
-            target = service_config(originals, settings)
+            target = (protocol_config if command=="protocols-apply" else service_config)(originals, settings)
         except Stale:
             raise
         except Error as exc:
@@ -235,7 +298,7 @@ def transaction(command, settings, run):
     else:
         target = configure(originals, settings)
     modes = [stat.S_IMODE(stats[0].st_mode), stats[1].st_mode & 0o600]
-    if command == "services-apply":
+    if command in ("services-apply","protocols-apply"):
         # This editor never writes credentials. Keep the existing service
         # metadata, including when only the other file was edited.
         modes[1] = stat.S_IMODE(stats[1].st_mode)
@@ -255,7 +318,7 @@ def transaction(command, settings, run):
             if originals[i] != target[i]:
                 attempted.append(i)
                 run(units[i])
-        if command in ("apply", "services-apply") and any(originals[i] != target[i] for i in changed):
+        if command in ("apply", "services-apply","protocols-apply") and any(originals[i] != target[i] for i in changed):
             os.replace(pending, backup)
         elif command == "rollback":
             backup.unlink()
@@ -279,7 +342,7 @@ def transaction(command, settings, run):
 
 
 def execute(command, settings=None, run=restart):
-    require(command in ("read", "apply", "rollback", "services-read", "services-apply"), "unknown command")
+    require(command in ("read", "apply", "rollback", "services-read", "services-apply","protocols-read","protocols-apply"), "unknown command")
     if command == "apply":
         validate(settings, check_device=True)
     STATE.mkdir(mode=0o700, exist_ok=True)
@@ -294,7 +357,7 @@ def execute(command, settings=None, run=restart):
 def main():
     require(len(sys.argv) == 2, "expected one settings command")
     settings = None
-    if sys.argv[1] in ("apply", "services-apply"):
+    if sys.argv[1] in ("apply", "services-apply","protocols-apply"):
         raw = sys.stdin.buffer.read(8193)
         require(len(raw) <= 8192, "settings too large")
         settings = json.loads(raw.decode(), object_pairs_hook=pairs)

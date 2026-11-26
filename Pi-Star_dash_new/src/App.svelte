@@ -107,6 +107,7 @@
 <main>
   <nav class="workspace-tabs" aria-label="Рабочая область">
     {#if installed}<a href="/">Статус узла</a>{:else}<a href="#overview" aria-current={view === 'overview' ? 'page' : undefined}>Обзор узла</a>{/if}
+    {#if installed || runtime==='pi'}<a href="/admin/configure.php" data-testid="open-radio-settings">Настроить MMDVMHost</a>{/if}
     <a href="#console" aria-current={view === 'console' ? 'page' : undefined}>Все функции Pi-Star</a>
     <a href="./hoseline.html">Слушать TG · Hoseline</a>
   </nav>

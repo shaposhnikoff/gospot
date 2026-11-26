@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import StationSettings from './StationSettings.svelte';
   import Services from './Services.svelte';
+  import Protocols from './Protocols.svelte';
   import SystemInfo from './SystemInfo.svelte';
   import LogView from './LogView.svelte';
   import Backup from './Backup.svelte';
@@ -23,14 +24,13 @@
   </nav>
   {#if page === 'expert'}
     <section><h1>Expert</h1><h2>Quick Edit</h2><ul>
-      <li><a href="#expert-mmdvmhost">MMDVMHost · DMR</a></li>
+      <li><a href="#expert-mmdvmhost">MMDVMHost · протоколы</a></li>
       <li><a href="#expert-dmrgateway">DMRGateway · сеть 1</a></li>
     </ul></section>
   {:else if page === 'configuration'}
-    <section><h1>Configuration</h1><a href="#settings">Общие настройки станции</a></section>
-    <Services editor="host" />
+    <Protocols />
   {:else if page === 'expert-dmrgateway'}<Services editor="gateway" />
-  {:else if page === 'expert-mmdvmhost'}<Services editor="host" />
+  {:else if page === 'expert-mmdvmhost'}<Protocols />
   {:else if page === 'services'}<Services />
   {:else if page === 'system'}<SystemInfo />
   {:else if page === 'logs'}<LogView />

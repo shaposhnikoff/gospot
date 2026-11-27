@@ -80,7 +80,8 @@ func newHoseline() *hoseline {
 	return h
 }
 
-var hoselineTokenValue = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]{1,1000}$`)
+// The live page publishes credentials such as "test:test" (checked 2026-11-27).
+var hoselineTokenValue = regexp.MustCompile(`^[A-Za-z0-9._~+/=:@-]{1,1000}$`)
 
 // spotterToken reads the token published by the Hoseline page (cached).
 func (h *hoseline) spotterToken(ctx context.Context) (string, error) {

@@ -541,3 +541,18 @@ func TestHoselineSettingsValidation(t *testing.T) {
 		t.Fatal("a rejected settings file changed the active values")
 	}
 }
+
+// The live Hoseline page (2026-11-27) assigns the spotter token as a
+// user:password pair: new Ty("wss://hose.brandmeister.network/spotter/",My) ... ,My="test:test".
+func TestHoselineTokenFromLivePageShape(t *testing.T) {
+	for _, v := range []string{"test:test", "abc.DEF-123_~+/=", "user@host:pw"} {
+		if !hoselineTokenValue.MatchString(v) {
+			t.Errorf("%q refused", v)
+		}
+	}
+	for _, v := range []string{"", "a b", `a"b`, "a\nb", "<script>"} {
+		if hoselineTokenValue.MatchString(v) {
+			t.Errorf("%q accepted", v)
+		}
+	}
+}

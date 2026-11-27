@@ -148,6 +148,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		case "/manage/api/hoseline", "/manage/api/hoseline/groups":
 			hose.serve(w, r)
 			return
+		case "/manage/api/links/dstar", "/manage/api/links/dstar/keeper":
+			serveDStarLinks(w, r, runRemoteControl)
+			return
 		case "/manage/api/links/tgif":
 			serveTGIF(w, r, tgif)
 			return

@@ -9,6 +9,9 @@
   import { readJSON, serviceOrigin } from './runtime';
   import LinkManagers from './LinkManagers.svelte';
   import Hoseline from './Hoseline.svelte';
+  import DStarPanels from './DStarPanels.svelte';
+  import DStarLinkManager from './DStarLinkManager.svelte';
+  import { dstarVisibility } from './dstar';
 
   // admin: the /admin/ variant of index.php, served by the HTTPS management UI.
   let { admin = false }: { admin?: boolean } = $props();
@@ -20,6 +23,7 @@
   let operator = $state('/');
   let d = $state<Dashboard | null>(null);
   let failed = $state(false);
+  const dstar = $derived(dstarVisibility(d?.Controller, d?.DStarInfo, admin));
   const year = new Date().getFullYear();
   const pairs = <T,>(items: T[] | null) => {
     const out: T[][] = [];
@@ -199,6 +203,20 @@
       <p>I don't know what mode I am in, you probably just need to configure me.</p>
       <p>You will be re-directed to the configuration portal in 10 secs</p>
     </div>
+  {:else if d.Controller === 'dstarrepeater'}
+    <!-- index.php, /etc/dstar-radio.dstarrepeater: D-Star only, no side menu -->
+    <div class="contentwide">
+      {#if d.DStarInfo && dstar.gateway}<DStarPanels info={d.DStarInfo} section="gateway" />{/if}
+      <br />
+      <div id="refLinks">{#if d.DStarInfo && dstar.links}<DStarPanels info={d.DStarInfo} section="links" timeZone={d.TimeZone} />{/if}</div>
+      <br />
+      {#if dstar.manager}<DStarLinkManager /><br />{/if}
+      <div id="cssConnects">{#if d.DStarInfo && dstar.ccs}<DStarPanels info={d.DStarInfo} section="ccs" timeZone={d.TimeZone} />{/if}</div>
+      <div id="lh">{#if d.DStarInfo && dstar.heard}<DStarPanels info={d.DStarInfo} section="heard" timeZone={d.TimeZone} lookup={d.Theme?.Lookup} />{/if}</div>
+      <br />
+      <div id="localTx">{#if d.DStarInfo && dstar.heard}<DStarPanels info={d.DStarInfo} section="local" timeZone={d.TimeZone} lookup={d.Theme?.Lookup} />{/if}</div>
+      <br />
+    </div>
   {:else}
     <div class="nav">
       <table>
@@ -293,6 +311,12 @@
     </div>
 
     <div class="content">
+      {#if d.DStarInfo && dstar.links}
+        <div id="refLinks"><DStarPanels info={d.DStarInfo} section="links" timeZone={d.TimeZone} /></div>
+        <br />
+      {/if}
+      {#if dstar.manager}<DStarLinkManager /><br />{/if}
+      {#if d.DStarInfo && dstar.ccs}<div id="cssConnects"><DStarPanels info={d.DStarInfo} section="ccs" timeZone={d.TimeZone} /></div>{/if}
       {#if admin}<LinkManagers />{/if}
       <div id="lastHerd">
         <b>Gateway Activity</b>
@@ -360,5 +384,6 @@
     .content { margin: 0; padding: 5px; font-size: 1.4em; }
     .content > div { overflow-x: auto; }
     .contentwide { font-size: 1.4em; }
+    .contentwide > div { overflow-x: auto; }
   }
 </style>

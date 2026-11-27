@@ -1,0 +1,2 @@
+XRF001	xrf001.example
+XRF023	xrf023.example

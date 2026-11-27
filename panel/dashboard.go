@@ -88,6 +88,7 @@ type dashboard struct {
 	Firmware   string
 	TCXO       string
 	DStar      *dashDStar
+	DStarInfo  *dstarPanels
 	DMR        *dashDMR
 	YSF        *dashLink
 	P25        *dashLink
@@ -473,6 +474,7 @@ func gatherDashboard(now time.Time) dashboard {
 		rows: rows, active: active, heardOK: ok, hostname: strings.TrimSpace(string(host)),
 		controller: controllerMode(), now: now,
 	})
+	d.DStarInfo = dstarDashboard(d.Controller, mmdvm, ircddbINI.load())
 	d.Theme = currentTheme()
 	return d
 }

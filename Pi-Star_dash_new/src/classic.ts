@@ -1,6 +1,8 @@
 // Formatting rules ported from Pi-Star_DV_Dash mmdvmhost/lh.php, localtx.php
 // and functions.php (revision 10bf34c9).
 
+import type { DStarInfo } from './dstar';
+
 export type Cell = { label: string; state: 'on' | 'fail' | 'warn' | 'off' };
 export type Row = {
   time: string; clock: string; mode: string; callsign: string; target: string; source: string;
@@ -19,6 +21,7 @@ export type Dashboard = {
   NXDN: { Code: string; Link: string } | null;
   M17: { Code: string; Link: string } | null;
   POCSAG: { TX: string; Master: string } | null;
+  DStarInfo?: DStarInfo | null;
   Heard: Row[] | null; Local: Row[] | null; HeardReady: boolean; TimeZone: string; Now: string;
   Theme?: Theme;
 };

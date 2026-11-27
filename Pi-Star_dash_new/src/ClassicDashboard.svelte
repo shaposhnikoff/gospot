@@ -7,6 +7,7 @@
     duration, loss, ber, lossStyle, berStyle, rssi, red, green, dataNote,
   } from './classic';
   import { readJSON, serviceOrigin } from './runtime';
+  import LinkManagers from './LinkManagers.svelte';
 
   // admin: the /admin/ variant of index.php, served by the HTTPS management UI.
   let { admin = false }: { admin?: boolean } = $props();
@@ -288,6 +289,7 @@
     </div>
 
     <div class="content">
+      {#if admin}<LinkManagers />{/if}
       <div id="lastHerd">
         <b>Gateway Activity</b>
         <table>
@@ -330,20 +332,20 @@
   .content { margin: 0 0 0 166px; padding: 1px 5px 5px 5px; color: #000000; background: #ffffff; text-align: center; }
   .contentwide { padding: 5px; color: #000000; background: #ffffff; text-align: center; }
   .footer { background: #dd4b39; text-decoration: none; color: #ffffff; font-family: verdana, arial, sans-serif; font-size: 9px; text-align: center; padding: 10px 0; border-radius: 0 0 10px 10px; clear: both; }
-  table { vertical-align: middle; text-align: center; empty-cells: show; padding: 0; border-collapse: collapse; border-color: #000000; border-style: solid; border-spacing: 4px; border-width: 2px; text-decoration: none; color: #ffffff; background: #000000; font-family: verdana, arial, sans-serif; width: 100%; white-space: nowrap; }
-  th { font-family: "Lucidia Console", Monaco, monospace; text-shadow: 1px 1px #8b0000; text-decoration: none; background: #dd4b39; border: 1px solid #c0c0c0; }
-  tr:nth-child(even) { background: #f7f7f7; }
-  tr:nth-child(odd) { background: #d0d0d0; }
-  td { color: #000000; font-family: "Lucidia Console", Monaco, monospace; text-decoration: none; border: 1px solid #000000; }
-  a { text-decoration: none; }
-  a:link, a:visited { text-decoration: none; color: #0000e0; font-weight: normal; }
+  .container :global(table) { vertical-align: middle; text-align: center; empty-cells: show; padding: 0; border-collapse: collapse; border-color: #000000; border-style: solid; border-spacing: 4px; border-width: 2px; text-decoration: none; color: #ffffff; background: #000000; font-family: verdana, arial, sans-serif; width: 100%; white-space: nowrap; }
+  .container :global(th) { font-family: "Lucidia Console", Monaco, monospace; text-shadow: 1px 1px #8b0000; text-decoration: none; background: #dd4b39; border: 1px solid #c0c0c0; }
+  .container :global(tr:nth-child(even)) { background: #f7f7f7; }
+  .container :global(tr:nth-child(odd)) { background: #d0d0d0; }
+  .container :global(td) { color: #000000; font-family: "Lucidia Console", Monaco, monospace; text-decoration: none; border: 1px solid #000000; }
+  .container :global(a) { text-decoration: none; }
+  .container :global(a:link), .container :global(a:visited) { text-decoration: none; color: #0000e0; font-weight: normal; }
   h1 { text-shadow: 2px 2px #303030; text-align: center; font-size: 2em; margin: 0.67em 0; }
-  a.tooltip, a.tooltip:link, a.tooltip:visited, a.tooltip:active { text-decoration: none; position: relative; color: #ffffff; }
-  a.tooltip:hover { text-shadow: none; color: #ffffff; background: transparent; }
-  a.tooltip span { text-shadow: none; display: none; }
-  a.tooltip:hover span { text-shadow: none; display: block; position: absolute; top: 20px; left: 0; z-index: 100; color: #000000; border: 1px solid #000000; background: #f7f7f7; font: 12px Verdana, sans-serif; text-align: left; white-space: nowrap; }
-  th:last-child a.tooltip:hover span { left: auto; right: 0; }
-  a.tooltip span b { display: block; color: #000000; margin: 0; padding: 0; font-size: 12px; font-weight: bold; border: 0; border-bottom: 1px solid black; background: #d0d0d0; }
+  .container :global(a.tooltip), .container :global(a.tooltip:link), .container :global(a.tooltip:visited), .container :global(a.tooltip:active) { text-decoration: none; position: relative; color: #ffffff; }
+  .container :global(a.tooltip:hover) { text-shadow: none; color: #ffffff; background: transparent; }
+  .container :global(a.tooltip span) { text-shadow: none; display: none; }
+  .container :global(a.tooltip:hover span) { text-shadow: none; display: block; position: absolute; top: 20px; left: 0; z-index: 100; color: #000000; border: 1px solid #000000; background: #f7f7f7; font: 12px Verdana, sans-serif; text-align: left; white-space: nowrap; }
+  .container :global(th:last-child a.tooltip:hover span) { left: auto; right: 0; }
+  .container :global(a.tooltip span b) { display: block; color: #000000; margin: 0; padding: 0; font-size: 12px; font-weight: bold; border: 0; border-bottom: 1px solid black; background: #d0d0d0; }
 
   /* css/pistar-css-mini.php, linked for screens up to 829px */
   @media screen and (max-width: 829px) {

@@ -106,6 +106,7 @@ func applySettings(s settings) error {
 	conf := map[*iniFile]string{
 		mmdvmINI: "CONF_MMDVMHOST", dmrGWINI: "CONF_DMRGATEWAY", dapnetINI: "CONF_DAPNETGATEWAY",
 		ircddbINI: "CONF_IRCDDBGATEWAY", dstarRptINI: "CONF_DSTARREPEATER",
+		ysfGWINI: "CONF_YSFGATEWAY", p25GWINI: "CONF_P25GATEWAY", nxdnGWINI: "CONF_NXDNGATEWAY", m17GWINI: "CONF_M17GATEWAY",
 		ysf2dmrINI: "CONF_YSF2DMR", ysf2nxdnINI: "CONF_YSF2NXDN", ysf2p25INI: "CONF_YSF2P25",
 		dmr2ysfINI: "CONF_DMR2YSF", dmr2nxdnINI: "CONF_DMR2NXDN",
 	}
@@ -118,6 +119,7 @@ func applySettings(s settings) error {
 	lib, ui, bm := path("DASHBOARD_LIB_DIR"), path("DASHBOARD_UI_DIR"), path("DASHBOARD_BM_STATE_DIR")
 	logDir, release, hosts := path("PISTAR_LOG_DIR"), path("PISTAR_RELEASE_FILE"), path("PISTAR_HOSTS_DIR")
 	update := path("PISTAR_UPDATE_LOG")
+	bmKey := path("BM_API_KEY_FILE")
 	binDir, sbinDir := path("PISTAR_BIN_DIR"), path("PISTAR_SBIN_DIR")
 	source := s["RADIO_LOG_SOURCE"]
 	if source != "files" && source != "journal" {
@@ -138,6 +140,7 @@ func applySettings(s settings) error {
 	bmStateDir = bm
 	pistarLogDir, radioLogSource, pistarReleaseFile, pistarHostsDir = logDir, source, release, hosts
 	pistarBinDir, pistarSbinDir = binDir, sbinDir
+	bmKeyFile = bmKey
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort = pp, mp, op
 	modemDiagnostic, masterDiagnostic = diagnosticFor(modem, modemRules), diagnosticFor(master, masterRules)
 	return nil

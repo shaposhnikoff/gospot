@@ -132,6 +132,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		case "/manage/api/livelog", "/manage/api/livelog/download", "/manage/api/power", "/manage/api/update":
 			serveMaintenance(w, r, runMaintenanceHelper, time.Now())
 			return
+		case "/manage/api/links", "/manage/api/links/bm":
+			serveLinks(w, r, bm, sendRemoteCommand)
+			return
 		case "/manage/api/dashboard":
 			// The classic admin page shows the same tables as the dashboard.
 			if r.Method != http.MethodGet {

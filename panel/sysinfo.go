@@ -43,16 +43,20 @@ type systemSnapshot struct {
 	Services []systemService `json:"services"`
 }
 
-var systemUnits = [...]struct{ unit, name string }{
-	{modemUnit, "MMDVMHost"}, {masterUnit, "DMRGateway"}, {"pistar-panel.service", "Pi-Star Panel"},
-	{"dstarrepeater.service", "DStarRepeater"}, {"ircddbgateway.service", "ircDDBGateway"},
-	{"timeserver.service", "TimeServer"}, {"pistar-watchdog.service", "Pi-Star Watchdog"}, {"pistar-remote.service", "Pi-Star Remote"},
+// systemUnits is built on use: the radio unit names come from pistar.conf.
+func systemUnits() []struct{ unit, name string } {
+	return []struct{ unit, name string }{
+		{modemUnit, "MMDVMHost"}, {masterUnit, "DMRGateway"}, {"pistar-panel.service", "Pi-Star Panel"},
+		{"dstarrepeater.service", "DStarRepeater"}, {"ircddbgateway.service", "ircDDBGateway"},
+		{"timeserver.service", "TimeServer"}, {"pistar-watchdog.service", "Pi-Star Watchdog"}, {"pistar-remote.service", "Pi-Star Remote"},
+	}
 }
 
 func systemServices(ctx context.Context, run diagRun) []systemService {
 	args := []string{"show", "--no-pager", "--property=Id,LoadState,ActiveState"}
-	services := make([]systemService, len(systemUnits))
-	for i, s := range systemUnits {
+	units := systemUnits()
+	services := make([]systemService, len(units))
+	for i, s := range units {
 		args = append(args, s.unit)
 		services[i] = systemService{s.name, "unknown"}
 	}
@@ -77,7 +81,7 @@ func systemServices(ctx context.Context, run diagRun) []systemService {
 				active = v
 			}
 		}
-		for i, s := range systemUnits {
+		for i, s := range units {
 			if id != s.unit {
 				continue
 			}

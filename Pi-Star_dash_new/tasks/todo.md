@@ -12,6 +12,17 @@ Immediate correction: verify the interactive preview through one forwarded origi
 4. Run targeted unit, build, package and Chromium checks; record evidence and update the issue.
 5. Continue with operation contracts and the remaining module issues linked from #1.
 
+## Full port in the classic look (decided 2026-11-27)
+
+Main page done (`ClassicDashboard.svelte`, `/api/dashboard`, release `deb-10`). Remaining phases, each deployed to pistar3:
+
+1. **Radio platform package (`pistar-radio`, armhf).** Pi-Star PS4 binaries → `/usr/local/bin`; wiringPi + ArduiPi_OLED libs; reusable sbin scripts and service handlers → `/usr/local/sbin`; systemd units calling the handlers; clean configs from `config_clean.zip` as defaults; `/etc/pistar-release`; `/var/log/pi-star`; daily HostFilesUpdate timer without git pulls or PHP. Migrate pistar3: translate `/etc/MMDVM-Host.ini` + `/etc/DMRGateway.ini` into `/etc/mmdvmhost` + `/etc/dmrgateway`, keep a rollback copy, verify modem answers and DMR network.
+2. **Backend on Pi-Star layout.** Read `/etc/mmdvmhost` etc.; tail `/var/log/pi-star/MMDVM-*.log` and gateway logs (port `getHeardList`/`getActualLink` for all modes); hosts files for master/reflector names; helpers write Pi-Star paths.
+3. **Admin shell in classic look.** `/admin/` index (system info, link managers BM/TGIF/YSF/P25/NXDN/M17/D-Star), header menu Dashboard | Admin | Live Logs | Power | Update | Configuration.
+4. **Configuration** (`configure.php`) — all sections, both controllers.
+5. **Expert**: Quick Edit (generic section editor per file), Full Edit (text editors), Tools (SSH, jitter, modem firmware, upgrade), API keys.
+6. **Wi-Fi, Power, Update (Go: host files + apt, no dashboard git pull), Backup/Restore, Live Logs, Calibration.**
+
 ## OS image (Trixie, armhf first, arm64 later, local build only)
 
 All three boards are Raspberry Pi 2 Model B (Bookworm armhf); Rev 1.1 boards cannot run arm64. Steps 2–5 target armhf first; repeat them for arm64 only after the armhf image passes verification.

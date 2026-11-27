@@ -21,6 +21,20 @@
 - Главная страница, админка и все разделы повторяют разметку, порядок блоков, подписи, цвета и правила раскраски эталона (`index.php`, `mmdvmhost/*.php`, `css/pistar-css*.php`). Отклонения — только для безопасности или работоспособности (например, прокрутка широких таблиц на телефоне).
 - Быстродействие: страница опрашивает один JSON-эндпоинт; журналы читаются потоково одним `journalctl -f`, INI перечитываются только при изменении; никаких запусков `grep`/`tail` на каждый запрос.
 
+## Правило: все пути — только в `pistar.conf`
+
+- Требование пользователя от 2026-11-27: пути и параметры, от которых зависят действия с конфигурацией системы, хранятся **только** в файле [`pistar.conf`](pistar.conf) в корне `Pi-Star_dash_new/`. Это пути к бинарникам и скриптам Pi-Star, конфигам радиослужб, справочникам, журналам, маркерам контроллера, имена systemd-юнитов радиослужб, каталоги установки дашборда, порты, целевая плата для деплоя и пути к соседним репозиториям.
+- Go-бэкенд (`panel/config.go`, флаг `-config`), Python-помощники (`load_settings()`), `postinst`, `scripts/build-deb`, `scripts/install-release` и тестовые стенды читают значения из этого файла. Зашивать такие пути и адреса в код, скрипты, юниты, `sudoers` или тесты **запрещено**; `sudoers` и drop-in юниты генерируются при сборке. Исключения: сам путь установленного файла `/etc/pistar-dashboard/pistar.conf` и стандартные утилиты ОС (`/usr/bin/sudo`, `systemctl`, `journalctl`).
+- Новый путь или параметр сначала добавить в `pistar.conf` с комментарием, затем читать из кода; проверка `panel/config_test.go` загружает репозиторную копию, а `scripts/test-native-runtime.mjs` сверяет её с упакованной.
+- Формат: `KEY=value` по строке, `#` — комментарий; без кавычек, пробелов и подстановок, чтобы Bash, Go и Python читали одинаково. На плате файл — conffile пакета (`/etc/pistar-dashboard/pistar.conf`): правки переживают обновление; после правки перезапустить `pistar-panel`, `pistar-wizard`, `psdash-stage`. Root-помощники доверяют файлу, только если его не может изменить никто, кроме владельца-root.
+
+## Раскладка системы и радиослужбы
+
+- Решение пользователя от 2026-11-27: основная раскладка — **как в Pi-Star**: `/etc/mmdvmhost`, `/etc/dmrgateway` и остальные конфиги без `.ini`, бинарники в `/usr/local/bin`, скрипты в `/usr/local/sbin`, справочники в `/usr/local/etc`, файловые журналы в `/var/log/pi-star`, маркеры `/etc/dstar-radio.*`, `/etc/pistar-release`. Дашборд читает и пишет те же файлы, что и оригинал. `pistar3` переводится на эту раскладку; `pistar1`/`pistar2` не трогать.
+- Радиослужбы для armhf — готовые сборки Pi-Star из `../Pi-Star_v4_Binaries_Bin` (метка `_PS4`, ARMv6). Им нужны `libwiringPi` и `libArduiPi_OLED`, которых нет в Debian, — поставлять вместе с пакетом. D-Star-часть (`ircddbgatewayd`, `dstarrepeaterd`, `timeserverd`, `starnetserverd`, `remotecontrold`, `timercontrold`) собрана под wxWidgets 3.0 и на Trixie пересобирается из исходников; arm64 — тоже из исходников.
+- Скрипты из `../Pi-Star_Binaries_sbin` использовать как есть, если они не трогают PHP и старый дашборд (`HostFilesUpdate.sh`, `pistar-*link`, `pistar-bmapi`/`dapnetapi`/`tgifapi`, `pistar-findmodem`, `pistar-mmdvmcal`, `pistar-modemupgrade`, `pistar-jittertest`, `pistar-factory-reset`, `pistar-firewall`, `pistar-watchdog`, `pistar-remote`, `pistar-keeper`, обработчики `*.service`). `pistar-update`, `pistar-upgrade`, `pistar-daily.cron` и другие скрипты с обращениями к `/var/www/dashboard`, PHP, nginx и `.htpasswd` не ставить; их функции переписать в Go или в собственные скрипты без PHP.
+- Пользователь оставляет за собой право переделать любое решение; работать без лишних вопросов и показывать результат на `pistar3`.
+
 ## Бэклог проекта
 
 - Основной бэклог — [GitHub Issues](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues). Когда пользователь просит добавить задачу в бэклог, сначала найти существующую issue; дополнить её или создать новую с ожидаемым результатом и критериями приёмки. Пользователю вернуть ссылку на issue.

@@ -58,13 +58,18 @@ sed -e 's/^Address=master.invalid$/Address=192.0.2.11/' -e 's/^Id=1$/Id=10001/' 
 openssl rand -hex 20 >"$work/admin-password"
 openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout "$work/key.pem" -out "$work/cert.pem" \
   -subj /CN=127.0.0.1 -addext 'subjectAltName=IP:127.0.0.1' 2>/dev/null
-sed 's|/usr/lib/pistar-dashboard/|/usr/local/libexec/|g' debian/sudoers >"$work/sudoers"
+sed 's|@DASHBOARD_LIB_DIR@|/usr/local/libexec|g' debian/sudoers >"$work/sudoers"
+# The fixture keeps its own layout; only its copy of pistar.conf differs.
+sed -e 's|^CONF_MMDVMHOST=.*|CONF_MMDVMHOST=/etc/MMDVM-Host.ini|' -e 's|^CONF_DMRGATEWAY=.*|CONF_DMRGATEWAY=/etc/DMRGateway.ini|' \
+    -e 's|^DASHBOARD_LIB_DIR=.*|DASHBOARD_LIB_DIR=/usr/local/libexec|' -e 's|^DASHBOARD_UI_DIR=.*|DASHBOARD_UI_DIR=/usr/local/share/pistar-native-ui|' \
+    pistar.conf >"$work/pistar.conf"
 test -s "$work/sudoers"
 docker network create --internal "$name" >/dev/null
 docker run -d --name "$name" --network "$name" \
   --mount type=bind,source="$work/bridge",target=/qa-bridge,readonly \
   --pids-limit=120 pistar-write-qa-runtime:bookworm sleep infinity >/dev/null
-docker exec "$name" mkdir -p /usr/local/libexec /usr/local/share/pistar-native-ui /run/credentials /run/pistar-qa
+docker exec "$name" mkdir -p /usr/local/libexec /usr/local/share/pistar-native-ui /run/credentials /run/pistar-qa /etc/pistar-dashboard
+docker cp "$work/pistar.conf" "$name:/etc/pistar-dashboard/pistar.conf"
 docker cp "$dist/." "$name:/usr/local/share/pistar-native-ui/"
 (cd "$dist" && sha256sum index.html assets/*) >"$work/ui.sha256"
 echo "Admin UI source: $dist; verifying container files against source hashes"
@@ -84,7 +89,8 @@ docker exec "$name" sh -eu -c '
   chown mmdvm:mmdvm /etc/DMRGateway.ini /etc/MMDVM-Host.ini
   chmod 600 /etc/DMRGateway.ini; chmod 640 /etc/MMDVM-Host.ini
   chown -R pistar-wizard:pistar-wizard /run/credentials; chmod -R go-rwx /run/credentials
-  chown root:root /etc/sudoers.d/pistar-wizard /usr/local/libexec/pistar-* /usr/bin/systemctl
+  chown root:root /etc/sudoers.d/pistar-wizard /usr/local/libexec/pistar-* /usr/bin/systemctl /etc/pistar-dashboard/pistar.conf
+  chmod 644 /etc/pistar-dashboard/pistar.conf
   chmod 0440 /etc/sudoers.d/pistar-wizard; visudo -c
   touch /run/pistar-qa/events
 '

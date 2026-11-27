@@ -1,5 +1,5 @@
-pistar-wizard ALL=(root) NOPASSWD: /usr/lib/pistar-dashboard/pistar-config read, /usr/lib/pistar-dashboard/pistar-config apply, /usr/lib/pistar-dashboard/pistar-config rollback
-pistar-wizard ALL=(root) NOPASSWD: /usr/lib/pistar-dashboard/pistar-config services-read, /usr/lib/pistar-dashboard/pistar-config services-apply
-pistar-wizard ALL=(root) NOPASSWD: /usr/lib/pistar-dashboard/pistar-config protocols-read, /usr/lib/pistar-dashboard/pistar-config protocols-apply
-pistar-wizard ALL=(root) NOPASSWD: /usr/lib/pistar-dashboard/pistar-config bm-peer
-pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: /usr/lib/pistar-dashboard/pistar-archive backup, /usr/lib/pistar-dashboard/pistar-archive preview, /usr/lib/pistar-dashboard/pistar-archive apply
+pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-config read, @DASHBOARD_LIB_DIR@/pistar-config apply, @DASHBOARD_LIB_DIR@/pistar-config rollback
+pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-config services-read, @DASHBOARD_LIB_DIR@/pistar-config services-apply
+pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-config protocols-read, @DASHBOARD_LIB_DIR@/pistar-config protocols-apply
+pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-config bm-peer
+pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR@/pistar-archive backup, @DASHBOARD_LIB_DIR@/pistar-archive preview, @DASHBOARD_LIB_DIR@/pistar-archive apply

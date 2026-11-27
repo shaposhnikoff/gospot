@@ -36,7 +36,7 @@ type bmCached struct {
 
 func newBMManager(helper wizardHelper) *bmManager {
 	return &bmManager{helper: helper, client: &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		base: "https://api.brandmeister.network/v2/", dir: "/var/lib/pistar-dashboard-bm", cache: make(map[string]bmCached), write: make(chan struct{}, 1)}
+		base: "https://api.brandmeister.network/v2/", dir: bmStateDir, cache: make(map[string]bmCached), write: make(chan struct{}, 1)}
 }
 func (b *bmManager) request(ctx context.Context, method, path, key string, body []byte) ([]byte, int, error) {
 	req, err := http.NewRequestWithContext(ctx, method, b.base+path, bytes.NewReader(body))

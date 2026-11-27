@@ -14,7 +14,7 @@ origin = 'https://192.168.210.194:8788'
 ctx = ssl.create_default_context(cafile=str(p/'tls-cert.pem'))
 api = u.build_opener(u.ProxyHandler({}), u.HTTPSHandler(context=ctx),
                      u.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-headers = {'Authorization': 'Basic '+base64.b64encode(b'admin:'+(p/'admin-password').read_bytes().strip()).decode()}
+headers = {'Authorization': 'Basic '+base64.b64encode(b'pi-star:'+(p/'admin-password').read_bytes().strip()).decode()}
 
 def req(path, *, extra=None, auth=True, data=None):
     return api.open(u.Request(origin+'/manage/'+path, data=data,

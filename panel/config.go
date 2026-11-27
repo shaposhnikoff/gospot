@@ -1,0 +1,139 @@
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// settingsPath is the installed copy of Pi-Star_dash_new/pistar.conf, the
+// single source of system paths (see AGENTS.md).
+var settingsPath = "/etc/pistar-dashboard/pistar.conf"
+
+type settings map[string]string
+
+var settingKey = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+func readSettings(path string) (settings, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	s := settings{}
+	scan := bufio.NewScanner(f)
+	for n := 1; scan.Scan(); n++ {
+		line := strings.TrimSpace(scan.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || !settingKey.MatchString(k) || strings.ContainsAny(v, " \t\"'$`\\") {
+			return nil, fmt.Errorf("%s:%d: expected KEY=value without quotes or spaces", path, n)
+		}
+		if _, dup := s[k]; dup {
+			return nil, fmt.Errorf("%s:%d: duplicate %s", path, n, k)
+		}
+		s[k] = v
+	}
+	return s, scan.Err()
+}
+
+func (s settings) abs(key string) (string, error) {
+	v := s[key]
+	if v == "" || !filepath.IsAbs(v) || filepath.Clean(v) != v {
+		return "", fmt.Errorf("%s must be a clean absolute path", key)
+	}
+	return v, nil
+}
+
+func (s settings) port(key string) (int, error) {
+	n, err := strconv.Atoi(s[key])
+	if err != nil || n < 1 || n > 65535 {
+		return 0, fmt.Errorf("%s must be a TCP port", key)
+	}
+	return n, nil
+}
+
+func (s settings) unit(key string) (string, error) {
+	v := s[key]
+	if !regexp.MustCompile(`^[A-Za-z0-9@_.-]+\.service$`).MatchString(v) {
+		return "", fmt.Errorf("%s must be a systemd service name", key)
+	}
+	return v, nil
+}
+
+// Paths and ports taken from settings by applySettings.
+var (
+	modemUnit, masterUnit                            string
+	markerMMDVMHost, markerDStarRepeater             string
+	hostnameFile                                     string
+	bmStateDir                                       string
+	cfgPanelPort, cfgManagementPort, cfgOperatorPort int
+)
+
+// applySettings validates every key the panel uses and installs the values.
+func applySettings(s settings) error {
+	var errs []string
+	path := func(key string) string {
+		v, err := s.abs(key)
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+		return v
+	}
+	unit := func(key string) string {
+		v, err := s.unit(key)
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+		return v
+	}
+	port := func(key string) int {
+		v, err := s.port(key)
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+		return v
+	}
+	conf := map[*iniFile]string{
+		mmdvmINI: "CONF_MMDVMHOST", dmrGWINI: "CONF_DMRGATEWAY", dapnetINI: "CONF_DAPNETGATEWAY",
+		ircddbINI: "CONF_IRCDDBGATEWAY", dstarRptINI: "CONF_DSTARREPEATER",
+		ysf2dmrINI: "CONF_YSF2DMR", ysf2nxdnINI: "CONF_YSF2NXDN", ysf2p25INI: "CONF_YSF2P25",
+		dmr2ysfINI: "CONF_DMR2YSF", dmr2nxdnINI: "CONF_DMR2NXDN",
+	}
+	files := map[*iniFile]string{}
+	for f, key := range conf {
+		files[f] = path(key)
+	}
+	modem, master := unit("UNIT_MMDVMHOST"), unit("UNIT_DMRGATEWAY")
+	mm, ds, host := path("MARKER_MMDVMHOST"), path("MARKER_DSTARREPEATER"), path("HOSTNAME_FILE")
+	lib, ui, bm := path("DASHBOARD_LIB_DIR"), path("DASHBOARD_UI_DIR"), path("DASHBOARD_BM_STATE_DIR")
+	pp, mp, op := port("PANEL_PORT"), port("MANAGEMENT_PORT"), port("OPERATOR_PORT")
+	if len(errs) > 0 {
+		return fmt.Errorf("invalid settings: %s", strings.Join(errs, "; "))
+	}
+	for f, p := range files {
+		f.setPath(p)
+	}
+	modemUnit, masterUnit = modem, master
+	markerMMDVMHost, markerDStarRepeater, hostnameFile = mm, ds, host
+	adminAssets, operatorAssets = ui, ui
+	configHelper, archiveHelperPath = filepath.Join(lib, "pistar-config"), filepath.Join(lib, "pistar-archive")
+	bmStateDir = bm
+	cfgPanelPort, cfgManagementPort, cfgOperatorPort = pp, mp, op
+	modemDiagnostic, masterDiagnostic = diagnosticFor(modem, modemRules), diagnosticFor(master, masterRules)
+	return nil
+}
+
+func loadSettings(path string) error {
+	s, err := readSettings(path)
+	if err != nil {
+		return err
+	}
+	return applySettings(s)
+}

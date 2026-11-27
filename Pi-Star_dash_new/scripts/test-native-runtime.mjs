@@ -9,9 +9,19 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const root = resolve(process.argv[2]);
-const binary = join(root, 'usr/lib/pistar-dashboard/panel');
-const ui = join(root, 'usr/share/pistar-dashboard/ui');
+// Paths come from the packaged pistar.conf, which must equal the repository copy.
+const packagedSettings = readFileSync(join(root, 'etc/pistar-dashboard/pistar.conf'), 'utf8');
+assert.equal(packagedSettings, readFileSync(new URL('../pistar.conf', import.meta.url), 'utf8'));
+const settings = Object.fromEntries(packagedSettings.split('\n').map(l => l.trim())
+  .filter(l => l && !l.startsWith('#')).map(l => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+const binary = join(root, settings.DASHBOARD_LIB_DIR, 'panel');
+const ui = join(root, settings.DASHBOARD_UI_DIR);
 const work = mkdtempSync(join(tmpdir(), 'pistar-package-test-'));
+// The unpacked package lives under `root`; point the copy of the settings there.
+const testSettings = join(work, 'pistar.conf');
+writeFileSync(testSettings, packagedSettings
+  .replace(/^DASHBOARD_UI_DIR=.*$/m, 'DASHBOARD_UI_DIR=' + ui)
+  .replace(/^DASHBOARD_LIB_DIR=.*$/m, 'DASHBOARD_LIB_DIR=' + join(root, settings.DASHBOARD_LIB_DIR)));
 const children = [];
 const runner = arch() === 'arm' ? binary : 'qemu-arm-static';
 const prefix = arch() === 'arm' ? [] : [binary];
@@ -46,7 +56,7 @@ async function ready(probe, check) {
 try {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
-  const check = start(['-operator-listen', `127.0.0.1:${port}`, '-operator-assets', ui]);
+  const check = start(['-config', testSettings, '-operator-listen', `127.0.0.1:${port}`]);
   await ready(() => fetch(origin + '/health'), check);
   const index = readFileSync(join(ui, 'index.html'));
   assert.deepEqual(Buffer.from(await (await fetch(origin)).arrayBuffer()), index);
@@ -63,7 +73,7 @@ try {
   assert.equal((await fetch(origin + '/not-installed.php')).status, 404);
   assert.equal((await fetch(origin + '/', { method: 'POST' })).status, 405);
   const redirect = await fetch(origin + '/admin/configure.php', { redirect: 'manual' });
-  assert.equal(redirect.headers.get('location'), 'https://127.0.0.1:8788/manage/#configuration');
+  assert.equal(redirect.headers.get('location'), `https://127.0.0.1:${settings.MANAGEMENT_PORT}/manage/#configuration`);
   console.log(`PASS exact ARM binary: native operator HTML and ${resources.length} resources match package bytes; runtime, redirects and method restrictions verified`);
 
   const password = randomBytes(24).toString('hex');
@@ -72,7 +82,7 @@ try {
   const cert = join(work, 'cert.pem');
   execFileSync('openssl', ['req', '-x509', '-nodes', '-newkey', 'rsa:2048', '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1', '-keyout', key, '-out', cert], { stdio: 'ignore' });
   const adminPort = await freePort();
-  const checkAdmin = start(['-admin-listen', `127.0.0.1:${adminPort}`, '-admin-assets', ui, '-tls-cert', cert, '-tls-key', key], { ...process.env, CREDENTIALS_DIRECTORY: work });
+  const checkAdmin = start(['-config', testSettings, '-admin-listen', `127.0.0.1:${adminPort}`, '-tls-cert', cert, '-tls-key', key], { ...process.env, CREDENTIALS_DIRECTORY: work });
   function management(path, authenticated) {
     return new Promise((done, reject) => {
       const request = httpsRequest({ hostname: '127.0.0.1', port: adminPort, path, ca: readFileSync(cert),

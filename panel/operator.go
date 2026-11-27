@@ -14,7 +14,8 @@ import (
 	"time"
 )
 
-var operatorAssets = "/usr/local/share/pistar-native-ui"
+// Set from DASHBOARD_UI_DIR by applySettings.
+var operatorAssets string
 
 var operatorPath = regexp.MustCompile(`^/[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$`)
 var operatorHeard = regexp.MustCompile(`^/api/last_heard\.php(?:\?num_transmissions=[0-9]{1,3})?$`)

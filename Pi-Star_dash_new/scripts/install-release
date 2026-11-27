@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Install only the published, verified Debian package; no source sync or rebuild.
 set -euo pipefail
+# Target board, ports and paths come from pistar.conf (see AGENTS.md).
+# shellcheck source=../pistar.conf
+source "$(dirname "$0")/../pistar.conf"
 tag=${1:?usage: install-release deb-RUN-COMMIT}
 [[ $tag =~ ^deb-[0-9]+-[0-9a-f]{12}$ ]]
 d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
@@ -14,17 +17,17 @@ sha256sum -c SHA256SUMS
 test "$(dpkg-deb -f "$deb" Package)" = pistar-dashboard
 test "$(dpkg-deb -f "$deb" Architecture)" = armhf
 echo "GitHub Release $tag; SHA256=$sha"
-ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes pistar3 "set -eu
-  test \"\$(hostname -s)\" = pistar3 && test \"\$(dpkg --print-architecture)\" = armhf
-  state() { sudo -n sha256sum /etc/MMDVM-Host.ini /etc/DMRGateway.ini; stat -c '%n %U:%G %a' /etc/MMDVM-Host.ini /etc/DMRGateway.ini; systemctl show -p InvocationID mmdvmhost dmrgateway; }
+ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_HOST" "set -eu
+  test \"\$(hostname -s)\" = '$DEPLOY_HOST' && test \"\$(dpkg --print-architecture)\" = armhf
+  state() { sudo -n sha256sum $CONF_MMDVMHOST $CONF_DMRGATEWAY; stat -c '%n %U:%G %a' $CONF_MMDVMHOST $CONF_DMRGATEWAY; systemctl show -p InvocationID $UNIT_MMDVMHOST $UNIT_DMRGATEWAY; }
   before=\$(state)
   f=\$(mktemp); trap 'rm -f \"\$f\"' EXIT
   cat >\"\$f\"; echo '$sha  '\"\$f\" | sha256sum -c -
   sudo -n dpkg -i \"\$f\"
-  dpkg-query -W pistar-dashboard; sudo -n dpkg -V pistar-dashboard
-  for unit in psdash-stage pistar-wizard pistar-panel mmdvmhost dmrgateway; do systemctl is-active \"\$unit\"; done
-  test \"\$(curl --noproxy '*' --retry 5 --retry-connrefused --cacert /etc/pistar-wizard/tls-cert.pem -sS -o /dev/null -w '%{http_code}' https://192.168.210.194:8788/manage/)\" = 401
-  curl --retry 5 --retry-connrefused --noproxy '*' -fsS http://192.168.210.194:8789/ | cmp - /usr/share/pistar-dashboard/ui/index.html
+  dpkg-query -W pistar-dashboard; { sudo -n dpkg -V pistar-dashboard || true; } | grep -v ' c /etc/pistar-dashboard/pistar.conf\$' | { ! grep .; }
+  for unit in psdash-stage pistar-wizard pistar-panel $UNIT_MMDVMHOST $UNIT_DMRGATEWAY; do systemctl is-active \"\$unit\"; done
+  test \"\$(curl --noproxy '*' --retry 5 --retry-connrefused --cacert $WIZARD_CONFIG_DIR/tls-cert.pem -sS -o /dev/null -w '%{http_code}' https://$DEPLOY_ADDRESS:$MANAGEMENT_PORT/manage/)\" = 401
+  curl --retry 5 --retry-connrefused --noproxy '*' -fsS http://$DEPLOY_ADDRESS:$OPERATOR_PORT/ | cmp - $DASHBOARD_UI_DIR/index.html
   after=\$(state); test \"\$before\" = \"\$after\"
   echo 'PASS package installed: operator bytes match; both radio INIs, ownership, modes and InvocationIDs unchanged'
 " < "$deb"

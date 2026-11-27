@@ -13,6 +13,7 @@ import warnings
 import zipfile
 
 
+os.environ.setdefault("PISTAR_SETTINGS", str(Path(__file__).resolve().parents[2] / "Pi-Star_dash_new" / "pistar.conf"))
 loader = importlib.machinery.SourceFileLoader("archive_helper", str(Path(__file__).with_name("pistar-archive")))
 archive = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(archive)
@@ -28,7 +29,7 @@ class LocalArchiveTest(unittest.TestCase):
         self.etc = root / "etc"
         self.etc.mkdir()
         self.state = root / "state"
-        config = patch.multiple(archive, ETC=self.etc, STATE=self.state)
+        config = patch.multiple(archive, PATHS=tuple(self.etc / n for n in archive.NAMES), STATE=self.state)
         config.start()
         self.addCleanup(config.stop)
         self.host, self.gw = [self.etc / n for n in archive.NAMES]

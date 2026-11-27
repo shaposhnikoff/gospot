@@ -287,7 +287,7 @@ def main():
     # TemporaryDirectory creates a mode-0700 directory for both download and upload.
     with TemporaryDirectory(prefix="write-browser-", dir=shared) as folder:
         with chromium(args.origin, args.key) as command:
-            auth = args.origin.replace("://", f"://admin:{quote(password, safe='')}@", 1)
+            auth = args.origin.replace("://", f"://pi-star:{quote(password, safe='')}@", 1)
             command("/url", {"url": auth + "/manage/"})
             cdp(command, "Browser.setDownloadBehavior", behavior="allow", downloadPath=folder)
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)

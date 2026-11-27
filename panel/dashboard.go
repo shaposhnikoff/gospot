@@ -14,18 +14,11 @@ import (
 // dashboardVersion is set at build time (-X main.dashboardVersion=...).
 var dashboardVersion = "dev"
 
+// Locations come from pistar.conf via applySettings.
 var (
-	mmdvmINI     = newINIFile("/etc/MMDVM-Host.ini", "/etc/mmdvmhost")
-	dmrGWINI     = newINIFile("/etc/DMRGateway.ini", "/etc/dmrgateway")
-	dapnetINI    = newINIFile("/etc/DAPNETGateway.ini", "/etc/dapnetgateway")
-	ircddbINI    = newINIFile("/etc/ircddbgateway")
-	dstarRptINI  = newINIFile("/etc/dstarrepeater")
-	ysf2dmrINI   = newINIFile("/etc/ysf2dmr")
-	ysf2nxdnINI  = newINIFile("/etc/ysf2nxdn")
-	ysf2p25INI   = newINIFile("/etc/ysf2p25")
-	dmr2ysfINI   = newINIFile("/etc/dmr2ysf")
-	dmr2nxdnINI  = newINIFile("/etc/dmr2nxdn")
-	hostnameFile = "/etc/hostname"
+	mmdvmINI, dmrGWINI, dapnetINI, ircddbINI, dstarRptINI = newINIFile(), newINIFile(), newINIFile(), newINIFile(), newINIFile()
+	ysf2dmrINI, ysf2nxdnINI, ysf2p25INI                   = newINIFile(), newINIFile(), newINIFile()
+	dmr2ysfINI, dmr2nxdnINI                               = newINIFile(), newINIFile()
 )
 
 // Process names as they appear in /proc/<pid>/comm. Source builds install
@@ -400,8 +393,8 @@ func shorten16(s string) string {
 }
 
 func controllerMode() string {
-	_, mmdvm := os.Stat("/etc/dstar-radio.mmdvmhost")
-	_, dstar := os.Stat("/etc/dstar-radio.dstarrepeater")
+	_, mmdvm := os.Stat(markerMMDVMHost)
+	_, dstar := os.Stat(markerDStarRepeater)
 	switch {
 	case mmdvm == nil:
 		return "mmdvmhost"

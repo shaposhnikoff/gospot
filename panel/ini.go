@@ -66,6 +66,23 @@ type iniFile struct {
 
 func newINIFile(candidates ...string) *iniFile { return &iniFile{candidates: candidates} }
 
+// setPath points the file at one configured location and drops the cache.
+func (f *iniFile) setPath(path string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.candidates, f.path, f.data = []string{path}, "", nil
+}
+
+// location is the configured path (the first candidate).
+func (f *iniFile) location() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.candidates) == 0 {
+		return ""
+	}
+	return f.candidates[0]
+}
+
 func (f *iniFile) load() iniData {
 	f.mu.Lock()
 	defer f.mu.Unlock()

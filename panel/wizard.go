@@ -23,9 +23,8 @@ import (
 )
 
 // Overridden by the Debian build; keep standalone deployment paths compatible.
-var adminAssets = "/usr/local/share/pistar-native-ui"
-var configHelper = "/usr/local/libexec/pistar-config"
-var archiveHelperPath = "/usr/local/libexec/pistar-archive"
+// Set from DASHBOARD_UI_DIR and DASHBOARD_LIB_DIR by applySettings.
+var adminAssets, configHelper, archiveHelperPath string
 
 // registerWizard is used only on the dedicated HTTPS management mux.
 func registerWizard(mux *http.ServeMux) {

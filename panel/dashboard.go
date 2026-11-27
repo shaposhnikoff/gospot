@@ -45,6 +45,7 @@ type dashRow struct {
 	Clock    string    `json:"clock"`
 	Mode     string    `json:"mode"`
 	Callsign string    `json:"callsign"`
+	Suffix   string    `json:"suffix"`
 	Target   string    `json:"target"`
 	Source   string    `json:"source"`
 	Duration *float64  `json:"duration"`
@@ -52,6 +53,7 @@ type dashRow struct {
 	BER      *float64  `json:"ber"`
 	RSSI     *float64  `json:"rssi"`
 	Live     bool      `json:"live"`
+	Note     string    `json:"note"`
 }
 
 type dashDStar struct {
@@ -125,6 +127,7 @@ type dashInputs struct {
 	login                           map[string]int
 	firmware, tcxo                  string
 	release                         iniData
+	links                           map[string]string
 	rows, active                    []HeardRow
 	heardOK                         bool
 	hostname                        string
@@ -227,18 +230,38 @@ func shorten(s string) string {
 	return s
 }
 
-func heardMode(r HeardRow) string { return "DMR Slot " + r.Slot }
+func heardMode(r HeardRow) string {
+	if r.Mode != "" {
+		return r.Mode
+	}
+	return "DMR Slot " + r.Slot
+}
 
-func (in dashInputs) hang(source string) time.Duration {
+// trxMode is the mode name the classic getActualMode() reports.
+func trxMode(r HeardRow) string {
+	if m := heardMode(r); !strings.HasPrefix(m, "DMR") {
+		return m
+	}
+	return "DMR"
+}
+
+// MMDVMHost section names behind each mode (RF, network).
+var modeSections = map[string][2]string{
+	"D-Star": {"D-Star", "D-Star Network"}, "DMR": {"DMR", "DMR Network"}, "YSF": {"System Fusion", "System Fusion Network"},
+	"P25": {"P25", "P25 Network"}, "NXDN": {"NXDN", "NXDN Network"}, "M17": {"M17", "M17 Network"},
+}
+
+func (in dashInputs) hang(mode, source string) time.Duration {
 	seconds := in.host.get("General", "ModeHang")
 	if seconds == "" {
+		sections := modeSections[mode]
 		if source == "RF" {
-			seconds = in.host.get("DMR", "ModeHang")
+			seconds = in.host.get(sections[0], "ModeHang")
 			if seconds == "" {
 				seconds = in.host.get("General", "RFModeHang")
 			}
 		} else {
-			seconds = in.host.get("DMR Network", "ModeHang")
+			seconds = in.host.get(sections[1], "ModeHang")
 			if seconds == "" {
 				seconds = in.host.get("General", "NetModeHang")
 			}
@@ -254,17 +277,20 @@ func (in dashInputs) hang(source string) time.Duration {
 func (in dashInputs) trx() dashTRX {
 	for _, a := range in.active {
 		if a.Source != "RF" {
-			return dashTRX{Kind: "tx", Mode: "DMR", Label: "TX " + heardMode(a)}
+			return dashTRX{Kind: "tx", Mode: trxMode(a), Label: "TX " + heardMode(a)}
 		}
 	}
 	if len(in.active) > 0 {
-		return dashTRX{Kind: "rx", Mode: "DMR", Label: "RX DMR"}
+		return dashTRX{Kind: "rx", Mode: trxMode(in.active[0]), Label: "RX " + trxMode(in.active[0])}
+	}
+	if len(in.rows) > 0 && in.rows[0].Mode == "POCSAG" && in.now.Sub(in.rows[0].At) < 5*time.Second {
+		return dashTRX{Kind: "pocsag", Mode: "POCSAG", Label: "POCSAG"}
 	}
 	if len(in.rows) > 0 && in.rows[0].Duration != nil {
 		last := in.rows[0]
-		end := last.At.Add(time.Duration(*last.Duration * float64(time.Second))).Add(in.hang(last.Source))
+		end := last.At.Add(time.Duration(*last.Duration * float64(time.Second))).Add(in.hang(trxMode(last), last.Source))
 		if in.now.Before(end) {
-			return dashTRX{Kind: "hang", Mode: "DMR", Label: "Listening DMR"}
+			return dashTRX{Kind: "hang", Mode: trxMode(last), Label: "Listening " + trxMode(last)}
 		}
 	}
 	if in.running("MMDVMHost") {
@@ -307,6 +333,11 @@ func (in dashInputs) dmr() *dashDMR {
 func (in dashInputs) link(gateway string) string {
 	if !in.running(gateway) {
 		return "Service Not Started"
+	}
+	for mode, gw := range gatewayByMode {
+		if gw == gateway && in.links[mode] != "" {
+			return in.links[mode]
+		}
 	}
 	return "Not Linked"
 }
@@ -364,20 +395,29 @@ func buildDashboard(in dashInputs) dashboard {
 		d.POCSAG = &dashPOCSAG{TX: mhz(in.host.get("POCSAG", "Frequency")), Master: shorten(in.dapnet.get("DAPNET", "Address"))}
 	}
 	type callKey struct {
-		at                     time.Time
-		source, from, to, slot string
+		at                           time.Time
+		source, from, to, slot, mode string
 	}
 	live := map[callKey]bool{}
 	for _, a := range in.active {
-		live[callKey{a.At, a.Source, a.From, a.To, a.Slot}] = true
+		live[callKey{a.At, a.Source, a.From, a.To, a.Slot, a.Mode}] = true
 	}
+	// getLastHeard(): one row per callsign + mode + D-Star suffix + source,
+	// the most recent first.
+	seen := map[string]bool{}
 	for _, r := range in.rows {
-		row := dashRow{Time: r.At, Clock: classicClock(r.At), Mode: heardMode(r), Callsign: r.From, Target: r.To, Source: r.Source,
-			Duration: r.Duration, Loss: r.Loss, BER: r.BER, RSSI: r.RSSI, Live: r.Duration == nil && live[callKey{r.At, r.Source, r.From, r.To, r.Slot}]}
+		key := r.From + "#" + heardMode(r) + r.Suffix + r.Source
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		row := dashRow{Time: r.At, Clock: classicClock(r.At), Mode: heardMode(r), Callsign: r.From, Suffix: r.Suffix, Target: r.To, Source: r.Source,
+			Duration: r.Duration, Loss: r.Loss, BER: r.BER, RSSI: r.RSSI, Note: r.Note,
+			Live: r.Duration == nil && r.Note == "" && live[callKey{r.At, r.Source, r.From, r.To, r.Slot, r.Mode}]}
 		if len(d.Heard) < 20 {
 			d.Heard = append(d.Heard, row)
 		}
-		if r.Source == "RF" && len(d.Local) < 20 {
+		if r.Source == "RF" && r.Mode != "POCSAG" && len(d.Local) < 20 {
 			d.Local = append(d.Local, row)
 		}
 	}
@@ -417,11 +457,18 @@ func gatherDashboard(now time.Time) dashboard {
 	firmware, tcxo, login := journal.snapshot()
 	rows, active, ok := recentHeard.live()
 	host, _ := os.ReadFile(hostnameFile)
-	return buildDashboard(dashInputs{
-		host: mmdvmINI.load(), gw: dmrGWINI.load(), dapnet: dapnetINI.load(), ircddb: ircddbINI.load(), dstar: dstarRptINI.load(),
+	mmdvm, procs := mmdvmINI.load(), runningProcesses()
+	var linked []string
+	for mode, section := range map[string]string{"YSF": "System Fusion Network", "P25": "P25 Network", "NXDN": "NXDN Network", "M17": "M17 Network"} {
+		if mmdvm.on(section, "Enable") && procs[gatewayByMode[mode]] {
+			linked = append(linked, mode)
+		}
+	}
+	return buildDashboard(dashInputs{links: gatewayLinks(now, linked),
+		host: mmdvm, gw: dmrGWINI.load(), dapnet: dapnetINI.load(), ircddb: ircddbINI.load(), dstar: dstarRptINI.load(),
 		ysf2dmr: ysf2dmrINI.load(), ysf2nxdn: ysf2nxdnINI.load(), ysf2p25: ysf2p25INI.load(),
 		dmr2ysf: dmr2ysfINI.load(), dmr2nxdn: dmr2nxdnINI.load(),
-		procs: runningProcesses(), login: login, firmware: firmware, tcxo: tcxo, release: releaseINI(),
+		procs: procs, login: login, firmware: firmware, tcxo: tcxo, release: releaseINI(),
 		rows: rows, active: active, heardOK: ok, hostname: strings.TrimSpace(string(host)),
 		controller: controllerMode(), now: now,
 	})

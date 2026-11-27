@@ -4,7 +4,7 @@
   import { onMount } from 'svelte';
   import {
     type Dashboard, type Row, cellStyle, trxStyle, modeLabel, target, callsign, liveSeconds,
-    duration, loss, ber, lossStyle, berStyle, rssi, red, green,
+    duration, loss, ber, lossStyle, berStyle, rssi, red, green, dataNote,
   } from './classic';
 
   let d = $state<Dashboard | null>(null);
@@ -70,7 +70,7 @@
     {#if cs.kind === 'id'}
       <td align="left"><a href={cs.href} target="_blank" rel="noopener noreferrer">{cs.text}</a></td>
     {:else if cs.kind === 'call'}
-      <td align="left"><div style="float:left;"><a href={cs.href} target="_blank" rel="noopener noreferrer">{cs.text}</a></div> <div style="text-align:right;">(<a href={cs.gps} target="_blank" rel="noopener noreferrer">GPS</a>)</div></td>
+      <td align="left"><div style="float:left;"><a href={cs.href} target="_blank" rel="noopener noreferrer">{cs.text}</a>{#if r.suffix?.trim()}/{r.suffix}{/if}</div> <div style="text-align:right;">(<a href={cs.gps} target="_blank" rel="noopener noreferrer">GPS</a>)</div></td>
     {:else}
       <td align="left">{cs.text}</td>
     {/if}
@@ -78,6 +78,8 @@
     {#if r.source === 'RF'}<td style={green}>RF</td>{:else}<td>{r.source}</td>{/if}
     {#if r.live}
       <td colspan="3" style={red}>TX {liveSeconds(r, d!.Now)} sec</td>
+    {:else if dataNote(r)}
+      <td colspan="3" style={green}>{r.note}</td>
     {:else}
       <td>{duration(r)}</td>
       {#if local}

@@ -41,3 +41,9 @@ test('loss/BER colours and S-meter follow functions.php', () => {
   assert.equal(rssi(row({ rssi: -140 })), 'S1 (-140)');
   assert.equal(cellStyle('warn'), 'background:#ff9; color:#030; width:50%;');
 });
+
+test('timeouts and data transfers follow lh.php', () => {
+  assert.equal(duration(row({ duration: null, note: 'TOut' })), 'TOut');
+  assert.equal(ber(row({ ber: null, note: 'TOut' })), '??%');
+  assert.equal(ber(row({ ber: null })), '');
+});

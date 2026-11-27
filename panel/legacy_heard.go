@@ -31,12 +31,15 @@ func legacyHeardMetric(n *float64, precision int, unit string) string {
 	return strconv.FormatFloat(*n, 'f', precision, 64) + unit
 }
 
+// legacyHeardLimit is the classic api/last_heard.php default and maximum.
+const legacyHeardLimit = 20
+
 func legacyHeard(r HeardRow) legacyHeardRow {
 	// functions.php drops portable suffixes for DMR; callsign_suffix was a
 	// D-Star field. The full DMR ID is still available in /api/status.
 	call, _, _ := strings.Cut(r.From, "/")
 	row := legacyHeardRow{
-		TimeUTC: r.At.UTC().Format("2006-01-02 15:04:05"), Mode: "DMR Slot " + r.Slot,
+		TimeUTC: r.At.UTC().Format("2006-01-02 15:04:05"), Mode: heardMode(r),
 		Callsign: call, Target: r.To, Src: r.Source,
 		Duration: legacyHeardMetric(r.Duration, 1, ""), Loss: legacyHeardMetric(r.Loss, 0, "%"),
 		BER: legacyHeardMetric(r.BER, 1, "%"),
@@ -74,7 +77,7 @@ func serveLegacyHeard(w http.ResponseWriter, r *http.Request, s *Status) {
 			w.WriteHeader(http.StatusBadRequest)
 			break
 		}
-		limit := min(len(s.Heard), heardLimit)
+		limit := min(len(s.Heard), legacyHeardLimit)
 		if values, ok := query["num_transmissions"]; ok {
 			// An invalid, duplicate, empty or negative count returns no rows.
 			// Saturate positive integers without converting untrusted lengths

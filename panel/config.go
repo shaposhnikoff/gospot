@@ -74,6 +74,7 @@ var (
 	hostnameFile                                     string
 	bmStateDir                                       string
 	pistarLogDir, radioLogSource, pistarReleaseFile  string
+	pistarHostsDir                                   string
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort int
 )
 
@@ -114,7 +115,7 @@ func applySettings(s settings) error {
 	modem, master := unit("UNIT_MMDVMHOST"), unit("UNIT_DMRGATEWAY")
 	mm, ds, host := path("MARKER_MMDVMHOST"), path("MARKER_DSTARREPEATER"), path("HOSTNAME_FILE")
 	lib, ui, bm := path("DASHBOARD_LIB_DIR"), path("DASHBOARD_UI_DIR"), path("DASHBOARD_BM_STATE_DIR")
-	logDir, release := path("PISTAR_LOG_DIR"), path("PISTAR_RELEASE_FILE")
+	logDir, release, hosts := path("PISTAR_LOG_DIR"), path("PISTAR_RELEASE_FILE"), path("PISTAR_HOSTS_DIR")
 	source := s["RADIO_LOG_SOURCE"]
 	if source != "files" && source != "journal" {
 		errs = append(errs, "RADIO_LOG_SOURCE must be files or journal")
@@ -131,7 +132,7 @@ func applySettings(s settings) error {
 	adminAssets, operatorAssets = ui, ui
 	configHelper, archiveHelperPath = filepath.Join(lib, "pistar-config"), filepath.Join(lib, "pistar-archive")
 	bmStateDir = bm
-	pistarLogDir, radioLogSource, pistarReleaseFile = logDir, source, release
+	pistarLogDir, radioLogSource, pistarReleaseFile, pistarHostsDir = logDir, source, release, hosts
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort = pp, mp, op
 	modemDiagnostic, masterDiagnostic = diagnosticFor(modem, modemRules), diagnosticFor(master, masterRules)
 	return nil

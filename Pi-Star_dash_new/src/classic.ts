@@ -5,6 +5,7 @@ export type Cell = { label: string; state: 'on' | 'fail' | 'warn' | 'off' };
 export type Row = {
   time: string; clock: string; mode: string; callsign: string; target: string; source: string;
   duration: number | null; loss: number | null; ber: number | null; rssi: number | null; live: boolean;
+  suffix?: string; note?: string;
 };
 export type Dashboard = {
   Hostname: string; Callsign: string; Version: string; PiStar: string; Controller: string;
@@ -77,9 +78,11 @@ export function liveSeconds(row: Row, now: string): string {
   return seconds < 999 ? `${Math.max(0, Math.round(seconds))}+` : '∞';
 }
 
-export const duration = (row: Row) => row.duration == null ? '' : row.duration.toFixed(1);
+export const duration = (row: Row) => row.note === 'TOut' && row.duration == null ? 'TOut' : row.duration == null ? '' : row.duration.toFixed(1);
 export const loss = (row: Row) => row.loss == null ? (row.source === 'RF' ? '0%' : '') : `${row.loss}%`;
-export const ber = (row: Row) => row.ber == null ? '' : `${row.ber.toFixed(1)}%`;
+export const ber = (row: Row) => row.ber == null ? (row.note === 'TOut' ? '??%' : '') : `${row.ber.toFixed(1)}%`;
+// lh.php shows data transfers as one green cell instead of the metrics.
+export const dataNote = (row: Row) => row.note === 'DMR Data' || row.note === 'POCSAG Data';
 
 export function lossStyle(row: Row): string {
   const v = row.loss ?? 0;

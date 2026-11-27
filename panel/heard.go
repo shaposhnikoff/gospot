@@ -16,12 +16,16 @@ type HeardRow struct {
 	At                        time.Time
 	Source, From, To, Slot    string
 	Duration, BER, Loss, RSSI *float64
+	// Mode is the classic mode label ("DMR Slot 2", "D-Star", "YSF", ...);
+	// Suffix is the D-Star station suffix; Note replaces the metrics like
+	// the classic list does ("DMR Data", "POCSAG Data", "TOut").
+	Mode, Suffix, Note string
 }
 
 const (
 	heardRefresh = 30 * time.Second
 	heardAge     = 24 * time.Hour
-	heardLimit   = 20
+	heardLimit   = 100 // raw calls kept; the classic list shows 20 unique ones
 )
 
 // MMDVMHost's DMRSlot.cpp logs a voice header or a late entry at call start,
@@ -165,6 +169,7 @@ func (h *heardHistory) trim(now time.Time) {
 func (h *heardHistory) observe(at time.Time, message string) {
 	m := heardSlot.FindStringSubmatch(message)
 	if m == nil {
+		h.observeOther(at, message)
 		return
 	}
 	action, direction, body := m[2], m[3], m[4]
@@ -182,7 +187,10 @@ func (h *heardHistory) observe(at time.Time, message string) {
 		if action != "received " || start == nil || (start[1] == "data header") != (start[4] != "") {
 			return
 		}
-		row := HeardRow{At: at, From: start[2], To: start[3], Source: lane.source, Slot: lane.slot}
+		row := HeardRow{At: at, From: start[2], To: start[3], Source: lane.source, Slot: lane.slot, Mode: "DMR Slot " + lane.slot}
+		if start[1] == "data header" {
+			row.Note = "DMR Data"
+		}
 		if h.rowIndex(row) < 0 {
 			h.rows = append(h.rows, row)
 		}

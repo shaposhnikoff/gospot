@@ -1,12 +1,14 @@
 Package: pistar-radio
-Version: 0.1.0-2
+Version: 0.1.0-3
 Architecture: armhf
 Section: hamradio
 Priority: optional
 Maintainer: Pi-Star native dashboard <noreply@localhost>
-Depends: libi2c0, libsamplerate0, libcrypt1, libstdc++6, curl, procps, python3, unzip
+Depends: libi2c0, libsamplerate0, libcrypt1, libstdc++6, curl, procps, python3, unzip,
+ libwxbase3.2-1t64 | libwxbase3.2-1, libasound2t64 | libasound2, libusb-1.0-0
 Description: Pi-Star radio services in the classic Pi-Star layout
  Pi-Star PS4 builds of MMDVMHost, DMRGateway and the YSF/P25/NXDN/DAPNET/M17
  gateways, the reusable Pi-Star sbin tools and service handlers, systemd
- units for them and a daily host-file update. No PHP. Radio units are not
- enabled on install.
+ units for them and a daily host-file update, and the D-Star daemons
+ (ircDDBGateway, DStarRepeater, TimeServer, ...) rebuilt for wxWidgets 3.2.
+ No PHP. Radio units are not enabled on install.

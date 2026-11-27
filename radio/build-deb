@@ -14,16 +14,22 @@ bin_src=$(cd "$settings_dir/$PISTAR_BINARIES_BIN_DIR" && pwd)
 sbin_src=$(cd "$settings_dir/$PISTAR_BINARIES_SBIN_DIR" && pwd)
 libs=$PWD/build/$suite/lib
 [[ -e $libs/libArduiPi_OLED.so.1.0 ]] || ./build-libs.sh "$suite"
+dstar=$PWD/build/$suite/dstar
+[[ -x $dstar/bin/ircddbgatewayd ]] || ./build-dstar.sh "$suite"
 
-# PS4 daemons and tools that run without wxWidgets. D-Star (ircddbgatewayd,
-# dstarrepeaterd, ...), displays (NextionDriver, MMDVMHost_Adafruit) and the
+# PS4 daemons and tools that run without wxWidgets (the D-Star ones are
+# rebuilt below); displays (NextionDriver, MMDVMHost_Adafruit) and the
 # apt/dpkg remount wrappers are deliberately not shipped.
 binaries=(MMDVMHost DMRGateway YSFGateway P25Gateway NXDNGateway DAPNETGateway M17Gateway
   DGIdGateway APRSGateway YSF2DMR YSF2NXDN YSF2P25 DMR2YSF DMR2NXDN NXDN2DMR
   YSFParrot P25Parrot NXDNParrot MMDVMCal RemoteCommand MobileGPS teensy_loader_cli platformDetect.sh)
+# D-Star daemons rebuilt for wxWidgets 3.2 by build-dstar.sh.
+dstar_binaries=(ircddbgatewayd timeserverd starnetserverd remotecontrold timercontrold aprstransmitd texttransmitd
+  voicetransmitd dstarrepeaterd)
 # Service handlers (start|stop|restart) for the shipped daemons.
 services=(mmdvmhost dmrgateway ysfgateway ysfparrot p25gateway p25parrot nxdngateway nxdnparrot
-  nxdn2dmr dapnetgateway m17gateway dgidgateway aprsgateway ysf2dmr ysf2nxdn ysf2p25 dmr2ysf dmr2nxdn mobilegps)
+  nxdn2dmr dapnetgateway m17gateway dgidgateway aprsgateway ysf2dmr ysf2nxdn ysf2p25 dmr2ysf dmr2nxdn mobilegps
+  ircddbgateway timeserver timercontrol dstarrepeater)
 # Tools without references to the PHP dashboard, nginx or /var/www.
 tools=(HostFilesUpdate.sh pistar-bmapi pistar-dapnetapi pistar-tgifapi pistar-link pistar-ysflink
   pistar-p25link pistar-nxdnlink pistar-findmodem pistar-mmdvmcal pistar-mmdvmhost-module
@@ -40,6 +46,15 @@ sed "s/^Version: .*/Version: $version/" debian/control >"$p/DEBIAN/control"
 install -m755 debian/postinst "$p/DEBIAN/"
 
 for b in "${binaries[@]}"; do install -m755 "$bin_src/$b" "$p$PISTAR_BIN_DIR/$b"; done
+for b in "${dstar_binaries[@]}"; do install -m755 "$dstar/bin/$b" "$p$PISTAR_BIN_DIR/$b"; done
+# AMBE voice data where the daemons look for it; the D-Star host lists are
+# kept up to date by HostFilesUpdate.sh in PISTAR_HOSTS_DIR.
+install -d -m755 "$p$DSTAR_IRCDDB_DATA_DIR" "$p$DSTAR_REPEATER_DATA_DIR"
+install -m644 "$dstar"/ircddbgateway/* "$p$DSTAR_IRCDDB_DATA_DIR/"
+find "$dstar/dstarrepeater" -type f -exec install -m644 {} "$p$DSTAR_REPEATER_DATA_DIR/" \;
+for h in DPlus_Hosts.txt DExtra_Hosts.txt DCS_Hosts.txt CCS_Hosts.txt XLXHosts.txt; do
+  ln -s "$PISTAR_HOSTS_DIR/$h" "$p$DSTAR_IRCDDB_DATA_DIR/$h"
+done
 cp -a "$bin_src/firmware" "$p$PISTAR_BIN_DIR/firmware"
 find "$p$PISTAR_BIN_DIR/firmware" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 install -m644 "$bin_src/config_clean.zip" "$p$RADIO_SHARE_DIR/config_clean.zip"

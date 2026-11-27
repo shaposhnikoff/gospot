@@ -137,6 +137,7 @@ func applySettings(s settings) error {
 	adminAssets, operatorAssets = ui, ui
 	configHelper, archiveHelperPath = filepath.Join(lib, "pistar-config"), filepath.Join(lib, "pistar-archive")
 	powerHelper, updateHelper, updateLog = filepath.Join(lib, "pistar-power"), filepath.Join(lib, "pistar-native-update"), update
+	setConfigHelper(lib)
 	bmStateDir = bm
 	pistarLogDir, radioLogSource, pistarReleaseFile, pistarHostsDir = logDir, source, release, hosts
 	pistarBinDir, pistarSbinDir = binDir, sbinDir

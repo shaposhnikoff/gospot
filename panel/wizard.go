@@ -119,6 +119,10 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 			return
 		}
 		path := r.URL.EscapedPath()
+		if strings.HasPrefix(path, "/manage/api/expert/") {
+			serveExpert(w, r, runConfigureHelper)
+			return
+		}
 		switch path {
 		case "/manage/api/bm/master", "/manage/api/bm/talkgroup", "/manage/api/bm/peer", "/manage/api/bm/profile", "/manage/api/bm/key", "/manage/api/bm/subscription":
 			bm.serve(w, r)
@@ -134,6 +138,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 			return
 		case "/manage/api/links", "/manage/api/links/bm":
 			serveLinks(w, r, bm, sendRemoteCommand)
+			return
+		case "/manage/api/configure":
+			serveConfigure(w, r, runConfigureHelper)
 			return
 		case "/manage/api/dashboard":
 			// The classic admin page shows the same tables as the dashboard.

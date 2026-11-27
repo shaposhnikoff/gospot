@@ -1,0 +1,416 @@
+#!/usr/bin/python3 -I
+"""Privileged backend of the Configuration page.
+
+read   -> JSON {revision, files: {name: {section: {key: value}}}, system: {...}}
+apply  <- JSON {revision, changes: {name: {section: {key: value|null}}},
+                restart: [unit, ...], system: {hostname?, timezone?, controller?}}
+
+Only the configuration files named in pistar.conf are read or written; values
+are single-line strings; comments, ordering, ownership and modes are kept.
+Every change is written atomically and rolled back, together with the service
+restarts, if any step fails.
+"""
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+SETTINGS = "/etc/pistar-dashboard/pistar.conf"
+
+
+def load_settings():
+    """Read pistar.conf (KEY=value), trusted only if no one else can write it.
+
+    Unprivileged runs (tests) may name another file in PISTAR_SETTINGS; root,
+    as under sudo, always uses the installed file."""
+    path = SETTINGS
+    if os.geteuid() != 0:
+        path = os.environ.get("PISTAR_SETTINGS", SETTINGS)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o022:
+        os.close(fd)
+        raise SystemExit("unsafe settings file")
+    values = {}
+    with os.fdopen(fd, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, sep, value = line.partition("=")
+            if not sep or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or re.search(r"[\s\"'$`\\]", value) or key in values:
+                raise SystemExit("invalid settings file")
+            values[key] = value
+    return values
+
+
+def setting_path(values, key):
+    value = values.get(key, "")
+    if not value.startswith("/") or os.path.normpath(value) != value:
+        raise SystemExit(f"{key} must be a clean absolute path")
+    return Path(value)
+
+
+_SETTINGS = load_settings()
+# Configuration files the page may touch, by short name.
+FILES = {name: setting_path(_SETTINGS, "CONF_" + name.upper().replace("-", "_")) for name in (
+    "mmdvmhost", "dmrgateway", "ysfgateway", "p25gateway", "nxdngateway", "m17gateway",
+    "dapnetgateway", "dgidgateway", "aprsgateway", "ircddbgateway", "dstarrepeater",
+    "timeserver", "starnetserver", "ysf2dmr", "ysf2nxdn", "ysf2p25", "dmr2ysf", "dmr2nxdn",
+    "pistar-remote")}
+STATE = setting_path(_SETTINGS, "DASHBOARD_STATE_DIR")
+MARKERS = {"mmdvmhost": setting_path(_SETTINGS, "MARKER_MMDVMHOST"),
+           "dstarrepeater": setting_path(_SETTINGS, "MARKER_DSTARREPEATER")}
+HOSTNAME = setting_path(_SETTINGS, "HOSTNAME_FILE")
+# Services the page may restart: the Pi-Star radio daemons and helpers.
+UNITS = {u + ".service" for u in (
+    "mmdvmhost", "dmrgateway", "ysfgateway", "ysfparrot", "p25gateway", "p25parrot", "nxdngateway",
+    "nxdnparrot", "nxdn2dmr", "dapnetgateway", "m17gateway", "dgidgateway", "aprsgateway", "ysf2dmr",
+    "ysf2nxdn", "ysf2p25", "dmr2ysf", "dmr2nxdn", "mobilegps", "ircddbgateway", "dstarrepeater",
+    "timeserver", "starnetserver", "pistar-remote", "pistar-watchdog")}
+LIMIT = 1 << 20
+
+# Expert > Full Edit: file, mode for a new file, services restarted after a save.
+FULL = {
+    "dmrgateway": (FILES["dmrgateway"], 0o644, ["mmdvmhost.service", "dmrgateway.service"]),
+    "pistar-remote": (FILES["pistar-remote"], 0o644, ["pistar-remote.service"]),
+    "wpaconfig": (setting_path(_SETTINGS, "WPA_SUPPLICANT_CONF"), 0o600, []),
+    "cron": (setting_path(_SETTINGS, "CRONTAB_FILE"), 0o644, []),
+    "rssidat": (setting_path(_SETTINGS, "PISTAR_HOSTS_DIR") / "RSSI.dat", 0o644, []),
+}
+# fulledit_cron.php pistar_cron_validate(): one diagnostic per offending line.
+CRON_RULES = [(re.compile(p, f), why) for p, f, why in (
+    (r"(?:^|[\s/;|&`$()=])(passwd|chpasswd|htpasswd)\b", re.I, "invokes a password-modification command (passwd / chpasswd / htpasswd)"),
+    (r"\busermod\b[^\n]*\s-p\b", re.I, "usermod -p sets a password hash directly"),
+    (r"(/etc/shadow|/etc/passwd|\.htpasswd)\b", re.I, "references an authentication file path"),
+    (r"(?:^|[\s/;|&`$()=])(nc|ncat|netcat)\b", re.I, "invokes nc / ncat / netcat"),
+    (r"\bsocat\b[^\n]*\b(EXEC|SYSTEM):", re.I, "socat with EXEC/SYSTEM token (spawns a process)"),
+    (r"/dev/(?:tcp|udp)/", 0, "reads or writes /dev/tcp/* or /dev/udp/* (reverse-shell pattern)"),
+    (r"\b(curl|wget|fetch)\b[^|\n]*\|\s*(?:bash|sh|zsh|ksh|dash|exec)\b", re.I, "pipes downloaded content directly into a shell"),
+    (r"\bpython[23]?\b[^\n]*-c[^\n]*(?:socket\.socket|os\.dup2)", re.I, "python reverse-shell pattern"),
+    (r"\bperl\b[^\n]*-e[^\n]*\bSocket\b", re.I, "perl reverse-shell pattern"),
+    (r"base64", re.I, "references base64 (no legitimate cron use; payload-obfuscation idiom)"),
+    (r"\bb64(?:decode|encode)\b", re.I, "python b64decode/b64encode (payload decoder)"),
+    (r"\bfromhex\b", re.I, "fromhex (hex payload decoder)"),
+    (r"\bxxd\b", re.I, "invokes xxd (hex dump / reverse-mode payload decoder)"),
+    (r"\\x[0-9a-fA-F]{2}", 0, "shell hex-escape literal (\\xNN — payload obfuscation)"),
+    (r"\\u[0-9a-fA-F]{4}", 0, "shell unicode-escape literal (\\uNNNN — payload obfuscation)"),
+    (r"(?:^|[\s/;|&`$()=])eval\b", re.I, "invokes eval (opaque shell-string execution)"),
+    (r"\bopenssl\b[^\n]*\s-d\b", re.I, "openssl with -d (decoder)"),
+)]
+
+
+def cron_blockers(text):
+    out = []
+    for i, line in enumerate(text.split("\n")):
+        trimmed = line.lstrip()
+        if not trimmed or trimmed[0] == "#":
+            continue
+        for pattern, why in CRON_RULES:
+            if pattern.search(line):
+                out.append(f"line {i + 1} ({why}): {line.strip()[:100]}")
+                break
+    return out
+
+
+def full_read(name):
+    path = FULL[name][0]
+    text, _ = read_file(path)
+    return {"exists": text is not None, "text": text or "",
+            "revision": hashlib.sha256((text or "\0missing").encode()).hexdigest()}
+
+
+def full_write(name, request, run=None):
+    run = run or systemctl
+    path, new_mode, units = FULL[name]
+    require(type(request) is dict and set(request) == {"revision", "text"} and type(request["text"]) is str, "invalid request")
+    text = request["text"].replace("\r\n", "\n").replace("\r", "\n")
+    require("\0" not in text and len(text) <= LIMIT, "invalid text")
+    if name == "cron":
+        blocked = cron_blockers(text)
+        if blocked:
+            return {"ok": False, "blocked": blocked}
+    old, st = read_file(path)
+    if request["revision"] != hashlib.sha256((old or "\0missing").encode()).hexdigest():
+        raise Stale("file changed since it was read")
+    if st is None:
+        class New:  # root:root with the page's mode
+            st_uid = st_gid = 0
+            st_mode = new_mode
+        st = New
+    replace(path, text, st)
+    try:
+        for unit in units:
+            run("restart", unit)
+    except Exception:
+        if old is not None:
+            replace(path, old, st)
+        raise Error("service restart failed; previous file restored") from None
+    return {"ok": True}
+
+
+class Error(Exception):
+    pass
+
+
+class Stale(Error):
+    pass
+
+
+def require(ok, message):
+    if not ok:
+        raise Error(message)
+
+
+class Ini:
+    """Line-preserving INI editor. Keys before the first section (flat files
+    such as /etc/ircddbgateway) belong to section ""."""
+
+    def __init__(self, text):
+        self.lines = text.splitlines()
+
+    def _scan(self):
+        section, out = "", []
+        for i, line in enumerate(self.lines):
+            s = line.strip()
+            if s.startswith("[") and s.endswith("]"):
+                section = s[1:-1]
+                out.append((i, section, None))
+            elif s and s[0] not in "#;" and "=" in s:
+                out.append((i, section, s.partition("=")[0].strip()))
+        return out
+
+    def data(self):
+        values = {}
+        for i, section, key in self._scan():
+            sec = values.setdefault(section, {})
+            if key is not None and key not in sec:
+                sec[key] = self.lines[i].partition("=")[2].strip()
+        return values
+
+    def layout(self):
+        """Sections and keys in file order: [[section, [[key, value], ...]], ...]."""
+        out, seen = [], {}
+        for i, section, key in self._scan():
+            if section not in seen:
+                seen[section] = []
+                out.append([section, seen[section]])
+            if key is not None and all(k != key for k, _ in seen[section]):
+                seen[section].append([key, self.lines[i].partition("=")[2].strip()])
+        return out
+
+    def set(self, section, key, value):
+        scan = self._scan()
+        for i, sec, k in scan:
+            if sec == section and k == key:
+                if value is None:
+                    del self.lines[i]
+                else:
+                    self.lines[i] = f"{key}={value}"
+                return
+        if value is None:
+            return
+        last = None
+        for i, sec, _ in scan:
+            if sec == section:
+                last = i
+        if last is None and section == "":
+            self.lines.insert(0, f"{key}={value}")
+            return
+        if last is None:
+            if self.lines and self.lines[-1].strip():
+                self.lines.append("")
+            self.lines += [f"[{section}]", f"{key}={value}"]
+            return
+        self.lines.insert(last + 1, f"{key}={value}")
+
+    def text(self):
+        return "\n".join(self.lines) + "\n"
+
+
+def read_file(path):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None, None
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(fd)
+        require(stat.S_ISREG(st.st_mode) and st.st_size <= LIMIT, f"invalid configuration file {path}")
+        return f.read(LIMIT + 1).decode("utf-8", "replace"), st
+
+
+def snapshot():
+    texts, stats = {}, {}
+    for name, path in FILES.items():
+        texts[name], stats[name] = read_file(path)
+    digest = hashlib.sha256()
+    for name in sorted(texts):
+        digest.update(name.encode() + b"\0" + (texts[name] or "\0missing").encode() + b"\0")
+    return texts, stats, digest.hexdigest()
+
+
+def system_state():
+    tz = ""
+    try:
+        tz = os.readlink("/etc/localtime").split("zoneinfo/", 1)[-1]
+    except OSError:
+        pass
+    host = HOSTNAME.read_text().strip() if HOSTNAME.exists() else ""
+    markers = {}
+    for name, path in MARKERS.items():
+        markers[name] = path.read_text(errors="replace") if path.exists() else None
+    return {"hostname": host, "timezone": tz, "markers": markers}
+
+
+VALUE = re.compile(r"[^\r\n\x00]{0,512}")
+NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _./+-]{0,63}")
+
+
+def replace(path, text, st):
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".pistar-")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.encode())
+            f.flush()
+            os.fchown(fd, st.st_uid if st else os.geteuid(), st.st_gid if st else os.getegid())
+            os.fchmod(fd, stat.S_IMODE(st.st_mode) if st else 0o644)
+            os.fsync(fd)
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def systemctl(*args):
+    subprocess.run(["/usr/bin/systemctl", *args], check=True, timeout=90, cwd="/",
+                   env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}, stdin=subprocess.DEVNULL,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def plan(request, texts):
+    """Validate the request and compute new file texts."""
+    require(type(request) is dict and set(request) <= {"revision", "changes", "restart", "system"}, "invalid request")
+    changes = request.get("changes", {})
+    require(type(changes) is dict and set(changes) <= set(FILES), "unknown configuration file")
+    targets = {}
+    for name, sections in changes.items():
+        require(texts[name] is not None, f"{name} is not installed")
+        require(type(sections) is dict, "invalid changes")
+        ini = Ini(texts[name])
+        for section, keys in sections.items():
+            require(section == "" or NAME.fullmatch(section), "invalid section")
+            require(type(keys) is dict, "invalid changes")
+            for key, value in keys.items():
+                require(NAME.fullmatch(key) and "=" not in key, "invalid key")
+                require(value is None or (type(value) is str and VALUE.fullmatch(value)), "invalid value")
+                ini.set(section, key, value)
+        if ini.text() != texts[name]:
+            targets[name] = ini.text()
+    units = request.get("restart", [])
+    require(type(units) is list and all(u in UNITS for u in units), "unknown service")
+    system = request.get("system", {})
+    require(type(system) is dict and set(system) <= {"hostname", "timezone", "controller"}, "invalid system change")
+    if "hostname" in system:
+        require(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", system["hostname"] or ""), "invalid hostname")
+    if "timezone" in system:
+        tz = system["timezone"]
+        require(type(tz) is str and re.fullmatch(r"[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_+-]+){0,2}", tz)
+                and Path("/usr/share/zoneinfo", tz).is_file(), "invalid timezone")
+    if "controller" in system:
+        require(system["controller"] in MARKERS, "invalid controller")
+    return targets, list(dict.fromkeys(units)), system
+
+
+def apply(request, run=systemctl):
+    texts, stats, revision = snapshot()
+    if request.get("revision") != revision:
+        raise Stale("configuration changed since it was read")
+    targets, units, system = plan(request, texts)
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    pending = STATE / "configure-pending.json"
+    require(not pending.exists(), "interrupted operation; inspect private pending backup")
+    replace(pending, json.dumps({n: texts[n] for n in targets}), None)
+    os.chmod(pending, 0o600)
+    written = []
+    try:
+        for name, text in targets.items():
+            replace(FILES[name], text, stats[name])
+            written.append(name)
+        if "hostname" in system and system["hostname"] != system_state()["hostname"]:
+            subprocess.run(["/usr/bin/hostnamectl", "set-hostname", system["hostname"]], check=True, timeout=30,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if "timezone" in system and system["timezone"] != system_state()["timezone"]:
+            subprocess.run(["/usr/bin/timedatectl", "set-timezone", system["timezone"]], check=True, timeout=30,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if "controller" in system:
+            want = MARKERS[system["controller"]]
+            other = [p for n, p in MARKERS.items() if n != system["controller"]]
+            for p in other:
+                if p.exists():
+                    if not want.exists():
+                        os.rename(p, want)  # keep the marker contents (modem selection)
+                    else:
+                        p.unlink()
+            if not want.exists():
+                want.touch(0o644)
+        for unit in units:
+            run("restart", unit)
+    except Exception:
+        for name in reversed(written):
+            try:
+                replace(FILES[name], texts[name], stats[name])
+            except Exception:
+                pass
+        for unit in units:
+            try:
+                run("restart", unit)
+            except Exception:
+                pass
+        pending.unlink(missing_ok=True)
+        raise Error("operation failed; previous settings restored") from None
+    pending.unlink(missing_ok=True)
+    return {"ok": True, "changed": sorted(targets), "restarted": units}
+
+
+def read():
+    texts, _, revision = snapshot()
+    files = {name: Ini(text).data() for name, text in texts.items() if text is not None}
+    layout = {name: Ini(text).layout() for name, text in texts.items() if text is not None}
+    return {"revision": revision, "files": files, "layout": layout, "system": system_state()}
+
+
+def main():
+    if len(sys.argv) == 3 and sys.argv[1] in ("full-read", "full-write") and sys.argv[2] in FULL:
+        if sys.argv[1] == "full-read":
+            print(json.dumps(full_read(sys.argv[2])))
+        else:
+            raw = sys.stdin.buffer.read(LIMIT + 4097)
+            require(len(raw) <= LIMIT + 4096, "request too large")
+            print(json.dumps(full_write(sys.argv[2], json.loads(raw.decode()))))
+        return
+    require(len(sys.argv) == 2 and sys.argv[1] in ("read", "apply"), "expected read or apply")
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    with os.fdopen(os.open(STATE / "configure.lock", os.O_CREAT | os.O_NOFOLLOW | os.O_RDWR, 0o600), "r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if sys.argv[1] == "read":
+            print(json.dumps(read()))
+            return
+        raw = sys.stdin.buffer.read(256 * 1024 + 1)
+        require(len(raw) <= 256 * 1024, "request too large")
+        print(json.dumps(apply(json.loads(raw.decode()))))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Stale as exc:
+        print(json.dumps({"error": str(exc), "stale": True}))
+        sys.exit(3)
+    except Error as exc:
+        print(json.dumps({"error": str(exc)}))
+        sys.exit(2)

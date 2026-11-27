@@ -4,10 +4,10 @@
   import { onMount, type Snippet } from 'svelte';
   import { operatorOrigin } from './runtime';
 
-  let { title, links, children }: { title: string; links: string[]; children: Snippet } = $props();
+  let { title, links, children, menu, footer = 'config' }: { title: string; links: string[]; children: Snippet; menu?: Snippet; footer?: 'config' | 'dashboard' } = $props();
   const targets: Record<string, string> = {
     Dashboard: '', Admin: '/manage/', 'Live Logs': '/manage/#logs', Power: '/manage/#power', Update: '/manage/#update',
-    'Backup/Restore': '/manage/#backup', Configuration: '/manage/#configuration',
+    'Backup/Restore': '/manage/#backup', Configuration: '/manage/#configuration', Expert: '/manage/#expert',
   };
   let operator = $state('/');
   let versions = $state('');
@@ -32,12 +32,13 @@
     <p style="padding-right: 5px; text-align: right; color: #ffffff;">
       {#each links as label, i}<a href={label === 'Dashboard' ? operator : targets[label]} style="color: #ffffff;">{label}</a>{#if i < links.length - 1}{' | '}{/if}{/each}
     </p>
+    {#if menu}{@render menu()}{/if}
   </div>
   <div class="contentwide">
     {@render children()}
   </div>
   <div class="footer">
-    Pi-Star web config, &copy; Andy Taylor (MW0MWZ) 2014-{year}.<br />
+    {#if footer === 'dashboard'}Pi-Star / Pi-Star Dashboard{:else}Pi-Star web config{/if}, &copy; Andy Taylor (MW0MWZ) 2014-{year}.<br />
     Need help? Click <a style="color: #ffffff;" href="https://www.facebook.com/groups/pistarusergroup/" target="_blank" rel="noopener noreferrer">here for the Support Group</a><br />
     Get your copy of Pi-Star from <a style="color: #ffffff;" href="http://www.pistar.uk/downloads/" target="_blank" rel="noopener noreferrer">here</a>.<br />
     <br />

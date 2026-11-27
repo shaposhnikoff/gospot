@@ -45,6 +45,10 @@
 
 - Решение от 2026-11-27: на `pistar3` (Bookworm) и в целевом образе Trixie сетью управляет NetworkManager, классический `wpa_supplicant.conf` там не действует. Страница Wi-Fi повторяет `wifi.php`, а запись идёт через бэкенд из `pistar.conf`: `WIFI_BACKEND=networkmanager` (профили `nmcli`, PSK передаётся только WPA-хешем) или `wpa_supplicant` (правка блоков файла, root:root 0600). Стенд `qa/real-write --wifi` проверяет бэкенд `wpa_supplicant`.
 
+## Плеер BrandMeister Hoseline
+
+- Требование пользователя от 2026-11-27: встроить его плеер (`shaposhnikoff/hoseline-bm-console-player`) в главную страницу **под Local RF Activity**, только прослушивание одной группы: селектор TG, кнопки Play и Stop. Звук идёт через плату (Hoseline проверяет Origin), URL, список TG и лимит слушателей — в `pistar.conf` (`HOSELINE_*`).
+
 ## Обновление `pistar.conf` на плате
 
 - `pistar.conf` — conffile. Новые ключи из пакета `postinst` дописывает в изменённую вручную копию (`pistar-conf-merge`), существующие строки не трогает; иначе службы не стартуют на неизвестной им конфигурации.

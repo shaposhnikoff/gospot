@@ -53,6 +53,7 @@ type bmLinks struct {
 type linksReply struct {
 	CSRF     string        `json:"csrf"`
 	BM       *bmLinks      `json:"bm"`
+	TGIF     *tgifInfo     `json:"tgif"`
 	Managers []linkManager `json:"managers"`
 }
 
@@ -319,7 +320,9 @@ func serveLinks(w http.ResponseWriter, r *http.Request, bm *bmManager, send func
 		}
 		reply := linksReply{CSRF: csrf, Managers: linkManagers(host)}
 		if host.on("DMR", "Enable") {
-			if name, id := dmrMaster(host, dmrGWINI.load()); strings.HasPrefix(name, "BM") {
+			gw := dmrGWINI.load()
+			reply.TGIF = tgifPanel(host, gw) // local files only; the TGIF API is fetched separately
+			if name, id := dmrMaster(host, gw); strings.HasPrefix(name, "BM") {
 				ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 				static, dynamic, err := bmProfile(ctx, bm, host, id)
 				cancel()

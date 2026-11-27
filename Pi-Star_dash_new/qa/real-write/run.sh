@@ -22,6 +22,8 @@ if [[ ${1:-} == --factory ]]; then scenario+=(--factory); shift; fi
 if [[ ${1:-} == --wifi ]]; then scenario+=(--wifi); wifi=true; shift; fi
 if [[ ${1:-} == --calibration ]]; then scenario+=(--calibration); shift; fi
 if [[ ${1:-} == --jitter ]]; then scenario+=(--jitter); shift; fi
+tgif=false
+if [[ ${1:-} == --tgif ]]; then scenario+=(--tgif); tgif=true; shift; fi
 if (($#)); then
   [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
@@ -75,6 +77,15 @@ if $wifi; then stand_conf=(-e 's|^WIFI_BACKEND=.*|WIFI_BACKEND=wpa_supplicant|')
 sed "${stand_conf[@]}" -e 's|^CONF_MMDVMHOST=.*|CONF_MMDVMHOST=/etc/MMDVM-Host.ini|' -e 's|^CONF_DMRGATEWAY=.*|CONF_DMRGATEWAY=/etc/DMRGateway.ini|' \
     -e 's|^DASHBOARD_LIB_DIR=.*|DASHBOARD_LIB_DIR=/usr/local/libexec|' -e 's|^DASHBOARD_UI_DIR=.*|DASHBOARD_UI_DIR=/usr/local/share/pistar-native-ui|' \
     pistar.conf >"$work/pistar.conf"
+if $tgif; then
+  # The container has no internet: only the stand's pistar.conf points TGIF at
+  # fake_tgif.py inside it (HTTPS with the stand certificate, legacy over HTTP).
+  # DMRGateway network 1 becomes the TGIF master with a 9-digit ID.
+  sed -i -e 's|^TGIF_API_URL=.*|TGIF_API_URL=https://127.0.0.1:8601/v1/|' \
+         -e 's|^TGIF_SESSION_URL=.*|TGIF_SESSION_URL=http://127.0.0.1:8602/api/sessions/update/|' "$work/pistar.conf"
+  sed -i -e 's/^Address=192\.0\.2\.11$/Address=tgif.network/' -e 's/^Id=10001$/Id=234123401/' "$work/DMRGateway.ini"
+  grep -qx 'Address=tgif.network' "$work/DMRGateway.ini" && grep -qx 'Id=234123401' "$work/DMRGateway.ini"
+fi
 test -s "$work/sudoers"
 docker network create --internal "$name" >/dev/null
 docker run -d --name "$name" --network "$name" \
@@ -111,9 +122,23 @@ docker exec "$name" sh -eu -c '
   chmod 0440 /etc/sudoers.d/pistar-wizard; visudo -c
   touch /run/pistar-qa/events
 '
+wizard_env=()
+if $tgif; then
+  docker cp "$fixture/fake_tgif.py" "$name:/usr/local/libexec/fake_tgif.py"
+  docker exec "$name" sh -eu -c '
+    printf "[Pi-Star]\nVersion=4.3.9\n" >/etc/pistar-release
+    # Pi-Star keeps the radio configs world-readable (classic restore writes 0644);
+    # the admin page reads them to find the TGIF master and ID.
+    chmod 644 /etc/DMRGateway.ini /etc/MMDVM-Host.ini
+  '
+  docker exec -d "$name" python3 -I /usr/local/libexec/fake_tgif.py --settings /etc/pistar-dashboard/pistar.conf \
+    --cert /run/credentials/cert.pem --key /run/credentials/key.pem --log /run/pistar-qa/tgif-requests --delay 1.5
+  # Trust the stand certificate for the fake HTTPS API only in this stand.
+  wizard_env=(-e SSL_CERT_FILE=/run/credentials/cert.pem)
+fi
 # The status panel feeds /manage/api/dashboard (theme, versions); it listens on PANEL_PORT from pistar.conf.
 docker exec -d --user pistar-wizard "$name" sh -c 'exec /usr/local/bin/pistar-wizard 2>>/tmp/pistar-panel.log'
-docker exec -d --user pistar-wizard -e CREDENTIALS_DIRECTORY=/run/credentials "$name" \
+docker exec -d --user pistar-wizard -e CREDENTIALS_DIRECTORY=/run/credentials ${wizard_env[@]+"${wizard_env[@]}"} "$name" \
   sh -c 'exec /usr/local/bin/pistar-wizard -admin-listen :8443 -tls-cert /run/credentials/cert.pem -tls-key /run/credentials/key.pem 2>>/tmp/pistar-wizard.log'
 ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name")
 [[ $ip =~ ^([0-9]+\.){3}[0-9]+$ ]]

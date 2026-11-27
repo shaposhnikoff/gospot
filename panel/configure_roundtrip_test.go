@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -163,5 +165,58 @@ func TestConfigureCallsignWithoutIrcDDBGateway(t *testing.T) {
 	}
 	if v := req.Changes["mmdvmhost"]["General"]["Callsign"]; v == nil || *v != "M0XYZ" {
 		t.Fatalf("%+v", req.Changes)
+	}
+}
+
+// On a board seeded from config_clean.zip, saving a new Node Callsign must
+// leave no M1ABC in any key the plan keeps of a file it changes: the Pi-Star
+// handlers refuse to start a gateway whose config still contains M1ABC.
+func TestConfigureCallsignClearsSeededDefaults(t *testing.T) {
+	z, err := zip.OpenReader(filepath.Join("..", "Pi-Star_v4_Binaries_Bin", "config_clean.zip"))
+	if err != nil {
+		t.Skip("config_clean.zip not present")
+	}
+	defer z.Close()
+	files := map[string]string{}
+	for _, f := range z.File {
+		r, _ := f.Open()
+		b, _ := io.ReadAll(r)
+		r.Close()
+		files[f.Name] = string(b)
+	}
+	all := cfgSections
+	ctlEnv(t)
+	cfgSections = all
+	st := ctlState(files, map[string]*string{"mmdvmhost": ctlMarker("zumspotgpio"), "dstarrepeater": nil})
+	c := &cfgContext{St: st}
+	form := ctlForm(c)
+	if form["confCallsign"] != "M1ABC" {
+		t.Fatalf("shown %q", form["confCallsign"])
+	}
+	form["confCallsign"] = "UT3UDX"
+	req, err := planCfgApply(c, "r1", form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"ysfgateway", "mmdvmhost", "ircddbgateway", "p25gateway", "nxdngateway", "dgidgateway"} {
+		if req.Changes[file] == nil {
+			t.Errorf("%s not changed", file)
+			continue
+		}
+		for section, keys := range st.Files[file] {
+			for key, old := range keys {
+				if !strings.Contains(old, "M1ABC") {
+					continue
+				}
+				v, planned := req.Changes[file][section][key]
+				if !planned || (v != nil && strings.Contains(*v, "M1ABC")) {
+					t.Errorf("%s [%s] %s keeps %q", file, section, key, old)
+				}
+			}
+		}
+	}
+	// An untouched save on the same files still writes nothing.
+	if req, _ := planCfgApply(c, "r1", ctlForm(c)); req.Changes != nil || req.Restart != nil {
+		t.Fatalf("untouched: %+v", req.Changes)
 	}
 }

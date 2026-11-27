@@ -102,6 +102,7 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 	slot := make(chan struct{}, 1)
 	bm := newBMManager(helper)
 	cal := newCalibrator(startCalibrationHelper, runSudo)
+	tgif := newTGIFClient()
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Cache-Control", "no-store")
@@ -142,6 +143,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 			return
 		case "/manage/api/configure/factory-reset":
 			serveFactoryReset(w, r, runConfigureHelper)
+			return
+		case "/manage/api/links/tgif":
+			serveTGIF(w, r, tgif)
 			return
 		case "/manage/api/backup/classic":
 			serveClassicBackup(w, r, runConfigureHelper, time.Now())

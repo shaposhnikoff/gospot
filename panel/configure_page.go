@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"reflect"
 	"sort"
@@ -262,6 +263,13 @@ func planCfgApply(c *cfgContext, revision string, form cfgForm) (configChange, e
 		base = &cfgPlan{ctx: c}
 	}
 	dropStored(c, &p.change)
+	staged := map[string]map[string]map[string]*string{}
+	for file, sections := range p.change.Changes {
+		staged[file] = map[string]map[string]*string{}
+		for section, keys := range sections {
+			staged[file][section] = maps.Clone(keys)
+		}
+	}
 	same := func(a, b *string) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
 	for file, sections := range p.change.Changes {
 		for section, keys := range sections {
@@ -276,6 +284,23 @@ func planCfgApply(c *cfgContext, revision string, form cfgForm) (configChange, e
 		}
 		if len(sections) == 0 {
 			delete(p.change.Changes, file)
+		}
+	}
+	// A file the edit changes also gets the classic changes to keys it
+	// already has (migrations such as dropping YSFGateway's old [aprs.fi]),
+	// so it is never left half-migrated; defaults for missing keys are still
+	// not added.
+	for file := range p.change.Changes {
+		for section, keys := range staged[file] {
+			for key, v := range keys {
+				if _, present := c.St.Files[file][section][key]; !present {
+					continue
+				}
+				if p.change.Changes[file][section] == nil {
+					p.change.Changes[file][section] = map[string]*string{}
+				}
+				p.change.Changes[file][section][key] = v
+			}
 		}
 	}
 	for op, v := range p.change.System {

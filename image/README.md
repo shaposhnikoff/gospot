@@ -1,8 +1,8 @@
-# Pi-Star OS image (Raspberry Pi OS Trixie, armhf)
+# GoSpot OS image (Raspberry Pi OS Trixie, armhf)
 
 `image/build.sh` builds a Raspberry Pi OS Lite **Trixie (Debian 13) armhf**
 image locally with Docker and a pinned [pi-gen](https://github.com/RPi-Distro/pi-gen).
-The Pi-Star software comes from two local Debian packages installed with
+The radio software comes from two local Debian packages installed with
 `apt-get install ./…deb` inside the image, so their dependencies resolve from
 the Raspberry Pi OS archive:
 

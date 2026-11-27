@@ -17,6 +17,19 @@ import (
 	"time"
 )
 
+// bmNumber reads a BrandMeister API number sent either as a JSON number or
+// as a string ("talkgroup":"91","slot":"1" in device profiles).
+type bmNumber int
+
+func (n *bmNumber) UnmarshalJSON(b []byte) error {
+	v, err := strconv.Atoi(strings.Trim(string(b), `"`))
+	if err != nil {
+		return err
+	}
+	*n = bmNumber(v)
+	return nil
+}
+
 type bmPeer struct {
 	ID      uint32 `json:"id"`
 	Simplex bool   `json:"simplex"`
@@ -172,8 +185,8 @@ func (b *bmManager) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		type sub struct {
-			Slot  int `json:"slot"`
-			Group int `json:"talkgroup"`
+			Slot  bmNumber `json:"slot"`
+			Group bmNumber `json:"talkgroup"`
 		}
 		var profile struct {
 			Static  []sub `json:"staticSubscriptions"`

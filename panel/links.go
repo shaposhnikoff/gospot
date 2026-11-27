@@ -281,8 +281,8 @@ func bmProfile(ctx context.Context, b *bmManager, host iniData, id string) ([]st
 		return nil, nil, fmt.Errorf("BrandMeister API: %d", status)
 	}
 	type sub struct {
-		Slot  int `json:"slot"`
-		Group int `json:"talkgroup"`
+		Slot  bmNumber `json:"slot"`
+		Group bmNumber `json:"talkgroup"`
 	}
 	var p struct{ Static, Dynamic []sub }
 	var raw struct {

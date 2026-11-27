@@ -114,7 +114,9 @@ func TestBrandMeisterManager(t *testing.T) {
 			auth = auth[:7]
 		}
 		calls = append(calls, r.Method+" "+r.URL.Path+" "+string(body)+" "+auth)
-		w.Write([]byte(`{"staticSubscriptions":[{"slot":0,"talkgroup":91}],"dynamicSubscriptions":[]}`))
+		// The live API sends numbers as strings (api.brandmeister.network, 2026-11-27).
+		w.Write([]byte(`{"autoStatic":null,"blockedGroups":[],"dynamicSubscriptions":[{"slot":"2","talkgroup":"9990"}],"clusters":[],` +
+			`"staticSubscriptions":[{"talkgroup":"91","slot":"0","repeaterid":"234123401"}],"timedSubscriptions":[]}`))
 	}))
 	defer api.Close()
 	bm := newBMManager(nil)
@@ -127,7 +129,7 @@ func TestBrandMeisterManager(t *testing.T) {
 		return r
 	}
 	r := get()
-	if r.BM == nil || r.BM.Master != "BM 2341 United Kingdom" || r.BM.ID != "234123401" || r.BM.Manager || strings.Join(r.BM.Static, ",") != "TG91" {
+	if r.BM == nil || r.BM.Master != "BM 2341 United Kingdom" || r.BM.ID != "234123401" || r.BM.Manager || strings.Join(r.BM.Static, ",") != "TG91" || strings.Join(r.BM.Dynamic, ",") != "TG9990(2)" {
 		t.Fatalf("without key: %+v", r.BM)
 	}
 	post := func(body string) *httptest.ResponseRecorder {

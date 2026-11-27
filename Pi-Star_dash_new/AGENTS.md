@@ -66,6 +66,13 @@
 
 - `gospot.conf` — conffile. Новые ключи из пакета `postinst` дописывает в изменённую вручную копию (`gospot-conf-merge`), существующие строки не трогает; иначе службы не стартуют на неизвестной им конфигурации.
 
+## Хост-файлы: gospot-hostfiles (решения пользователя 2026-11-27)
+
+- Хост-файлы и базы ID собирает workflow в <https://github.com/shaposhnikoff/gospot-hostfiles> и публикует на <https://shaposhnikoff.github.io/gospot-hostfiles/> с теми же именами файлов, что скачивает `HostFilesUpdate.sh`.
+- Уточнение пользователя: **«нельзя все качать с pistar.uk»** — только первоисточники (RadioID.net, BrandMeister API, XLX API, списки g4klx); pistar.uk не используется ни как источник, ни как запасной вариант.
+- YSF/P25/NXDN/M17-хосты (и `TGList_YSF/P25/NXDN.txt`) ведёт DVRef.com; его API закрыт Cloudflare, эти файлы ждут доступа (токен пользователя). RefCheck (`hostfiles.refcheck.radio`) закрывается 2027-01-01 и не используется.
+- Следующий шаг: клиент `HostFilesUpdate.sh` в пакете берёт базовый URL из `gospot.conf` и скачивает атомарно с проверкой `SHA256SUMS`.
+
 ## Переезд в репозиторий gospot-radio (решения пользователя 2026-11-27)
 
 - Проект переезжает в <https://github.com/shaposhnikoff/gospot-radio> **чистым стартом**: один первый коммит, только живой код. Старый репозиторий `gospot` остаётся архивом.

@@ -15,7 +15,7 @@ type RadioInfo struct {
 }
 
 func readRadio() RadioInfo {
-	f, err := os.Open("/etc/MMDVM-Host.ini")
+	f, err := os.Open(mmdvmINI.location())
 	if err != nil {
 		return RadioInfo{}
 	}

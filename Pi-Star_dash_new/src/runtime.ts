@@ -22,12 +22,30 @@ export async function readJSON(path: string): Promise<unknown> {
   if (!r.ok) throw Error(`HTTP ${r.status}`);
   return r.json();
 }
-export async function detectRuntime(): Promise<{mode:'demo'|'pi', classicPort:number|null}> {
+export function serviceOrigin(origin: string, protocol: 'http:'|'https:', port: unknown): string | null {
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+  const url = new URL(origin);
+  url.protocol = protocol;
+  url.port = String(port);
+  return url.origin;
+}
+export async function detectRuntime(): Promise<{mode:'demo'|'pi', classicPort:number|null, wizardPort:number|null, preview:boolean}> {
   const x = await readJSON('./runtime.json');
   if (object(x) && x.backend === 'pistar-go') {
     const port = x.classicHttpsPort;
-    return {mode:'pi', classicPort:typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65535 ? port : null};
+    return {mode:'pi', classicPort:typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65535 ? port : null,
+      wizardPort:typeof x.wizardPort === 'number' ? x.wizardPort : null, preview:x.preview === true};
   }
-  if (object(x) && x.backend === 'demo') return {mode:'demo',classicPort:null};
+  if (object(x) && x.backend === 'demo') return {mode:'demo',classicPort:null,wizardPort:null,preview:false};
   throw Error('Не распознан режим панели');
+}
+
+// HTTP origin of the operator dashboard as advertised by the management server.
+export async function operatorOrigin(): Promise<string | null> {
+  try {
+    const c = await readJSON('/runtime.json');
+    return serviceOrigin(location.origin, 'http:', object(c) ? c.operatorPort : null);
+  } catch {
+    return null;
+  }
 }

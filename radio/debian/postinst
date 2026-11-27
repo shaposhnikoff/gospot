@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+[ "$1" = configure ] || exit 0
+. /usr/share/pistar-radio/paths
+if ! getent group "$RADIO_USER" >/dev/null; then groupadd --system "$RADIO_USER"; fi
+if ! getent passwd "$RADIO_USER" >/dev/null; then
+    useradd --system --gid "$RADIO_USER" --groups dialout,tty --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$RADIO_USER"
+fi
+install -d -o root -g "$RADIO_USER" -m 0775 "$PISTAR_LOG_DIR"
+install -d -m 0755 "$PISTAR_HOSTS_DIR"
+if [ ! -e "$PISTAR_RELEASE_FILE" ]; then
+    printf '[Pi-Star]\nVersion = 4.3-native\nHardware = RPi\n' >"$PISTAR_RELEASE_FILE"
+fi
+# Missing radio configurations start from the Pi-Star defaults, as on a Pi-Star
+# image; existing files are never touched.
+"$RADIO_SHARE_DIR/seed-configs" "$RADIO_SHARE_DIR/config-seed" "$RADIO_SHARE_DIR/config_clean.zip"
+ldconfig
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    # Data sets only; radio services are enabled by the operator or radio/migrate-board.
+    systemctl enable --now pistar-hostfiles.timer >/dev/null
+fi

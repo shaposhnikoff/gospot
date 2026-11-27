@@ -9,8 +9,8 @@ import {checkYSF} from './packaged_ysf.mjs';
 
 const board='192.168.210.194', root=`http://${board}:8789`, admin=`https://${board}:8788`;
 const mode=process.argv[2];
-assert([undefined,'--deb-readonly','--deb-fixture-write','--deb-ysf-write'].includes(mode));
-const write=mode==='--deb-fixture-write'||mode==='--deb-ysf-write';
+assert([undefined,'--deb-readonly','--deb-fixture-write','--deb-ysf-write','--deb-dmr-write'].includes(mode));
+const write=['--deb-fixture-write','--deb-ysf-write','--deb-dmr-write'].includes(mode);
 if(write){
   assert.deepEqual(JSON.parse(execFileSync('ip',['-j','link'])).map(i=>i.ifname),['lo']);
   assert.equal(JSON.parse(execFileSync('ip',['-j','route','get',board]))[0].dev,'lo');
@@ -61,7 +61,7 @@ try {
   const page=(await (await fetch('http://'+debug+'/json/list')).json()).find(t=>t.type==='page');
   ws=new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});
-  let seq=0; const pending=new Map(), blocked=[],posts=[];
+  let seq=0; const pending=new Map(), blocked=[],posts=[],reads=[];
   const cdp=(method,params={})=>new Promise((r,j)=>{pending.set(++seq,{r,j});ws.send(JSON.stringify({id:seq,method,params}));});
   ws.onmessage=({data})=>{
     const {id,result,error,method,params:p}=JSON.parse(data);
@@ -70,18 +70,23 @@ try {
       const u=new URL(p.request.url);
       const save=write && p.request.method==='POST' && ['/manage/api/services','/manage/api/protocols'].some(path=>u.href===admin+path);
       const ok=(['GET','HEAD'].includes(p.request.method) && [root,admin].includes(u.origin)) || save;
-      if(save)posts.push({id:p.networkId,path:u.pathname,csrf:Object.entries(p.request.headers).some(([k,v])=>k.toLowerCase()==='x-pistar-csrf'&&/^[0-9a-f]{64}$/.test(v)),body:JSON.parse(p.request.postData)});
+      if(save){
+        const token=Object.entries(p.request.headers).find(([k])=>k.toLowerCase()==='x-pistar-csrf')?.[1]??'';
+        posts.push({id:p.networkId,path:u.pathname,csrf:/^[0-9a-f]{64}$/.test(token),csrfDigest:createHash('sha256').update(token).digest('hex'),body:JSON.parse(p.request.postData)});
+      }
       if(!ok)blocked.push(p.request.method+' '+u.origin+u.pathname);
       void cdp(ok?'Fetch.continueRequest':'Fetch.failRequest',ok?{requestId:p.requestId}:{requestId:p.requestId,errorReason:'BlockedByClient'});
     } else if(method==='Fetch.authRequired'){
       const a=p.authChallenge;
       const allow=a.source==='Server' && a.origin===admin && a.realm==='Pi-Star' && a.scheme==='basic' && new URL(p.request.url).pathname.startsWith('/manage/');
       void cdp('Fetch.continueWithAuth',{requestId:p.requestId,authChallengeResponse:allow?
-        {response:'ProvideCredentials',username:'admin',password:ssh('sudo -n cat /etc/pistar-wizard/admin-password')}:{response:'CancelAuth'}});
+        {response:'ProvideCredentials',username:'pi-star',password:ssh('sudo -n cat /etc/pistar-wizard/admin-password')}:{response:'CancelAuth'}});
     } else if(method==='Network.responseReceived' && posts.some(x=>x.id===p.requestId)){
       posts.find(x=>x.id===p.requestId).status=p.response.status;
-    } else if(method==='Network.responseReceived' && p.response.url===admin+'/manage/api/services'){
-      console.log('DMR settings GET HTTP',p.response.status);
+    } else if(method==='Network.responseReceived' && ['/manage/api/services','/manage/api/protocols'].some(k=>p.response.url===admin+k)){
+      const path=new URL(p.response.url).pathname;
+      reads.push({path,status:p.response.status});
+      console.log('GET',path,'HTTP',p.response.status);
     } else if(method==='Network.responseReceived' && p.type==='Document'){
       console.log(`Document ${p.response.status} ${p.response.url.split('?')[0]}`);
     } else if(method==='Network.requestWillBeSent' && p.redirectResponse && p.type==='Document'){
@@ -90,7 +95,7 @@ try {
   };
   await cdp('Network.enable'); await cdp('Fetch.enable',{handleAuthRequests:true});
   if(mode){
-    await (mode==='--deb-ysf-write'?checkYSF:checkPackaged)({write,wd,js,click,until,ssh,root,admin,posts,cdp});
+    await (mode==='--deb-ysf-write'?checkYSF:checkPackaged)({write,wd,js,click,until,ssh,root,admin,posts,reads,cdp,dmrOnly:mode==='--deb-dmr-write'});
     assert.deepEqual(blocked,[]);
   }else{
   let failures=0;

@@ -5,13 +5,20 @@ umask 022
 npm run check
 d=$(mktemp -d)
 trap 'rm -rf "$d"' EXIT
-npm run package:stock | tee "$d/package.log"
-root=$(sed -n 's|^Stock Pi-Star docroot .*: \(/.*\)$|\1|p' "$d/package.log")
-[[ $root == "$PWD"/build/release-*/docroot && -s $root/admin/configure.php ]]
-release=$(basename "$(dirname "$root")")
+npm run package:native | tee "$d/package.log"
+root=$(sed -n 's|^Native release: \(/.*\)$|\1|p' "$d/package.log")
+[[ $root == "$PWD"/build/release-* && -s $root/ui/index.html ]]
+release=$(basename "$root")
 p=$d/pkg
-lib=/usr/lib/pistar-dashboard
-share=/usr/share/pistar-dashboard
+# All installation paths and ports come from pistar.conf (see AGENTS.md).
+# shellcheck source=../pistar.conf
+source ./pistar.conf
+lib=$DASHBOARD_LIB_DIR
+ui=$DASHBOARD_UI_DIR
+share=$(dirname "$ui")
+wizard=$WIZARD_CONFIG_DIR
+[[ $DASHBOARD_BM_STATE_DIR == /var/lib/* && $DASHBOARD_BM_STATE_DIR != */*/*/*/* ]]
+bm_state=${DASHBOARD_BM_STATE_DIR#/var/lib/}
 units=/lib/systemd/system
 radio=../image/stage-mmdvm/00-install/files
 install -d "$p"/DEBIAN "$p$lib" "$p$share" "$p$units"
@@ -20,30 +27,43 @@ version=${DEB_VERSION:-$base}
 [[ $version =~ ^[0-9][A-Za-z0-9.+~-]*$ ]]
 dpkg --validate-version "$version"
 sed "s/^Version: .*/Version: $version/" debian/control >"$p/DEBIAN/control"
-install -m755 debian/{postinst,prerm,postrm} "$p/DEBIAN/"
-install -Dm440 debian/sudoers "$p/etc/sudoers.d/pistar-dashboard"
-install -m755 ../panel/helper/{pistar-config,pistar-archive} "$p$lib/"
+install -m755 debian/{prerm,postrm} "$p/DEBIAN/"
+sed "s|@DASHBOARD_LIB_DIR@|$lib|g" debian/postinst >"$p/DEBIAN/postinst"
+chmod 755 "$p/DEBIAN/postinst"
+install -d -m755 "$p/etc/sudoers.d" "$p/etc/pistar-dashboard"
+sed "s|@DASHBOARD_LIB_DIR@|$lib|g" debian/sudoers >"$p/etc/sudoers.d/pistar-dashboard"
+chmod 440 "$p/etc/sudoers.d/pistar-dashboard"
+if grep -q @ "$p/etc/sudoers.d/pistar-dashboard"; then echo "unresolved sudoers placeholder" >&2; exit 1; fi
+install -m644 pistar.conf "$p/etc/pistar-dashboard/pistar.conf"
+install -d -m755 "$p$lib"
+install -m644 pistar.conf "$p$lib/pistar.conf.default"
+install -m755 debian/pistar-conf-merge "$p$lib/pistar-conf-merge"
+printf '%s\n' /etc/pistar-dashboard/pistar.conf >"$p/DEBIAN/conffiles"
+install -m755 ../panel/helper/{pistar-config,pistar-power,pistar-native-update,pistar-configure,pistar-modem,pistar-calibrate,pistar-jitter} "$p$lib/"
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go -C ../panel build -trimpath \
-  -ldflags="-s -w -X main.adminAssets=$share/classic/operator -X main.configHelper=$lib/pistar-config -X main.archiveHelperPath=$lib/pistar-archive" \
+  -ldflags="-s -w -X main.dashboardVersion=$version" \
   -o "$p$lib/panel" .
-cp -a "$root" "$p$share/classic"
-find "$p$share/classic" -type d -exec chmod 755 {} +
-find "$p$share/classic" -type f -exec chmod 644 {} +
+install -d "$p$share"
+cp -a "$root/ui" "$p$ui"
 printf '%s\n' "$release" >"$p$share/RELEASE"
-install -m644 "$(dirname "$root")/staging/server.py" "$p$lib/server.py"
-ln -s ../../share/pistar-dashboard/classic/operator "$p$lib/dist"
 for unit in psdash-stage pistar-panel pistar-wizard; do
   case $unit in
-    psdash-stage) src=staging/$unit.service; cmd="/usr/bin/python3 -IB $lib/server.py" ;;
-    pistar-panel) src=$radio/$unit.service; cmd="$lib/panel -listen :8787" ;;
-    pistar-wizard) src=$radio/$unit.service; cmd="$lib/panel -admin-listen :8788 -tls-cert /etc/pistar-wizard/tls-cert.pem -tls-key %d/tls-key" ;;
+    psdash-stage) src=staging/$unit.service; cmd="$lib/panel -operator-listen :$OPERATOR_PORT" ;;
+    pistar-panel) src=$radio/$unit.service; cmd="$lib/panel -listen :$PANEL_PORT" ;;
+    pistar-wizard) src=$radio/$unit.service; cmd="$lib/panel -admin-listen :$MANAGEMENT_PORT -tls-cert $wizard/tls-cert.pem -tls-key %d/tls-key" ;;
   esac
   sed "s|^ExecStart=.*|ExecStart=$cmd|" "$src" >"$p$units/$unit.service"
   # Existing pilot units are administrator files in /etc: retain them for removal.
   install -d "$p$units/$unit.service.d"
   printf '[Service]\nExecStart=\nExecStart=%s\n' "$cmd" >"$p$units/$unit.service.d/50-pistar-dashboard.conf"
+  if [[ $unit == pistar-wizard ]]; then
+    printf 'LoadCredential=\nLoadCredential=admin-password:%s/admin-password\nLoadCredential=tls-key:%s/tls-key.pem\nStateDirectory=%s\nStateDirectoryMode=0700\n' \
+      "$wizard" "$wizard" "$bm_state" >>"$p$units/$unit.service.d/50-pistar-dashboard.conf"
+  fi
 done
-(cd "$p" && find usr lib etc -type f -print0 | LC_ALL=C sort -z | xargs -0 md5sum >DEBIAN/md5sums)
+node scripts/audit-native.mjs "$p"
+# Conffiles are tracked by dpkg separately, as in debhelper packages.
+(cd "$p" && find usr lib etc -type f ! -path etc/pistar-dashboard/pistar.conf -print0 | LC_ALL=C sort -z | xargs -0 md5sum >DEBIAN/md5sums)
 dest="build/$release/pistar-dashboard_${version}_armhf.deb"
 dpkg-deb --root-owner-group --build "$p" "$dest"
 sha256sum "$dest"

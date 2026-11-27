@@ -17,9 +17,9 @@
       if(save) {
         const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf},body:JSON.stringify(cfg)});
         if(!r.ok) throw Error((await r.text()).trim() || `HTTP ${r.status}`);
-        message='Настройки сохранены.';
       }
-      await load();
+       await load();
+       if(save)message='Настройки сохранены.';
     } catch(e) {error=e instanceof Error?e.message:'Ошибка связи с узлом.';}
     finally {busy=false;}
   }

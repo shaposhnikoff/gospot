@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -118,5 +119,15 @@ func TestNativeSystemPartialSnapshotOnProbeTimeout(t *testing.T) {
 		if svc.State != "unknown" {
 			t.Fatalf("accepted a timed-out observation: %+v", svc)
 		}
+	}
+}
+
+func TestClassicServices(t *testing.T) {
+	got := classicServices(map[string]bool{"MMDVM-Host": true, "timeserverd": true},
+		[]string{"python3 " + pistarSbinDir + "/pistar-watchdog", "bash -c true"})
+	want := []systemService{{"MMDVMHost", "running"}, {"DStarRepeater", "stopped"}, {"ircDDBGateway", "stopped"},
+		{"TimeServer", "running"}, {"PiStar-Watchdog", "running"}, {"PiStar-Remote", "stopped"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%+v", got)
 	}
 }

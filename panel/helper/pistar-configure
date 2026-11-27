@@ -1,0 +1,1479 @@
+#!/usr/bin/python3 -I
+"""Privileged backend of the Configuration page.
+
+read   -> JSON {revision, files: {name: {section: {key: value}}}, system: {...}}
+apply  <- JSON {revision, changes: {name: {section: {key: value|null}}},
+                restart: [unit, ...], system: {hostname?, timezone?, controller?}}
+wifi-read, wifi-write, wifi-scan, wifi-action up|down|reset
+       -> the Wi-Fi page (admin/wifi.php); see the Wi-Fi section below
+
+Only the configuration files named in pistar.conf are read or written; values
+are single-line strings; comments, ordering, ownership and modes are kept.
+Every change is written atomically and rolled back, together with the service
+restarts, if any step fails.
+"""
+import errno
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+
+
+class _Lazy:
+    """Import a module on first use: read, the common call, needs neither."""
+
+    def __init__(self, name):
+        self._name = name
+
+    def __getattr__(self, attr):
+        import importlib
+        return getattr(importlib.import_module(self._name), attr)
+
+
+subprocess = _Lazy("subprocess")
+tempfile = _Lazy("tempfile")
+
+SETTINGS = "/etc/pistar-dashboard/pistar.conf"
+
+
+def load_settings():
+    """Read pistar.conf (KEY=value), trusted only if no one else can write it.
+
+    Unprivileged runs (tests) may name another file in PISTAR_SETTINGS; root,
+    as under sudo, always uses the installed file."""
+    path = SETTINGS
+    if os.geteuid() != 0:
+        path = os.environ.get("PISTAR_SETTINGS", SETTINGS)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o022:
+        os.close(fd)
+        raise SystemExit("unsafe settings file")
+    values = {}
+    with os.fdopen(fd, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            key, sep, value = line.partition("=")
+            if not sep or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or re.search(r"[\s\"'$`\\]", value) or key in values:
+                raise SystemExit("invalid settings file")
+            values[key] = value
+    return values
+
+
+def setting_path(values, key):
+    value = values.get(key, "")
+    if not value.startswith("/") or os.path.normpath(value) != value:
+        raise SystemExit(f"{key} must be a clean absolute path")
+    return Path(value)
+
+
+_SETTINGS = load_settings()
+# Configuration files the page may touch, by short name.
+FILES = {name: setting_path(_SETTINGS, "CONF_" + name.upper().replace("-", "_")) for name in (
+    "mmdvmhost", "dmrgateway", "ysfgateway", "p25gateway", "nxdngateway", "m17gateway",
+    "dapnetgateway", "dgidgateway", "aprsgateway", "ircddbgateway", "dstarrepeater",
+    "timeserver", "starnetserver", "ysf2dmr", "ysf2nxdn", "ysf2p25", "dmr2ysf", "dmr2nxdn",
+    "pistar-remote", "mobilegps")}
+STATE = setting_path(_SETTINGS, "DASHBOARD_STATE_DIR")
+MARKERS = {"mmdvmhost": setting_path(_SETTINGS, "MARKER_MMDVMHOST"),
+           "dstarrepeater": setting_path(_SETTINGS, "MARKER_DSTARREPEATER")}
+# Flag files reported with the markers and toggled by system operations.
+FLAGS = {"timeserver-disable": setting_path(_SETTINGS, "FLAG_TIMESERVER_DISABLE"),
+         "hostfiles-nodextra": setting_path(_SETTINGS, "FLAG_HOSTFILES_NODEXTRA"),
+         "hostfiles-ysfupper": setting_path(_SETTINGS, "FLAG_HOSTFILES_YSFUPPER")}
+HOSTNAME = setting_path(_SETTINGS, "HOSTNAME_FILE")
+HOSTS = setting_path(_SETTINGS, "HOSTS_FILE")
+HOSTAPD = setting_path(_SETTINGS, "HOSTAPD_CONF")
+HOSTAP_OFF = setting_path(_SETTINGS, "HOSTAP_OFF_FLAG")
+UPNP = setting_path(_SETTINGS, "PISTAR_UPNP_SCRIPT")
+CRONTAB = setting_path(_SETTINGS, "CRONTAB_FILE")
+WIZARD_DIR = setting_path(_SETTINGS, "WIZARD_CONFIG_DIR")
+LINUX_USER = _SETTINGS.get("PISTAR_LINUX_USER", "")
+WIZARD_UNIT = _SETTINGS["UNIT_WIZARD"]
+# Services the page may restart: the Pi-Star radio daemons and helpers.
+UNITS = {u + ".service" for u in (
+    "mmdvmhost", "dmrgateway", "ysfgateway", "ysfparrot", "p25gateway", "p25parrot", "nxdngateway",
+    "nxdnparrot", "nxdn2dmr", "dapnetgateway", "m17gateway", "dgidgateway", "aprsgateway", "ysf2dmr",
+    "ysf2nxdn", "ysf2p25", "dmr2ysf", "dmr2nxdn", "mobilegps", "ircddbgateway", "dstarrepeater",
+    "timeserver", "starnetserver", "pistar-remote", "pistar-watchdog")}
+LIMIT = 1 << 20
+
+# Expert > Full Edit: file, mode for a new file, services restarted after a save.
+FULL = {
+    "dmrgateway": (FILES["dmrgateway"], 0o644, ["mmdvmhost.service", "dmrgateway.service"]),
+    "pistar-remote": (FILES["pistar-remote"], 0o644, ["pistar-remote.service"]),
+    "wpaconfig": (setting_path(_SETTINGS, "WPA_SUPPLICANT_CONF"), 0o600, []),
+    "cron": (setting_path(_SETTINGS, "CRONTAB_FILE"), 0o644, []),
+    "rssidat": (setting_path(_SETTINGS, "PISTAR_HOSTS_DIR") / "RSSI.dat", 0o644, []),
+}
+# fulledit_cron.php pistar_cron_validate(): one diagnostic per offending line.
+CRON_RULES = [(re.compile(p, f), why) for p, f, why in (
+    (r"(?:^|[\s/;|&`$()=])(passwd|chpasswd|htpasswd)\b", re.I, "invokes a password-modification command (passwd / chpasswd / htpasswd)"),
+    (r"\busermod\b[^\n]*\s-p\b", re.I, "usermod -p sets a password hash directly"),
+    (r"(/etc/shadow|/etc/passwd|\.htpasswd)\b", re.I, "references an authentication file path"),
+    (r"(?:^|[\s/;|&`$()=])(nc|ncat|netcat)\b", re.I, "invokes nc / ncat / netcat"),
+    (r"\bsocat\b[^\n]*\b(EXEC|SYSTEM):", re.I, "socat with EXEC/SYSTEM token (spawns a process)"),
+    (r"/dev/(?:tcp|udp)/", 0, "reads or writes /dev/tcp/* or /dev/udp/* (reverse-shell pattern)"),
+    (r"\b(curl|wget|fetch)\b[^|\n]*\|\s*(?:bash|sh|zsh|ksh|dash|exec)\b", re.I, "pipes downloaded content directly into a shell"),
+    (r"\bpython[23]?\b[^\n]*-c[^\n]*(?:socket\.socket|os\.dup2)", re.I, "python reverse-shell pattern"),
+    (r"\bperl\b[^\n]*-e[^\n]*\bSocket\b", re.I, "perl reverse-shell pattern"),
+    (r"base64", re.I, "references base64 (no legitimate cron use; payload-obfuscation idiom)"),
+    (r"\bb64(?:decode|encode)\b", re.I, "python b64decode/b64encode (payload decoder)"),
+    (r"\bfromhex\b", re.I, "fromhex (hex payload decoder)"),
+    (r"\bxxd\b", re.I, "invokes xxd (hex dump / reverse-mode payload decoder)"),
+    (r"\\x[0-9a-fA-F]{2}", 0, "shell hex-escape literal (\\xNN — payload obfuscation)"),
+    (r"\\u[0-9a-fA-F]{4}", 0, "shell unicode-escape literal (\\uNNNN — payload obfuscation)"),
+    (r"(?:^|[\s/;|&`$()=])eval\b", re.I, "invokes eval (opaque shell-string execution)"),
+    (r"\bopenssl\b[^\n]*\s-d\b", re.I, "openssl with -d (decoder)"),
+)]
+
+
+def cron_blockers(text):
+    out = []
+    for i, line in enumerate(text.split("\n")):
+        trimmed = line.lstrip()
+        if not trimmed or trimmed[0] == "#":
+            continue
+        for pattern, why in CRON_RULES:
+            if pattern.search(line):
+                out.append(f"line {i + 1} ({why}): {line.strip()[:100]}")
+                break
+    return out
+
+
+# Expert > API Keys (fulledit_apikeys.php): id -> (file, title, seed text).
+KEYS = {
+    "bm": (setting_path(_SETTINGS, "BM_API_KEY_FILE"), "BrandMeister API Key", "[key]\napikey=None\n"),
+    "dapnet": (setting_path(_SETTINGS, "DAPNET_API_KEY_FILE"), "DAPNET API Credentials", "[DAPNETAPI]\nUSER=\nPASS=\nTRXAREA=\n"),
+    "tgif": (setting_path(_SETTINGS, "TGIF_API_KEY_FILE"), "TGIF Static Talkgroups API Key", "[key]\napikey=None\n"),
+}
+KEY_OWNER = _SETTINGS.get("DASHBOARD_ADMIN_USER", "")
+
+
+def keys_read():
+    out = []
+    for kid, (path, title, seed) in KEYS.items():
+        text, _ = read_file(path)
+        layout = Ini(text).layout() if text else []
+        if not any(keys for _, keys in layout):
+            layout = Ini(seed).layout()
+        out.append({"id": kid, "title": title, "sections": [[sec, keys] for sec, keys in layout if sec]})
+    return {"targets": out}
+
+
+def keys_write(request):
+    """apikey_install_ini(): rewrite the whole file, empty values as "none"."""
+    require(type(request) is dict and set(request) == {"target", "values"} and request["target"] in KEYS, "invalid request")
+    values = request["values"]
+    require(type(values) is dict and values, "invalid values")
+    lines = []
+    for section, keys in values.items():
+        require(type(section) is str and NAME.fullmatch(section) and type(keys) is dict, "invalid section")
+        lines.append(f"[{section}]")
+        for key, value in keys.items():
+            require(type(key) is str and NAME.fullmatch(key) and "=" not in key, "invalid key")
+            # BrandMeister API v2 keys are JWTs well beyond the 512-character INI limit.
+            require(type(value) is str and KEY_VALUE.fullmatch(value), "invalid value")
+            lines.append(f"{key}={value if value != '' else 'none'}")
+        lines.append("")
+    import pwd
+    owner = pwd.getpwnam(KEY_OWNER)
+
+    class Private:
+        st_uid, st_gid, st_mode = owner.pw_uid, owner.pw_gid, 0o600
+    replace(KEYS[request["target"]][0], "\n".join(lines) + "\n", Private)
+    return {"ok": True}
+
+
+# Backup/Restore (admin/config_backup.php backup_files()): archive name ->
+# (path, mode, owner). Owner None means root. Names match classic Pi-Star
+# archives, so their backups restore here and ours restore there.
+def backup_files():
+    s = _SETTINGS
+    files = {
+        "dhcpcd.conf": (setting_path(s, "DHCPCD_CONF"), 0o644, None),
+        "wpa_supplicant.conf": (setting_path(s, "WPA_SUPPLICANT_CONF"), 0o600, None),
+    }
+    for name in ("ircddbgateway", "mmdvmhost", "dstarrepeater", "dapnetgateway", "p25gateway", "m17gateway",
+                 "ysfgateway", "ysf2dmr", "dgidgateway", "nxdngateway", "dmrgateway", "starnetserver",
+                 "timeserver", "pistar-remote"):
+        files[name] = (FILES[name], 0o644, None)
+    files["dstar-radio.mmdvmhost"] = (MARKERS["mmdvmhost"], 0o644, None)
+    files["dstar-radio.dstarrepeater"] = (MARKERS["dstarrepeater"], 0o644, None)
+    files["hosts"] = (HOSTS, 0o644, None)
+    files["hostname"] = (HOSTNAME, 0o644, None)
+    for name, key in (("bmapi.key", "bm"), ("dapnetapi.key", "dapnet"), ("tgifapi.key", "tgif")):
+        files[name] = (KEYS[key][0], 0o600, KEY_OWNER)
+    files["pistar-css.ini"] = (setting_path(s, "PISTAR_CSS_FILE"), 0o644, None)
+    files["RSSI.dat"] = (setting_path(s, "PISTAR_HOSTS_DIR") / "RSSI.dat", 0o644, None)
+    return files
+
+
+ZIP_MAX = 256 * 1024
+UNPACKED_MAX = 4 * 1024 * 1024
+
+
+def backup():
+    import io, time, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, (path, _, _) in backup_files().items():
+            if name == "dhcpcd.conf":
+                text, _ = read_file(path)
+                # Only a static address is worth restoring (config_backup.php).
+                if not text or not any("static ip_address" in l and not l.lstrip().startswith("#") for l in text.splitlines()):
+                    continue
+            data, _ = read_file(path)
+            if data is not None:
+                z.writestr(zipfile.ZipInfo(name, time.gmtime()[:6]), data)
+    return buf.getvalue()
+
+
+def restore(blob, run=None, is_loaded=None):
+    import io, zipfile
+    run = run or systemctl
+    is_loaded = is_loaded or loaded
+    out = []
+    if not (0 < len(blob) <= ZIP_MAX):
+        return {"ok": False, "output": [f"Uploaded file is empty or too large (limit {ZIP_MAX // 1024} KB)."]}
+    try:
+        z = zipfile.ZipFile(io.BytesIO(blob))
+        infos = z.infolist()
+    except zipfile.BadZipFile:
+        return {"ok": False, "output": ["Uploaded file is not a valid .zip archive."]}
+    allowed = backup_files()
+    admit = {}
+    total = 0
+    for info in infos:
+        name = info.filename
+        if not name:
+            continue
+        if "/" in name or "\\" in name or "\0" in name or name.startswith("."):
+            return {"ok": False, "output": [f"Refusing ZIP — entry '{name[:64]}' has an unsafe name."]}
+        total += info.file_size
+        if total > UNPACKED_MAX:
+            return {"ok": False, "output": ["Refusing ZIP — unpacked size is too large."]}
+        if name in allowed:
+            admit[name] = info
+    timezone = None
+    if "config.php" in {i.filename for i in infos}:
+        m = re.search(rb"date_default_timezone_set\(\s*['\"]([^'\"]+)['\"]\s*\)", z.read("config.php")[:65536])
+        if m and Path("/usr/share/zoneinfo", m.group(1).decode(errors="replace")).is_file():
+            timezone = m.group(1).decode()
+    if not admit:
+        return {"ok": False, "output": ["ZIP contained no recognised Pi-Star config files."]}
+    contents = {}
+    for name, info in admit.items():
+        data = z.read(info)
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return {"ok": False, "output": [f"Refusing ZIP — {name} is not a text file."]}
+        require("\0" not in text, "binary content")
+        contents[name] = text
+    out.append(f"Your .zip file was uploaded and unpacked ({len(admit)} files).")
+    import pwd
+    # Snapshot everything a restore may touch, including both markers.
+    touched = set(admit) | {"dstar-radio.mmdvmhost", "dstar-radio.dstarrepeater"}
+    before = {}
+    for name in touched:
+        path = allowed[name][0]
+        text, st = read_file(path)
+        before[name] = (text, st)
+    written = []
+    try:
+        out.append("Writing new Config")
+        if any(n.startswith("dstar-radio.") for n in admit):
+            for n in ("dstar-radio.mmdvmhost", "dstar-radio.dstarrepeater"):
+                allowed[n][0].unlink(missing_ok=True)
+                written.append(n)
+        for name, text in contents.items():
+            path, mode, owner = allowed[name]
+            # root under sudo; the running user in unprivileged tests
+            uid, gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+            if owner and os.geteuid() == 0:
+                pw = pwd.getpwnam(owner)
+                uid, gid = pw.pw_uid, pw.pw_gid
+
+            class Target:
+                st_uid, st_gid, st_mode = uid, gid, mode
+            replace(path, text, Target)
+            written.append(name)
+        out.append(f"Installed {len(contents)} file(s).")
+        if timezone:
+            subprocess.run(["/usr/bin/timedatectl", "set-timezone", timezone], check=True, timeout=30,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            out.append(f"Timezone set to {timezone}.")
+        out.append("Starting Services.")
+        for unit in RESTORE_UNITS:
+            if is_loaded(unit):
+                run("restart", unit)
+    except Exception as exc:
+        # The reason goes to the caller's log; it never includes values.
+        print(f"pistar-configure: apply failed: {type(exc).__name__}", file=sys.stderr)
+        for name in reversed(written):
+            text, st = before[name]
+            path = allowed[name][0]
+            if text is None:
+                path.unlink(missing_ok=True)
+            else:
+                replace(path, text, st)
+        for unit in RESTORE_UNITS:
+            try:
+                if is_loaded(unit):
+                    run("restart", unit)
+            except Exception:
+                pass
+        return {"ok": False, "output": out + ["Restore failed; previous configuration restored."]}
+    out.append("Configuration restored.")
+    return {"ok": True, "output": out}
+
+
+# Services config_backup.php stops before and starts after a restore.
+RESTORE_UNITS = ["dstarrepeater.service", "ircddbgateway.service", "timeserver.service", "pistar-watchdog.service",
+                 "pistar-remote.service", "ysfgateway.service", "ysf2dmr.service", "p25gateway.service",
+                 "nxdngateway.service", "m17gateway.service", "dapnetgateway.service", "mobilegps.service",
+                 "dmrgateway.service", "mmdvmhost.service"]
+
+
+def full_read(name):
+    path = FULL[name][0]
+    text, _ = read_file(path)
+    return {"exists": text is not None, "text": text or "",
+            "revision": hashlib.sha256((text or "\0missing").encode()).hexdigest()}
+
+
+def full_write(name, request, run=None):
+    run = run or systemctl
+    path, new_mode, units = FULL[name]
+    require(type(request) is dict and set(request) == {"revision", "text"} and type(request["text"]) is str, "invalid request")
+    text = request["text"].replace("\r\n", "\n").replace("\r", "\n")
+    require("\0" not in text and len(text) <= LIMIT, "invalid text")
+    if name == "cron":
+        blocked = cron_blockers(text)
+        if blocked:
+            return {"ok": False, "blocked": blocked}
+    old, st = read_file(path)
+    if request["revision"] != hashlib.sha256((old or "\0missing").encode()).hexdigest():
+        raise Stale("file changed since it was read")
+    if st is None:
+        class New:  # root:root with the page's mode
+            st_uid = st_gid = 0
+            st_mode = new_mode
+        st = New
+    replace(path, text, st)
+    try:
+        for unit in units:
+            run("restart", unit)
+    except Exception:
+        if old is not None:
+            replace(path, old, st)
+        raise Error("service restart failed; previous file restored") from None
+    return {"ok": True}
+
+
+CSS_FILE = setting_path(_SETTINGS, "PISTAR_CSS_FILE")
+# admin/expert/edit_dashboard.php shows these when /etc/pistar-css.ini is missing.
+CSS_DEFAULT = ("[Background]\nPage=edf0f5\nContent=ffffff\nBanners=dd4b39\n\n"
+               "[Text]\nBanners=ffffff\nBannersDrop=303030\n\n"
+               "[Tables]\nHeadDrop=8b0000\nBgEven=f7f7f7\nBgOdd=d0d0d0\n\n"
+               "[Content]\nText=000000\n\n"
+               "[BannerH1]\nEnabled=0\nText=\"Some Text\"\n\n"
+               "[BannerExtText]\nEnabled=0\nText=\"Some long text entry\"\n\n"
+               "[Lookup]\nService=\"RadioID\"\n")
+
+
+def css_layout(text):
+    """Sections and keys in file order, values unquoted like parse_ini_file;
+    Lookup popupWidth/popupHeight are hidden by the classic editor."""
+    out = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            out.append((line[1:-1], []))
+        elif out and "=" in line:
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip()
+            if len(value) >= 2 and value[0] == value[-1] == '"':
+                value = value[1:-1]
+            if out[-1][0] == "Lookup" and key in ("popupWidth", "popupHeight"):
+                continue
+            out[-1][1].append([key, value])
+    return out
+
+
+def css_current():
+    old, st = read_file(CSS_FILE)
+    revision = hashlib.sha256((old if old is not None else "\0missing").encode()).hexdigest()
+    return old, st, revision
+
+
+def css_write(request):
+    """Save the CSS Tool form: every shown key, "" stored as none (update_ini_file)."""
+    require(type(request) is dict and set(request) <= {"revision", "values"} and type(request.get("values")) is dict,
+            "invalid request")
+    old, st, revision = css_current()
+    if request.get("revision") != revision:
+        raise Stale("file changed since it was read")
+    layout = css_layout(old if old is not None else CSS_DEFAULT)
+    known = {name: {k for k, _ in keys} for name, keys in layout}
+    for section, keys in request["values"].items():
+        require(section in known and type(keys) is dict, "unknown section")
+        for key, value in keys.items():
+            require(key in known[section] and type(value) is str and VALUE.fullmatch(value) and len(value) <= 256,
+                    "invalid value")
+    out = []
+    for name, keys in layout:
+        out.append(f"[{name}]")
+        for key, value in keys:
+            value = request["values"].get(name, {}).get(key, value)
+            out.append(f"{key}={value if value != '' else 'none'}")
+        out.append("")
+    if st is None:
+        class New:  # root:root under sudo; the running user in unprivileged tests
+            st_uid, st_gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+            st_mode = 0o644
+        st = New
+    replace(CSS_FILE, "\n".join(out) + "\n", st)
+    return {"ok": True}
+
+
+RADIO_SHARE = setting_path(_SETTINGS, "RADIO_SHARE_DIR")
+# The radio services the classic Apply restarts, gateways first (as in panel/configure_page.go).
+FACTORY_UNITS = ["dmrgateway.service", "ysfgateway.service", "ysf2dmr.service", "ysf2nxdn.service", "ysf2p25.service",
+                 "dgidgateway.service", "p25gateway.service", "nxdngateway.service", "m17gateway.service",
+                 "dmr2ysf.service", "dmr2nxdn.service", "dapnetgateway.service", "aprsgateway.service",
+                 "ircddbgateway.service", "timeserver.service", "pistar-remote.service",
+                 "mmdvmhost.service", "dstarrepeater.service"]
+
+
+def factory_reset(request, run=None, is_loaded=None):
+    """pistar-factory-reset without the PHP tree: every radio configuration back
+    to the Pi-Star defaults (config_clean.zip), controller markers and the CSS
+    override removed, Wi-Fi kept; then the installed radio services restart."""
+    import io
+    import zipfile
+    run = run or systemctl
+    is_loaded = is_loaded or loaded
+    require(type(request) is dict and request.get("confirm") == "RESET", "Server-side confirmation did not match")
+    blob = (RADIO_SHARE / "config_clean.zip").read_bytes()
+    output = ["Loading fresh configuration file(s)..."]
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        for name in z.namelist():
+            if name not in FILES:
+                continue
+            text = z.read(name).decode()
+            _, st = read_file(FILES[name])
+            if st is None:
+                class New:  # root:root under sudo; the running user in unprivileged tests
+                    st_uid, st_gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+                    st_mode = 0o644
+                st = New
+            replace(FILES[name], text, st)
+            output.append(f"Restored {FILES[name]}")
+    for path in list(MARKERS.values()) + [CSS_FILE]:
+        if path.exists():
+            path.unlink()
+            output.append(f"Removed {path}")
+    for unit in FACTORY_UNITS:
+        if is_loaded(unit):
+            try:
+                run("restart", unit)
+            except Exception:
+                output.append(f"{unit} did not restart")
+    return {"ok": True, "output": output}
+
+
+def css_reset(request):
+    """Factory Reset of the CSS Tool: remove the file; the classic palette applies."""
+    require(type(request) is dict, "invalid request")
+    _, _, revision = css_current()
+    if request.get("revision") != revision:
+        raise Stale("file changed since it was read")
+    CSS_FILE.unlink(missing_ok=True)
+    return {"ok": True}
+
+
+# --- Wi-Fi page (admin/wifi.php) ---------------------------------------------
+# Two backends behind one page: classic network blocks in wpa_supplicant.conf,
+# or NetworkManager wifi profiles through nmcli. Nothing returned, printed or
+# put in an error ever contains a PSK; NetworkManager gets only the WPA hash.
+
+# ISO 3166-1 alpha-2 (wifi.php reads the regulatory database instead).
+WIFI_COUNTRIES = tuple((
+    "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW "
+    "BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI "
+    "FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN "
+    "IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME "
+    "MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF "
+    "PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV "
+    "SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE "
+    "YT ZA ZM ZW").split())
+WIFI_DEFAULT_COUNTRY = "JP"  # wifi.php shows JP when the file names no country
+WIFI_MAX_NETWORKS = 32
+# Seconds wifi.php waits between scan and scan_results, and between down and up.
+WIFI_SLEEP = {"scan": 8, "reset": 3}
+NM_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+MAC = re.compile(r"[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}")
+
+
+class Wifi:
+    """Wi-Fi settings from pistar.conf, resolved per command so a missing key
+    breaks only this page."""
+
+    def __init__(self):
+        s = _SETTINGS
+        self.backend = s.get("WIFI_BACKEND", "")
+        require(self.backend in ("networkmanager", "wpa_supplicant"),
+                "WIFI_BACKEND in pistar.conf must be networkmanager or wpa_supplicant")
+        self.iface = s.get("WIFI_INTERFACE", "")
+        require(re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", self.iface) is not None,
+                "WIFI_INTERFACE in pistar.conf is not an interface name")
+
+        def path(key):
+            try:
+                return setting_path(s, key)
+            except SystemExit as exc:
+                raise Error(f"{exc} (pistar.conf)") from None
+        self.conf, self.sysfs = path("WPA_SUPPLICANT_CONF"), path("SYSFS_NET_DIR")
+        self.ctrl, self.regdom = path("WPA_CTRL_DIR"), path("WIFI_REGDOM_CONF")
+        self.nmcli, self.wpa_cli, self.ip, self.iw = (str(path(k)) for k in ("NMCLI_BIN", "WPA_CLI_BIN", "IP_BIN", "IW_BIN"))
+
+    def present(self):
+        return (self.sysfs / self.iface).exists()
+
+    def require_present(self):
+        require(self.present(), f"Interface {self.iface} is not present")
+
+
+def tool(argv, timeout=30):
+    """Run a configured program (argument list, never a shell): its output, or
+    None when it is missing, fails or times out."""
+    try:
+        r = subprocess.run(argv, timeout=timeout, cwd="/", env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"},
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else None
+
+
+def wpa_psk(ssid, passphrase):
+    """The 256-bit WPA key exactly as wpa_passphrase prints it."""
+    return hashlib.pbkdf2_hmac("sha1", passphrase.encode(), ssid.encode(), 4096, 32).hex()
+
+
+def wifi_key(ssid, psk):
+    return psk.lower() if re.fullmatch(r"[0-9A-Fa-f]{64}", psk) else wpa_psk(ssid, psk)
+
+
+def wifi_ssid_ok(ssid):
+    return type(ssid) is str and 1 <= len(ssid.encode()) <= 32 and not re.search(r"[\x00-\x1f\x7f]", ssid)
+
+
+def wifi_psk_ok(psk):
+    return re.fullmatch(r"[0-9A-Fa-f]{64}|[\x20-\x7e]{8,63}", psk) is not None
+
+
+def wifi_status(w):
+    """Interface state from sysfs, ip and iw (wifi.php parsed ifconfig and iwconfig)."""
+    base = w.sysfs / w.iface
+    if not base.exists():
+        return {"present": False, "up": False}
+
+    def sysfs(name):
+        try:
+            return (base / name).read_text().strip()
+        except OSError:
+            return ""
+
+    out = {"present": True, "up": sysfs("operstate") == "up", "mac": sysfs("address")}
+    for key, name in (("rxPackets", "rx_packets"), ("rxBytes", "rx_bytes"), ("txPackets", "tx_packets"), ("txBytes", "tx_bytes")):
+        value = sysfs("statistics/" + name)
+        if value.isdigit():
+            out[key] = int(value)
+    m = re.search(r"\binet (\d+\.\d+\.\d+\.\d+)/(\d+)", tool([w.ip, "-o", "-4", "addr", "show", "dev", w.iface]) or "")
+    if m:
+        import ipaddress
+        out["ip"], out["netmask"] = m.group(1), str(ipaddress.IPv4Network(f"0.0.0.0/{m.group(2)}").netmask)
+    link = tool([w.iw, "dev", w.iface, "link"]) or ""
+    for key, pattern in (("bssid", r"Connected to (" + MAC.pattern + ")"), ("ssid", r"^\s*SSID: (.*)$"),
+                         ("freq", r"^\s*freq: (\d+)"), ("signal", r"^\s*signal: (-?\d+ dBm)"),
+                         ("bitrate", r"^\s*tx bitrate: ([0-9.]+ MBit/s)")):
+        m = re.search(pattern, link, re.M)
+        if m:
+            out[key] = m.group(1)
+    m = re.search(r"^\s*txpower ([0-9.]+ dBm)", tool([w.iw, "dev", w.iface, "info"]) or "", re.M)
+    if m:
+        out["txPower"] = m.group(1)
+    return out
+
+
+def wifi_plan(request, existing):
+    """Validate a save request against the current networks: (country, items).
+    Every item is {id, ssid, psk}; id "" is a new network, psk "" keeps the
+    stored key (or makes a new network open), as the classic form did."""
+    require(type(request) is dict and set(request) <= {"revision", "country", "networks"}
+            and type(request.get("networks")) is list, "invalid request")
+    errors = []
+    country = request.get("country")
+    if country not in WIFI_COUNTRIES:
+        errors.append("WiFi country code must be exactly 2 uppercase letters (ISO 3166-1 alpha-2)")
+    nets = request["networks"]
+    if len(nets) > WIFI_MAX_NETWORKS:
+        errors.append("network count out of range")
+        nets = []
+    by_id = {n["id"]: n for n in existing}
+    seen, items = set(), []
+    for x, item in enumerate(nets):
+        require(type(item) is dict and set(item) <= {"id", "ssid", "psk"} and "ssid" in item
+                and all(type(item.get(k, "")) is str for k in ("id", "ssid", "psk")), "invalid network")
+        nid, ssid, psk = item.get("id", ""), item["ssid"], item.get("psk", "")
+        if nid:
+            require(nid in by_id and nid not in seen, "unknown or repeated network")
+            seen.add(nid)
+        if not wifi_ssid_ok(ssid):
+            errors.append(f"network {x}: SSID must be 1-32 bytes without control characters")
+        if psk and not wifi_psk_ok(psk):
+            errors.append(f"network {x}: PSK must be 8-63 printable ASCII characters or exactly 64 hex characters")
+        old = by_id.get(nid)
+        if old and old["secured"] and ssid != old["ssid"] and not psk:
+            errors.append(f"network {x}: enter the PSK again when changing the SSID (the stored key is derived from it)")
+        items.append({"id": nid, "ssid": ssid, "psk": psk})
+    if errors:
+        raise Error("\n".join(errors))
+    return country, items
+
+
+# wpa_supplicant backend: network={...} blocks in WPA_SUPPLICANT_CONF. A save
+# rewrites only the blocks it changes or deletes; every other byte is kept.
+
+def wpa_split(text):
+    """Lines (with their endings) and the (first, last) line of every block."""
+    lines = text.splitlines(keepends=True)
+    blocks, i = [], 0
+    while i < len(lines):
+        if re.fullmatch(r"\s*network\s*=\s*\{\s*", lines[i]):
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != "}":
+                j += 1
+            require(j < len(lines), "unterminated network block in the wpa_supplicant configuration")
+            blocks.append((i, j))
+            i = j + 1
+        else:
+            i += 1
+    return lines, blocks
+
+
+def wpa_value(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] == '"':
+        return v[1:-1]
+    if re.fullmatch(r"(?:[0-9a-fA-F]{2})+", v):
+        return bytes.fromhex(v).decode("utf-8", "replace")
+    return v
+
+
+def wpa_entry(line):
+    """(key, value, commented) of a block line; key "" for anything else."""
+    s = line.strip()
+    commented = s.startswith("#")
+    key, sep, value = s.lstrip("#").strip().partition("=") if commented else s.partition("=")
+    return (key.strip() if sep else ""), value, commented
+
+
+def wpa_network(body):
+    ssid = comment = key_mgmt = None
+    psk = False
+    for line in body:
+        key, value, commented = wpa_entry(line)
+        if commented:
+            if key == "ssid" and comment is None:
+                comment = wpa_value(value)
+        elif key == "ssid":
+            ssid = wpa_value(value)
+        elif key in ("psk", "sae_password", "wep_key0", "password"):
+            psk = True
+        elif key == "key_mgmt":
+            key_mgmt = value.strip()
+    # wifi.php shows the "#ssid=" comment when present (its wildcard "*" has no ssid line).
+    return {"ssid": ssid if ssid is not None else (comment or ""),
+            "secured": psk or key_mgmt not in (None, "NONE")}
+
+
+def wpa_country(lines, blocks):
+    inside = {i for a, b in blocks for i in range(a, b + 1)}
+    for i, line in enumerate(lines):
+        key, value, commented = wpa_entry(line)
+        if i not in inside and not commented and key == "country":
+            return i, value.strip()
+    return None, None
+
+
+def wpa_state(w):
+    text, st = read_file(w.conf)
+    lines, blocks = wpa_split(text or "")
+    nets = [dict(wpa_network(lines[a + 1:b]), id=str(n)) for n, (a, b) in enumerate(blocks)]
+    _, country = wpa_country(lines, blocks)
+    revision = hashlib.sha256((text if text is not None else "\0missing").encode()).hexdigest()
+    return text, st, lines, blocks, nets, country, revision
+
+
+def wpa_edit(block, old, item):
+    """Change only the ssid and psk lines of one block."""
+    ssid_changed, psk = item["ssid"] != old["ssid"], item["psk"]
+    if not ssid_changed and not psk:
+        return block
+    out = list(block)
+    indent = re.match(r"[ \t]*", out[1]).group(0) if len(out) > 2 else "\t"
+    indent = indent or "\t"
+
+    def put(key, line, after):
+        for i, l in enumerate(out):
+            k, _, commented = wpa_entry(l)
+            if i and k == key and not commented:
+                out[i] = line
+                return
+        out.insert(after, line)
+
+    def ssid_index():
+        return next((i for i, l in enumerate(out) if i and wpa_entry(l)[0] == "ssid" and not wpa_entry(l)[2]), 0)
+
+    if ssid_changed:
+        put("ssid", f"{indent}ssid={item['ssid'].encode().hex()}\n", 1)
+        for i, l in enumerate(out):
+            k, _, commented = wpa_entry(l)
+            if commented and k == "ssid":
+                out[i] = f'{indent}#ssid="{item["ssid"]}"\n'
+    if psk:
+        # Older Pi-Star files keep the passphrase in a "#psk=" comment: drop it.
+        out = [l for l in out if not (wpa_entry(l)[0] == "psk" and wpa_entry(l)[2])]
+        out = [l for l in out if not (wpa_entry(l)[0] == "key_mgmt" and not wpa_entry(l)[2] and wpa_entry(l)[1].strip() == "NONE")]
+        put("psk", f"{indent}psk={wifi_key(item['ssid'], psk)}\n", ssid_index() + 1)
+    return out
+
+
+def wpa_block(item, index):
+    """A new block in the wifi.php layout, without its plain-text "#psk=" line."""
+    lines = ["network={\n", f'\t#ssid="{item["ssid"]}"\n', f"\tssid={item['ssid'].encode().hex()}\n"]
+    lines.append(f"\tpsk={wifi_key(item['ssid'], item['psk'])}\n" if item["psk"] else "\tkey_mgmt=NONE\n")
+    return lines + [f'\tid_str="{index}"\n', f"\tpriority={100 - index}\n", "\tscan_ssid=1\n", "}\n"]
+
+
+def wpa_write(w, request):
+    text, st, lines, blocks, nets, current, revision = wpa_state(w)
+    if request.get("revision") != revision:
+        raise Stale("the Wi-Fi configuration changed since it was read")
+    country, items = wifi_plan(request, nets)
+    kept = {item["id"]: item for item in items if item["id"]}
+    starts = {a: (n, b) for n, (a, b) in enumerate(blocks)}
+    country_at, _ = wpa_country(lines, blocks)
+    out, first, i = [], None, 0
+    while i < len(lines):
+        if i in starts:
+            n, b = starts[i]
+            first = len(out) if first is None else first
+            item = kept.get(str(n))
+            if item is None:  # deleted, together with the blank line after it
+                i = b + 1
+                if i < len(lines) and not lines[i].strip():
+                    i += 1
+                continue
+            out += wpa_edit(lines[i:b + 1], nets[n], item)
+            i = b + 1
+            continue
+        if i == country_at and current != country:
+            out.append(f"country={country}" + ("\n" if lines[i].endswith("\n") else ""))
+        else:
+            out.append(lines[i])
+        i += 1
+    if text is None:
+        out = [f"ctrl_interface=DIR={w.ctrl} GROUP=netdev\n", "update_config=1\n", "ap_scan=1\n", "fast_reauth=1\n",
+               f"country={country}\n", "\n"]
+    elif country_at is None:
+        at = len(out) if first is None else first
+        while at and not out[at - 1].strip():
+            at -= 1
+        if at and not out[at - 1].endswith("\n"):
+            out[at - 1] += "\n"
+        out.insert(at, f"country={country}\n")
+    added = [(x, item) for x, item in enumerate(items) if not item["id"]]
+    if added and out:
+        if not out[-1].endswith("\n"):
+            out[-1] += "\n"
+        if out[-1].strip():
+            out.append("\n")
+    for x, item in added:  # id_str and priority from the position in the form, as wifi.php
+        out += wpa_block(item, x) + ["\n"]
+    new = "".join(out)
+
+    class Private:  # wifi.php: install -m 600 -o root -g root
+        st_uid, st_gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+        st_mode = 0o600
+    if new != text or st is None or stat.S_IMODE(st.st_mode) != 0o600:
+        replace(w.conf, new, Private)
+    reply = {"ok": True, "message": "Wifi Settings Updated Successfully"}
+    if not w.present():
+        reply["note"] = f"Interface {w.iface} is not present"
+    elif not (w.sysfs / (w.iface + "_ap")).exists():  # Auto AP active: leave the adapter alone
+        if tool([w.wpa_cli, "-p", str(w.ctrl), "-i", w.iface, "reconfigure"]) is None:
+            reply["note"] = "Saved, but wpa_supplicant did not reload the configuration"
+    return reply
+
+
+# NetworkManager backend: wifi connection profiles through nmcli.
+
+def nm_fields(line):
+    """Split one nmcli --terse line on unescaped colons."""
+    out, cur, escaped = [], [], False
+    for ch in line:
+        if escaped:
+            cur.append(ch)
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == ":":
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    return out + ["".join(cur)]
+
+
+def nm_profiles(w):
+    out = tool([w.nmcli, "-t", "-f", "UUID,TYPE", "connection", "show"])
+    require(out is not None, "NetworkManager is not available (nmcli failed)")
+    nets = []
+    for line in out.splitlines():
+        uuid, kind = (nm_fields(line) + [""])[:2]
+        if kind not in ("802-11-wireless", "wifi") or not NM_UUID.fullmatch(uuid):
+            continue
+        detail = tool([w.nmcli, "-t", "-e", "no", "-f",
+                       "connection.id,802-11-wireless.ssid,802-11-wireless.mode,802-11-wireless-security.key-mgmt",
+                       "connection", "show", "uuid", uuid])
+        if detail is None:
+            continue
+        fields = dict(l.partition(":")[::2] for l in detail.splitlines())
+        if fields.get("802-11-wireless.mode", "") not in ("", "infrastructure"):
+            continue  # hotspot and ad-hoc profiles are not client networks
+        km = fields.get("802-11-wireless-security.key-mgmt", "")
+        nets.append({"id": uuid, "name": fields.get("connection.id", ""), "ssid": fields.get("802-11-wireless.ssid", ""),
+                     "secured": km not in ("", "--"), "km": km})
+    return nets
+
+
+def nm_country(w):
+    text, _ = read_file(w.regdom)
+    m = re.search(r"ieee80211_regdom=([A-Z]{2})\b", text or "")
+    if not m:
+        m = re.search(r"^country ([A-Z]{2}):", tool([w.iw, "reg", "get"]) or "", re.M)
+    country = m.group(1) if m and m.group(1) in WIFI_COUNTRIES else None
+    return text, country
+
+
+def nm_state(w):
+    nets = nm_profiles(w)
+    regdom, country = nm_country(w)
+    # Revision: the profiles as listed (never their secrets) and the country file.
+    revision = hashlib.sha256(json.dumps([[n["id"], n["name"], n["ssid"], n["km"]] for n in nets] + [regdom]).encode()).hexdigest()
+    return nets, country, revision
+
+
+def nm_write(w, request):
+    nets, current, revision = nm_state(w)
+    current = current or WIFI_DEFAULT_COUNTRY  # an unknown domain shows as JP: keeping JP writes nothing
+    if request.get("revision") != revision:
+        raise Stale("the Wi-Fi configuration changed since it was read")
+    country, items = wifi_plan(request, nets)
+    old = {n["id"]: n for n in nets}
+    kept = {item["id"] for item in items if item["id"]}
+    nm = [w.nmcli]
+    steps = []
+    for item in items:
+        props = []
+        if item["id"]:
+            if item["ssid"] != old[item["id"]]["ssid"]:
+                props += ["802-11-wireless.ssid", item["ssid"]]
+            if item["psk"]:
+                props += ["802-11-wireless-security.key-mgmt", "wpa-psk", "802-11-wireless-security.psk", wifi_key(item["ssid"], item["psk"])]
+            if props:
+                steps.append(nm + ["connection", "modify", "uuid", item["id"]] + props)
+        else:
+            if item["psk"]:
+                props = ["802-11-wireless-security.key-mgmt", "wpa-psk", "802-11-wireless-security.psk", wifi_key(item["ssid"], item["psk"])]
+            steps.append(nm + ["connection", "add", "type", "wifi", "ifname", w.iface, "con-name", item["ssid"],
+                               "802-11-wireless.ssid", item["ssid"]] + props)
+    steps += [nm + ["connection", "delete", "uuid", n["id"]] for n in nets if n["id"] not in kept]
+    for done, argv in enumerate(steps):
+        # The arguments hold the WPA hash; the message must not.
+        require(tool(argv, timeout=60) is not None,
+                f"NetworkManager refused a change ({done} of {len(steps)} applied); reload the page")
+    reply = {"ok": True, "message": "Wifi Settings Updated Successfully"}
+    if country != current:
+        class Public:
+            st_uid, st_gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+            st_mode = 0o644
+        replace(w.regdom, f"# Wi-Fi country set by the Pi-Star dashboard\noptions cfg80211 ieee80211_regdom={country}\n", Public)
+        if tool([w.iw, "reg", "set", country]) is None:
+            reply["note"] = "Country saved; it applies after a reboot"
+    if not w.present():
+        reply["note"] = f"Interface {w.iface} is not present"
+    elif not (w.sysfs / (w.iface + "_ap")).exists() and tool([w.nmcli, "device", "connect", w.iface], timeout=60) is None:
+        reply["note"] = "Saved, but NetworkManager did not connect"
+    return reply
+
+
+def wifi_read():
+    w = Wifi()
+    if w.backend == "wpa_supplicant":
+        _, _, _, _, nets, country, revision = wpa_state(w)
+    else:
+        nets, country, revision = nm_state(w)
+    return {"revision": revision, "backend": w.backend, "interface": w.iface,
+            "country": country if country in WIFI_COUNTRIES else WIFI_DEFAULT_COUNTRY,
+            "countries": list(WIFI_COUNTRIES),
+            "networks": [{"id": n["id"], "ssid": n["ssid"], "secured": n["secured"]} for n in nets],
+            "status": wifi_status(w)}
+
+
+def wifi_write(request):
+    w = Wifi()
+    return wpa_write(w, request) if w.backend == "wpa_supplicant" else nm_write(w, request)
+
+
+def wifi_scan():
+    """wifi.php "Scan for Networks": raw rows; the page names channels and security."""
+    import time
+    w = Wifi()
+    w.require_present()
+    rows = []
+    if w.backend == "wpa_supplicant":
+        base = [w.wpa_cli, "-p", str(w.ctrl), "-i", w.iface]
+        require(tool(base + ["scan"]) is not None, "wpa_supplicant did not start a scan")
+        time.sleep(WIFI_SLEEP["scan"])
+        out = tool(base + ["scan_results"])
+        require(out is not None, "wpa_supplicant did not return scan results")
+        for line in out.splitlines():
+            f = line.split("\t")
+            if len(f) >= 4 and MAC.fullmatch(f[0]):
+                rows.append({"bssid": f[0], "freq": f[1], "signal": f[2] + " dBm", "security": f[3],
+                             "ssid": f[4] if len(f) > 4 else ""})
+    else:
+        out = tool([w.nmcli, "-t", "-f", "BSSID,FREQ,SIGNAL,SECURITY,SSID", "device", "wifi", "list",
+                    "--rescan", "yes", "ifname", w.iface], timeout=60)
+        require(out is not None, "NetworkManager did not return scan results")
+        for line in out.splitlines():
+            f = nm_fields(line)
+            if len(f) == 5 and MAC.fullmatch(f[0]):
+                rows.append({"bssid": f[0], "freq": f[1].split(" ")[0], "signal": f[2] + " %",
+                             "security": f[3] or "None", "ssid": f[4]})
+    return {"networks": rows}
+
+
+def wifi_action(action):
+    """Interface down / up / reset (wifi.php: ifdown, ifup, wpa_cli reconfigure)."""
+    import time
+    require(action in ("up", "down", "reset"), "unknown action")
+    w = Wifi()
+    w.require_present()
+    up = wifi_status(w)["up"]
+    if action == "down" and not up:
+        return {"ok": True, "message": "Interface already down"}
+    if action == "up" and up:
+        return {"ok": True, "message": "Interface already up"}
+    if w.backend == "wpa_supplicant":
+        wpa = [w.wpa_cli, "-p", str(w.ctrl), "-i", w.iface]
+        link = [w.ip, "link", "set", "dev", w.iface]
+        steps = {"down": [link + ["down"]], "up": [link + ["up"]],
+                 "reset": [wpa + ["reconfigure"], link + ["down"], None, link + ["up"], wpa + ["scan"]]}[action]
+    else:
+        dev = [w.nmcli, "device"]
+        steps = {"down": [dev + ["disconnect", w.iface]], "up": [dev + ["connect", w.iface]],
+                 "reset": [dev + ["disconnect", w.iface], None, dev + ["connect", w.iface],
+                           dev + ["wifi", "rescan", "ifname", w.iface]]}[action]
+    failed = False
+    for argv in steps:
+        if argv is None:
+            time.sleep(WIFI_SLEEP["reset"])
+        elif tool(argv, timeout=60) is None and argv[-1] != "scan" and "rescan" not in argv:
+            failed = True
+    require(not failed, f"Interface {w.iface}: the {action} command failed")
+    return {"ok": True, "message": {"down": f"Interface {w.iface} is down", "up": f"Interface {w.iface} is up",
+                                    "reset": "WiFi adapter reset"}[action]}
+
+
+WIFI_VERBS = {"wifi-read", "wifi-write", "wifi-scan", "wifi-action"}
+
+
+def wifi_main(argv, stdin):
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    with os.fdopen(os.open(STATE / "wifi.lock", os.O_CREAT | os.O_NOFOLLOW | os.O_RDWR, 0o600), "r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        verb = argv[0]
+        if verb == "wifi-action":
+            require(len(argv) == 2, "expected wifi-action up|down|reset")
+            return wifi_action(argv[1])
+        require(len(argv) == 1, "unexpected arguments")
+        if verb == "wifi-read":
+            return wifi_read()
+        if verb == "wifi-scan":
+            return wifi_scan()
+        raw = stdin.read(65537)
+        require(len(raw) <= 65536, "request too large")
+        try:
+            request = json.loads(raw.decode())
+        except ValueError:
+            raise Error("invalid request") from None
+        require(type(request) is dict, "invalid request")
+        try:
+            return wifi_write(request)
+        except OSError as exc:
+            raise Error(f"could not write the Wi-Fi configuration: {exc.strerror}") from None
+
+
+class Error(Exception):
+    pass
+
+
+class Stale(Error):
+    pass
+
+
+def require(ok, message):
+    if not ok:
+        raise Error(message)
+
+
+class Ini:
+    """Line-preserving INI editor. Keys before the first section (flat files
+    such as /etc/ircddbgateway) belong to section ""."""
+
+    def __init__(self, text):
+        self.lines = text.splitlines()
+
+    def _scan(self):
+        section, out = "", []
+        for i, line in enumerate(self.lines):
+            s = line.strip()
+            if s.startswith("[") and s.endswith("]"):
+                section = s[1:-1]
+                out.append((i, section, None))
+            elif s and s[0] not in "#;" and "=" in s:
+                out.append((i, section, s.partition("=")[0].strip()))
+        return out
+
+    def data(self):
+        values = {}
+        for i, section, key in self._scan():
+            sec = values.setdefault(section, {})
+            if key is not None and key not in sec:
+                sec[key] = self.lines[i].partition("=")[2].strip()
+        return values
+
+    def layout(self):
+        """Sections and keys in file order: [[section, [[key, value], ...]], ...]."""
+        out, seen, keys = [], {}, {}
+        for i, section, key in self._scan():
+            if section not in seen:
+                seen[section], keys[section] = [], set()
+                out.append([section, seen[section]])
+            if key is not None and key not in keys[section]:
+                keys[section].add(key)
+                seen[section].append([key, self.lines[i].partition("=")[2].strip()])
+        return out
+
+    def set(self, section, key, value):
+        scan = self._scan()
+        for i, sec, k in scan:
+            if sec == section and k == key:
+                if value is None:
+                    del self.lines[i]
+                else:
+                    self.lines[i] = f"{key}={value}"
+                return
+        if value is None:
+            return
+        last = None
+        for i, sec, _ in scan:
+            if sec == section:
+                last = i
+        if last is None and section == "":
+            self.lines.insert(0, f"{key}={value}")
+            return
+        if last is None:
+            if self.lines and self.lines[-1].strip():
+                self.lines.append("")
+            self.lines += [f"[{section}]", f"{key}={value}"]
+            return
+        self.lines.insert(last + 1, f"{key}={value}")
+
+    def text(self):
+        return "\n".join(self.lines) + "\n"
+
+
+def read_file(path):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None, None
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(fd)
+        require(stat.S_ISREG(st.st_mode) and st.st_size <= LIMIT, f"invalid configuration file {path}")
+        return f.read(LIMIT + 1).decode("utf-8", "replace"), st
+
+
+def snapshot():
+    texts, stats = {}, {}
+    for name, path in FILES.items():
+        texts[name], stats[name] = read_file(path)
+    digest = hashlib.sha256()
+    for name in sorted(texts):
+        digest.update(name.encode() + b"\0" + (texts[name] or "\0missing").encode() + b"\0")
+    return texts, stats, digest.hexdigest()
+
+
+def system_state():
+    tz = ""
+    try:
+        tz = os.readlink("/etc/localtime").split("zoneinfo/", 1)[-1]
+    except OSError:
+        pass
+    host = HOSTNAME.read_text().strip() if HOSTNAME.exists() else ""
+    markers = {}
+    for name, path in {**MARKERS, **FLAGS}.items():
+        markers[name] = path.read_text(errors="replace") if path.exists() else None
+    return {"hostname": host, "timezone": tz, "markers": markers}
+
+
+VALUE = re.compile(r"[^\r\n\x00]{0,512}")
+KEY_VALUE = re.compile(r"[^\r\n\x00]{0,4096}")
+NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _./+-]{0,63}")
+
+
+def replace(path, text, st):
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".pistar-")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.encode())
+            f.flush()
+            os.fchown(fd, st.st_uid if st else os.geteuid(), st.st_gid if st else os.getegid())
+            os.fchmod(fd, stat.S_IMODE(st.st_mode) if st else 0o644)
+            os.fsync(fd)
+        try:
+            os.replace(tmp, path)
+        except OSError as exc:
+            # A bind-mounted file (e.g. /etc/hosts in a container) cannot be
+            # replaced by rename; rewrite its contents in place instead.
+            if exc.errno not in (errno.EBUSY, errno.EXDEV):
+                raise
+            with open(path, "r+b") as f:
+                f.write(text.encode())
+                f.truncate()
+                f.flush()
+                os.fsync(f.fileno())
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def systemctl(*args):
+    subprocess.run(["/usr/bin/systemctl", *args], check=True, timeout=90, cwd="/",
+                   env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}, stdin=subprocess.DEVNULL,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def plan(request, texts):
+    """Validate the request and compute new file texts."""
+    require(type(request) is dict and set(request) <= {"revision", "changes", "restart", "system"}, "invalid request")
+    changes = request.get("changes", {})
+    require(type(changes) is dict and set(changes) <= set(FILES), "unknown configuration file")
+    targets = {}
+    for name, sections in changes.items():
+        require(texts[name] is not None, f"{name} is not installed")
+        require(type(sections) is dict, "invalid changes")
+        ini = Ini(texts[name])
+        for section, keys in sections.items():
+            require(section == "" or NAME.fullmatch(section), "invalid section")
+            require(type(keys) is dict, "invalid changes")
+            for key, value in keys.items():
+                require(NAME.fullmatch(key) and "=" not in key, "invalid key")
+                require(value is None or (type(value) is str and VALUE.fullmatch(value)), "invalid value")
+                ini.set(section, key, value)
+        if ini.text() != texts[name]:
+            targets[name] = ini.text()
+    units = request.get("restart", [])
+    require(type(units) is list and all(u in UNITS for u in units), "unknown service")
+    system = request.get("system", {})
+    require(type(system) is dict and set(system) <= SYSTEM_OPS, "invalid system change")
+    if "modem" in system:
+        require(type(system["modem"]) is dict and all(NAME.fullmatch(k) and type(v) is str and VALUE.fullmatch(v)
+                                                       for k, v in system["modem"].items()), "invalid modem settings")
+    if "modem_ini" in system:
+        ops = system["modem_ini"]
+        require(type(ops) is dict and set(ops) <= MODEM_INI_SECTIONS and all(
+            type(keys) is dict and all(NAME.fullmatch(k) and (v is None or (type(v) is str and VALUE.fullmatch(v)))
+                                       for k, v in keys.items()) for keys in ops.values()), "invalid modem settings")
+    for flag, states in (("timeserver_announce", ("on", "off")), ("hostfiles_nodextra", ("on", "off")),
+                         ("hostfiles_ysfupper", ("off",))):
+        if flag in system:
+            require(system[flag] in states, "invalid " + flag)
+    if "password" in system:
+        pw = system["password"]
+        require(type(pw) is str and 1 <= len(pw) <= 128 and VALUE.fullmatch(pw) and ":" not in pw, "invalid password")
+    if "autoap_psk" in system:
+        psk = system["autoap_psk"]
+        require(type(psk) is str and 8 <= len(psk) <= 63 and re.fullmatch(r"[\x20-\x7e]+", psk), "invalid Auto AP PSK")
+    for flag in ("autoap", "upnp"):
+        if flag in system:
+            require(system[flag] in ("on", "off"), "invalid " + flag)
+    if "upnp_ports" in system:
+        require(type(system["upnp_ports"]) is dict and set(system["upnp_ports"]) <= {"80", "10022", "22"}
+                and all(v in ("on", "off") for v in system["upnp_ports"].values()), "invalid UPnP ports")
+    if "hostname" in system:
+        require(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", system["hostname"] or ""), "invalid hostname")
+    if "timezone" in system:
+        tz = system["timezone"]
+        require(type(tz) is str and re.fullmatch(r"[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_+-]+){0,2}", tz)
+                and Path("/usr/share/zoneinfo", tz).is_file(), "invalid timezone")
+    if "controller" in system:
+        require(system["controller"] in MARKERS, "invalid controller")
+    return targets, list(dict.fromkeys(units)), system
+
+
+SYSTEM_OPS = {"hostname", "timezone", "controller", "modem", "modem_ini", "password", "autoap", "autoap_psk",
+              "upnp", "upnp_ports", "timeserver_announce", "hostfiles_nodextra", "hostfiles_ysfupper"}
+# modem_ini may change only the network passwords kept in the controller marker.
+MODEM_INI_SECTIONS = {"BrandMeister", "TGIF"}
+
+
+def set_line(path, pattern, line, comment=None):
+    """Replace every line matching pattern (or append one), like the classic sed;
+    with comment=True/False toggle a leading # instead."""
+    if not path.exists():
+        return
+    text, st = read_file(path)
+    lines = text.split("\n")
+    found = False
+    for i, l in enumerate(lines):
+        if re.search(pattern, l):
+            if comment is None:
+                lines[i] = line
+            elif comment:
+                lines[i] = "#" + l.lstrip("#")
+            else:
+                lines[i] = l.lstrip("#")
+            found = True
+    if not found:
+        if comment is None:
+            lines.insert(len(lines) - 1 if lines and lines[-1] == "" else len(lines), line)
+    new = "\n".join(lines)
+    if new != text:
+        replace(path, new, st)
+
+
+def system_ops(system, run):
+    """Apply validated system changes; runs inside apply()'s rollback scope."""
+    if "hostname" in system:
+        old, new = system_state()["hostname"], system["hostname"]
+        if new != old:
+            subprocess.run(["/usr/bin/hostnamectl", "set-hostname", new], check=True, timeout=30,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if old and HOSTS.exists():
+                text, st = read_file(HOSTS)
+                replace(HOSTS, re.sub(r"(?<![A-Za-z0-9.-])" + re.escape(old) + r"(?![A-Za-z0-9.-])", new, text), st)
+            set_line(HOSTAPD, r"^ssid=", f"ssid={new}")
+    if "timezone" in system and system["timezone"] != system_state()["timezone"]:
+        subprocess.run(["/usr/bin/timedatectl", "set-timezone", system["timezone"]], check=True, timeout=30,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if "controller" in system:
+        want = MARKERS[system["controller"]]
+        for name, p in MARKERS.items():
+            if name != system["controller"] and p.exists():
+                if not want.exists():
+                    os.rename(p, want)  # keep the marker contents (modem selection)
+                else:
+                    p.unlink()
+        if not want.exists():
+            want.touch(0o644)
+    if "modem" in system:
+        marker = next((p for p in MARKERS.values() if p.exists()), None)
+        require(marker is not None, "no controller configured")
+        text, st = read_file(marker)
+        ini = Ini(text or "")
+        for key, value in system["modem"].items():
+            ini.set("Modem", key, value)
+        replace(marker, ini.text(), st)
+    if "modem_ini" in system:
+        marker = next((p for p in MARKERS.values() if p.exists()), None)
+        require(marker is not None, "no controller configured")
+        text, st = read_file(marker)
+        ini = Ini(text or "")
+        for section, keys in system["modem_ini"].items():
+            for key, value in keys.items():
+                ini.set(section, key, value)
+        replace(marker, ini.text(), st)
+    flag_files = {"timeserver_announce": (FLAGS["timeserver-disable"], "off"),
+                  "hostfiles_nodextra": (FLAGS["hostfiles-nodextra"], "on"),
+                  "hostfiles_ysfupper": (FLAGS["hostfiles-ysfupper"], "on")}
+    for op, (path, present_when) in flag_files.items():
+        if op in system:
+            if system[op] == present_when:
+                if not path.exists():
+                    path.touch(0o644)
+            else:
+                path.unlink(missing_ok=True)
+    if "autoap_psk" in system:
+        set_line(HOSTAPD, r"^wpa_passphrase=", "wpa_passphrase=" + system["autoap_psk"])
+    if "autoap" in system:
+        if system["autoap"] == "off":
+            HOSTAP_OFF.touch(0o644)
+        else:
+            HOSTAP_OFF.unlink(missing_ok=True)
+    if "upnp_ports" in system:
+        for port, state in system["upnp_ports"].items():
+            set_line(UPNP, rf"\$ipVar {port} {port}", "", comment=(state == "off"))
+    if "upnp" in system:
+        set_line(CRONTAB, r"pistar-upnp\.service", "", comment=(system["upnp"] == "off"))
+    if "password" in system:
+        pw = system["password"]
+        path = WIZARD_DIR / "admin-password"
+        _, st = read_file(path)
+
+        class Private:
+            st_uid = st.st_uid if st else os.geteuid()
+            st_gid = st.st_gid if st else os.getegid()
+            st_mode = 0o600
+        replace(path, pw + "\n", Private)
+        if LINUX_USER:
+            import pwd
+            try:
+                pwd.getpwnam(LINUX_USER)
+            except KeyError:
+                pass
+            else:
+                subprocess.run(["/usr/sbin/chpasswd"], input=f"{LINUX_USER}:{pw}\n".encode(), check=True, timeout=30,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # The HTTPS service loads its credential at start; answer the request first.
+        subprocess.run(["/usr/bin/systemd-run", "--quiet", "--collect", "--on-active=2", "/usr/bin/systemctl",
+                        "restart", WIZARD_UNIT], check=True, timeout=30,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def loaded(unit):
+    out = subprocess.run(["/usr/bin/systemctl", "show", "-p", "LoadState", "--value", unit], timeout=30,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return out.stdout.decode().strip() == "loaded"
+
+
+def apply(request, run=systemctl, is_loaded=None):
+    is_loaded = is_loaded or loaded
+    texts, stats, revision = snapshot()
+    if request.get("revision") != revision:
+        raise Stale("configuration changed since it was read")
+    targets, units, system = plan(request, texts)
+    # Pi-Star restarts every radio service; skip units that are not installed.
+    units = [u for u in units if is_loaded(u)]
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    pending = STATE / "configure-pending.json"
+    require(not pending.exists(), "interrupted operation; inspect private pending backup")
+    replace(pending, json.dumps({n: texts[n] for n in targets}), None)
+    os.chmod(pending, 0o600)
+    written = []
+    try:
+        for name, text in targets.items():
+            replace(FILES[name], text, stats[name])
+            written.append(name)
+        system_ops(system, run)
+        for unit in units:
+            run("restart", unit)
+    except Exception as exc:
+        # The reason goes to the caller's log; it never includes values.
+        print(f"pistar-configure: apply failed: {type(exc).__name__}", file=sys.stderr)
+        for name in reversed(written):
+            try:
+                replace(FILES[name], texts[name], stats[name])
+            except Exception:
+                pass
+        for unit in units:
+            try:
+                run("restart", unit)
+            except Exception:
+                pass
+        pending.unlink(missing_ok=True)
+        raise Error("operation failed; previous settings restored") from None
+    pending.unlink(missing_ok=True)
+    return {"ok": True, "changed": sorted(targets), "restarted": units}
+
+
+def read():
+    texts, _, revision = snapshot()
+    files = {name: Ini(text).data() for name, text in texts.items() if text is not None}
+    layout = {name: Ini(text).layout() for name, text in texts.items() if text is not None}
+    return {"revision": revision, "files": files, "layout": layout, "system": system_state()}
+
+
+def main():
+    if len(sys.argv) >= 2 and sys.argv[1] in WIFI_VERBS:
+        print(json.dumps(wifi_main(sys.argv[1:], sys.stdin.buffer)))
+        return
+    if len(sys.argv) == 2 and sys.argv[1] == "backup":
+        sys.stdout.buffer.write(backup())
+        return
+    if len(sys.argv) == 2 and sys.argv[1] == "restore":
+        blob = sys.stdin.buffer.read(ZIP_MAX + 1)
+        print(json.dumps(restore(blob)))
+        return
+    if len(sys.argv) == 2 and sys.argv[1] == "factory-reset":
+        raw = sys.stdin.buffer.read(4097)
+        require(len(raw) <= 4096, "request too large")
+        print(json.dumps(factory_reset(json.loads(raw.decode()))))
+        return
+    if len(sys.argv) == 2 and sys.argv[1] in ("css-write", "css-reset"):
+        raw = sys.stdin.buffer.read(65537)
+        require(len(raw) <= 65536, "request too large")
+        request = json.loads(raw.decode())
+        print(json.dumps(css_write(request) if sys.argv[1] == "css-write" else css_reset(request)))
+        return
+    if len(sys.argv) == 2 and sys.argv[1] in ("keys-read", "keys-write"):
+        if sys.argv[1] == "keys-read":
+            print(json.dumps(keys_read()))
+        else:
+            raw = sys.stdin.buffer.read(65537)
+            require(len(raw) <= 65536, "request too large")
+            print(json.dumps(keys_write(json.loads(raw.decode()))))
+        return
+    if len(sys.argv) == 3 and sys.argv[1] in ("full-read", "full-write") and sys.argv[2] in FULL:
+        if sys.argv[1] == "full-read":
+            print(json.dumps(full_read(sys.argv[2])))
+        else:
+            raw = sys.stdin.buffer.read(LIMIT + 4097)
+            require(len(raw) <= LIMIT + 4096, "request too large")
+            print(json.dumps(full_write(sys.argv[2], json.loads(raw.decode()))))
+        return
+    require(len(sys.argv) == 2 and sys.argv[1] in ("read", "apply"), "expected read or apply")
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    with os.fdopen(os.open(STATE / "configure.lock", os.O_CREAT | os.O_NOFOLLOW | os.O_RDWR, 0o600), "r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if sys.argv[1] == "read":
+            print(json.dumps(read()))
+            return
+        raw = sys.stdin.buffer.read(256 * 1024 + 1)
+        require(len(raw) <= 256 * 1024, "request too large")
+        print(json.dumps(apply(json.loads(raw.decode()))))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Stale as exc:
+        print(json.dumps({"error": str(exc), "stale": True}))
+        sys.exit(3)
+    except Error as exc:
+        print(json.dumps({"error": str(exc)}))
+        sys.exit(2)

@@ -43,6 +43,27 @@ npm run build
 
 Проверки пилота: `ssh pistar3 'python3 -' < qa/board.py` (на плате) и
 `python3 qa/full_ui.py --url http://192.168.210.194:8789/ --expect live` (браузер).
-`npm run package:stock` собирает отдельно каталог для штатного PHP-сервера Pi-Star:
-старые URL остаются на месте, каталог Svelte открывается по `/operator/`.
-Это не пакет для статического HTTP-сервера на порту 8789.
+
+Экран входящих вызовов для настенного монитора — `http://<плата>:8789/kiosk`
+(тот же `/api/dashboard` раз в секунду; имена операторов из `DMRIds.dat`,
+названия TG из `TGList_*.txt` в `PISTAR_HOSTS_DIR`). Проверка на реальном
+Go-бэкенде с фикстурой и скриншоты 1920×1080, 1280×720, 1080×1920:
+`python3 -B qa/kiosk_screens.py --out <каталог>` после `npm run build`.
+
+## Нативный пакет без PHP
+
+`npm run package:native` собирает `build/release-*/ui` независимо от старого
+PHP-клона. `scripts/build-deb` добавляет Go-бинарник, ограниченные помощники
+и systemd-юниты в ARM-пакет. В пакете интерфейс находится в
+`/usr/share/pistar-dashboard/ui`; Go обслуживает операторскую панель на `:8789`
+и авторизованную HTTPS-админку на `:8788/manage/`. Python используется только
+существующими системными помощниками, не HTTP-сервером нового пакета.
+
+Сборка отклоняет PHP-код, классический docroot и PHP-зависимости.
+`bash scripts/test-deb-entry build/release-ID/pistar-dashboard_VERSION_armhf.deb`
+проверяет распакованный пакет и запускает его точный ARM-бинарник через
+`qemu-arm-static` на x86. Проверка сверяет HTML/ресурсы и HTTPS-авторизацию,
+не меняя радио-INI и не запуская радиослужбы.
+
+Полный перенос функций отслеживается в [issue #1](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/1).
+Нативный пакет не означает завершение всех редакторов и сетевых операций.

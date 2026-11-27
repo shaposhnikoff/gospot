@@ -1,24 +1,35 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { readJSON, serviceOrigin } from './runtime';
   import StationSettings from './StationSettings.svelte';
   import Services from './Services.svelte';
   import Protocols from './Protocols.svelte';
   import SystemInfo from './SystemInfo.svelte';
   import LogView from './LogView.svelte';
-  import Backup from './Backup.svelte';
   const pages = [
-    ['configuration','Configuration'], ['settings','Настройки станции'], ['expert','Expert'], ['services','Сервисы · DMR'], ['system','Система'], ['logs','Live Logs'], ['backup','Backup / Restore']
+    ['configuration','Configuration'], ['settings','Настройки станции'], ['expert','Expert'], ['services','Сервисы · DMR'], ['system','Система'], ['logs','Live Logs']
   ] as const;
   const current = () => ['#expert-dmrgateway','#expert-mmdvmhost'].includes(location.hash) ? location.hash.slice(1) : pages.find(([id]) => '#'+id === location.hash)?.[0] || 'settings';
   let page = $state(current());
+  let operator = $state<string | null>(null);
+  let preview = $state(false);
   onMount(() => {
+    void readJSON('/runtime.json').then(config => {
+      if (config && typeof config === 'object' && 'preview' in config && config.preview === true) {
+        preview = true;
+        operator = location.origin;
+        return;
+      }
+      if (config && typeof config === 'object' && 'operatorPort' in config)
+        operator = serviceOrigin(location.origin, 'http:', config.operatorPort);
+    }).catch(() => {});
     const change = () => { page=current(); };
     window.addEventListener('hashchange',change); return () => window.removeEventListener('hashchange',change);
   });
 </script>
 <svelte:head><title>Pi-Star · Администрирование</title></svelte:head>
 <div class="workspace">
-  <header><strong>Pi-Star · Admin</strong><a href={'http://' + location.hostname + ':8789/'}>Обзор узла ↗</a></header>
+  <header><strong>Pi-Star · Admin{preview ? ' · тестовый стенд' : ''}</strong>{#if operator}<a href={operator + '/'} data-testid="admin-back-operator">Обзор узла →</a>{/if}</header>
   <nav aria-label="Администрирование">
     {#each pages as p}<a href={'#'+p[0]} aria-current={p[0]===page?'page':undefined}>{p[1]}</a>{/each}
   </nav>
@@ -34,7 +45,6 @@
   {:else if page === 'services'}<Services />
   {:else if page === 'system'}<SystemInfo />
   {:else if page === 'logs'}<LogView />
-  {:else if page === 'backup'}<Backup />
   {:else}<StationSettings />{/if}
 </div>
 <style>

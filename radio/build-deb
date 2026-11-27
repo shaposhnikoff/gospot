@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Build pistar-radio: the Pi-Star PS4 radio binaries, the reusable Pi-Star
+# sbin tools and service handlers, the Python 3 ports of pistar-watchdog and
+# pistar-remote (radio/sbin), systemd units for them, the shared libraries
+# Debian lacks, and a daily host-file update timer.
+# All paths come from Pi-Star_dash_new/pistar.conf.
+set -euo pipefail
+cd "$(dirname "$0")"
+umask 022
+suite=${1:-bookworm}
+# shellcheck source=../Pi-Star_dash_new/pistar.conf
+source ../Pi-Star_dash_new/pistar.conf
+settings_dir=$PWD/../Pi-Star_dash_new
+bin_src=$(cd "$settings_dir/$PISTAR_BINARIES_BIN_DIR" && pwd)
+sbin_src=$(cd "$settings_dir/$PISTAR_BINARIES_SBIN_DIR" && pwd)
+libs=$PWD/build/$suite/lib
+[[ -e $libs/libArduiPi_OLED.so.1.0 ]] || ./build-libs.sh "$suite"
+dstar=$PWD/build/$suite/dstar
+[[ -x $dstar/bin/ircddbgatewayd ]] || ./build-dstar.sh "$suite"
+
+# PS4 daemons and tools that run without wxWidgets (the D-Star ones are
+# rebuilt below); displays (NextionDriver, MMDVMHost_Adafruit) and the
+# apt/dpkg remount wrappers are deliberately not shipped.
+binaries=(MMDVMHost DMRGateway YSFGateway P25Gateway NXDNGateway DAPNETGateway M17Gateway
+  DGIdGateway APRSGateway YSF2DMR YSF2NXDN YSF2P25 DMR2YSF DMR2NXDN NXDN2DMR
+  YSFParrot P25Parrot NXDNParrot MMDVMCal RemoteCommand MobileGPS teensy_loader_cli platformDetect.sh)
+# D-Star daemons rebuilt for wxWidgets 3.2 by build-dstar.sh.
+dstar_binaries=(ircddbgatewayd timeserverd starnetserverd remotecontrold timercontrold aprstransmitd texttransmitd
+  voicetransmitd dstarrepeaterd)
+# Service handlers (start|stop|restart) for the shipped daemons.
+services=(mmdvmhost dmrgateway ysfgateway ysfparrot p25gateway p25parrot nxdngateway nxdnparrot
+  nxdn2dmr dapnetgateway m17gateway dgidgateway aprsgateway ysf2dmr ysf2nxdn ysf2p25 dmr2ysf dmr2nxdn mobilegps
+  ircddbgateway timeserver timercontrol dstarrepeater)
+# Tools without references to the PHP dashboard, nginx or /var/www.
+tools=(HostFilesUpdate.sh pistar-bmapi pistar-dapnetapi pistar-tgifapi pistar-link pistar-ysflink
+  pistar-p25link pistar-nxdnlink pistar-findmodem pistar-mmdvmcal pistar-mmdvmhost-module
+  pistar-mmdvmremote pistar-modemupgrade pistar-jittertest pistar-sendcw pistar-motdgen
+  pistar-firewall pistar-expand)
+# Python 3 ports of Pi-Star daemons (radio/sbin) and their handlers, which are
+# named like their units, as in Pi-Star.
+daemons=(pistar-watchdog:"$UNIT_PISTAR_WATCHDOG" pistar-remote:"$UNIT_PISTAR_REMOTE")
+
+version=$(sed -n 's/^Version: //p' debian/control)
+version=${DEB_VERSION:-$version}
+dpkg --validate-version "$version"
+d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+p=$d/pkg
+install -d "$p/DEBIAN" "$p$PISTAR_BIN_DIR" "$p$PISTAR_SBIN_DIR" "$p/usr/local/lib" "$p$SYSTEMD_UNIT_DIR" "$p$RADIO_SHARE_DIR"
+sed "s/^Version: .*/Version: $version/" debian/control >"$p/DEBIAN/control"
+install -m755 debian/postinst "$p/DEBIAN/"
+
+for b in "${binaries[@]}"; do install -m755 "$bin_src/$b" "$p$PISTAR_BIN_DIR/$b"; done
+for b in "${dstar_binaries[@]}"; do install -m755 "$dstar/bin/$b" "$p$PISTAR_BIN_DIR/$b"; done
+# AMBE voice data where the daemons look for it; the D-Star host lists are
+# kept up to date by HostFilesUpdate.sh in PISTAR_HOSTS_DIR.
+install -d -m755 "$p$DSTAR_IRCDDB_DATA_DIR" "$p$DSTAR_REPEATER_DATA_DIR"
+install -m644 "$dstar"/ircddbgateway/* "$p$DSTAR_IRCDDB_DATA_DIR/"
+find "$dstar/dstarrepeater" -type f -exec install -m644 {} "$p$DSTAR_REPEATER_DATA_DIR/" \;
+for h in DPlus_Hosts.txt DExtra_Hosts.txt DCS_Hosts.txt CCS_Hosts.txt XLXHosts.txt; do
+  ln -s "$PISTAR_HOSTS_DIR/$h" "$p$DSTAR_IRCDDB_DATA_DIR/$h"
+done
+cp -a "$bin_src/firmware" "$p$PISTAR_BIN_DIR/firmware"
+find "$p$PISTAR_BIN_DIR/firmware" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
+install -m644 "$bin_src/config_clean.zip" "$p$RADIO_SHARE_DIR/config_clean.zip"
+for t in "${tools[@]}"; do install -m755 "$sbin_src/$t" "$p$PISTAR_SBIN_DIR/$t"; done
+# Shared libraries; the OLED one only satisfies MMDVMHost's link, no display is configured.
+for f in "$libs"/*; do
+  if [[ -L $f ]]; then ln -s "$(basename "$(readlink "$f")")" "$p/usr/local/lib/$(basename "$f")"
+  else install -m644 "$f" "$p/usr/local/lib/"; fi
+done
+
+# A unit that runs a Pi-Star handler (start|stop|restart): the handler starts
+# its daemon and exits, or exits without starting anything when the mode (or
+# the remote) is not configured.
+handler_unit() {
+  local unit=$1
+  cat >"$p$SYSTEMD_UNIT_DIR/$unit" <<EOF
+[Unit]
+Description=Pi-Star ${unit%.service} (handler $PISTAR_SBIN_DIR/$unit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+ExecStart=$PISTAR_SBIN_DIR/$unit start
+ExecStop=$PISTAR_SBIN_DIR/$unit stop
+ExecReload=$PISTAR_SBIN_DIR/$unit restart
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+for s in "${services[@]}"; do
+  install -m755 "$sbin_src/$s.service" "$p$PISTAR_SBIN_DIR/$s.service"
+  handler_unit "$s.service"
+done
+# Pi-Star's own handlers for these run /usr/bin/python (Python 2); radio/sbin
+# has handlers for the Python 3 ports, which read the paths file below.
+for entry in "${daemons[@]}"; do
+  daemon=${entry%%:*} unit=${entry#*:}
+  sed "s|@RADIO_SHARE_DIR@|$RADIO_SHARE_DIR|g" "sbin/$daemon" >"$p$PISTAR_SBIN_DIR/$daemon"
+  chmod 755 "$p$PISTAR_SBIN_DIR/$daemon"
+  if grep -q '@RADIO_SHARE_DIR@' "$p$PISTAR_SBIN_DIR/$daemon"; then echo "placeholder left in $daemon" >&2; exit 1; fi
+  install -m755 "sbin/$daemon.service" "$p$PISTAR_SBIN_DIR/$unit"
+  handler_unit "$unit"
+done
+# The watchdog and the remote act only on units this package installs (the
+# Pi-Star delay timers they also stop are optional).
+for item in ${WATCHDOG_DSTARREPEATER_PROCESSES//,/ } ${WATCHDOG_MMDVMHOST_PROCESSES//,/ } \
+    ${WATCHDOG_COMMON_PROCESSES//,/ } "$UNIT_MMDVMHOST" "$UNIT_DSTARREPEATER" "$UNIT_PISTAR_REMOTE" \
+    ${REMOTE_MMDVMHOST_STOP_UNITS//,/ } ${REMOTE_DSTARREPEATER_STOP_UNITS//,/ } ${REMOTE_DMR_RESTART_UNITS//,/ } \
+    ${REMOTE_P25_RESTART_UNITS//,/ } ${REMOTE_DSTAR_RESTART_UNITS//,/ } ${REMOTE_YSF_RESTART_UNITS//,/ } \
+    ${REMOTE_DSTARREPEATER_RESTART_UNITS//,/ }; do
+  unit=${item#*:}
+  if [[ $unit != *.timer && ! -e $p$SYSTEMD_UNIT_DIR/$unit ]]; then
+    echo "pistar.conf names $unit, which pistar-radio does not install" >&2; exit 1
+  fi
+done
+
+cat >"$p$SYSTEMD_UNIT_DIR/pistar-hostfiles.service" <<EOF
+[Unit]
+Description=Pi-Star host files and ID database update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$PISTAR_SBIN_DIR/HostFilesUpdate.sh
+EOF
+cat >"$p$SYSTEMD_UNIT_DIR/pistar-hostfiles.timer" <<EOF
+[Unit]
+Description=Daily Pi-Star host files update
+
+[Timer]
+OnBootSec=10min
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Paths and units the maintainer script, pistar-watchdog and pistar-remote
+# need, resolved at build time.
+paths_keys=(PISTAR_LOG_DIR PISTAR_HOSTS_DIR PISTAR_RELEASE_FILE RADIO_USER RADIO_SHARE_DIR
+  PISTAR_BIN_DIR PISTAR_SBIN_DIR SYSTEM_LOG_DIR MARKER_MMDVMHOST MARKER_DSTARREPEATER
+  CONF_MMDVMHOST CONF_YSFGATEWAY CONF_PISTAR_REMOTE UNIT_MMDVMHOST UNIT_DSTARREPEATER UNIT_PISTAR_REMOTE
+  WATCHDOG_DSTARREPEATER_PROCESSES WATCHDOG_MMDVMHOST_PROCESSES WATCHDOG_COMMON_PROCESSES
+  REMOTE_MMDVMHOST_STOP_UNITS REMOTE_DSTARREPEATER_STOP_UNITS REMOTE_DMR_RESTART_UNITS REMOTE_P25_RESTART_UNITS
+  REMOTE_DSTAR_RESTART_UNITS REMOTE_YSF_RESTART_UNITS REMOTE_DSTARREPEATER_RESTART_UNITS
+  IP_BIN IW_BIN SYSFS_NET_DIR WIFI_INTERFACE)
+for key in "${paths_keys[@]}"; do
+  if [[ -z ${!key:-} ]]; then echo "pistar.conf has no $key" >&2; exit 1; fi
+  printf '%s=%s\n' "$key" "${!key}"
+done >"$p$RADIO_SHARE_DIR/paths"
+chmod 644 "$p$RADIO_SHARE_DIR/paths"
+
+# Default Pi-Star configurations (config_clean.zip) and where each one lives;
+# postinst creates only the files that are missing.
+: >"$p$RADIO_SHARE_DIR/config-seed"
+for member in $(unzip -Z1 "$bin_src/config_clean.zip"); do
+  key=CONF_$(printf '%s' "$member" | tr 'a-z-' 'A-Z_')
+  target=${!key:-}
+  if [[ -z $target ]]; then echo "pistar.conf has no $key for config_clean.zip member $member" >&2; exit 1; fi
+  printf '%s %s\n' "$member" "$target" >>"$p$RADIO_SHARE_DIR/config-seed"
+done
+chmod 644 "$p$RADIO_SHARE_DIR/config-seed"
+install -m755 seed-configs "$p$RADIO_SHARE_DIR/seed-configs"
+
+if find "$p" -name '*.php' | grep -q .; then echo "PHP in package" >&2; exit 1; fi
+(cd "$p" && find usr lib -type f -print0 | LC_ALL=C sort -z | xargs -0 md5sum >DEBIAN/md5sums)
+mkdir -p "build/$suite"
+dest=build/$suite/pistar-radio_${version}_armhf.deb
+dpkg-deb --root-owner-group --build "$p" "$dest" >/dev/null
+sha256sum "$dest"

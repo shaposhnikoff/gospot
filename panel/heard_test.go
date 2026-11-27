@@ -44,9 +44,9 @@ func TestHeardEvents(t *testing.T) {
 	}
 	log.WriteString(`{"__REALTIME_TIMESTAMP":"123","MESSAGE":[0,1,2]}`)
 	want := []HeardRow{
-		{At: now, Source: "Net", From: "M0ABC", To: "TG 9", Slot: "2"},
-		{At: now.Add(-time.Minute), Source: "Net", From: "2345001", To: "G4KLX", Slot: "2"},
-		{At: now.Add(-2 * time.Minute), Source: "RF", From: "G4KLX/P", To: "TG 91", Slot: "1"},
+		{At: now, Source: "Net", From: "M0ABC", To: "TG 9", Slot: "2", Mode: "DMR Slot 2", Note: "DMR Data"},
+		{At: now.Add(-time.Minute), Source: "Net", From: "2345001", To: "G4KLX", Slot: "2", Mode: "DMR Slot 2"},
+		{At: now.Add(-2 * time.Minute), Source: "RF", From: "G4KLX/P", To: "TG 91", Slot: "1", Mode: "DMR Slot 1"},
 	}
 	h := heardHistory{}
 	h.ingest(log.Bytes(), now)

@@ -8,10 +8,11 @@ jobs:
   build:
     if: ${{ !github.event.deleted }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -29,9 +30,14 @@ jobs:
           npm test
           go -C ../panel test ./...
           python3 -B -m unittest discover -s ../panel/helper
+          debian/test-pistar-conf-merge.sh
+          ../radio/test_seed_configs.sh
+          python3 -B -m unittest discover -s ../radio -p 'test_pistar_*.py'
       - name: Build and check armhf package
         working-directory: Pi-Star_dash_new
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user-static
           base=$(sed -n 's/^Version: //p' debian/control)
           export DEB_VERSION="${base}+ci.${GITHUB_RUN_NUMBER}"
           scripts/build-deb
@@ -54,6 +60,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

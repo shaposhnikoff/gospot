@@ -13,9 +13,6 @@ import (
 	"time"
 )
 
-const modemUnit = "mmdvmhost.service"
-const masterUnit = "dmrgateway.service"
-
 type diagnosticRule struct {
 	pattern, state, detail string
 }
@@ -53,8 +50,8 @@ func diagnosticFor(unit string, rules []diagnosticRule) diagnosticSpec {
 	return s
 }
 
-var modemDiagnostic = diagnosticFor(modemUnit, modemRules)
-var masterDiagnostic = diagnosticFor(masterUnit, masterRules)
+// Built from the configured unit names by applySettings.
+var modemDiagnostic, masterDiagnostic diagnosticSpec
 var invocationFormat = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type diagOutput struct{ buf bytes.Buffer }

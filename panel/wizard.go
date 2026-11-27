@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"net/http"
@@ -23,9 +24,8 @@ import (
 )
 
 // Overridden by the Debian build; keep standalone deployment paths compatible.
-var adminAssets = "/usr/local/share/pistar-native-ui"
-var configHelper = "/usr/local/libexec/pistar-config"
-var archiveHelperPath = "/usr/local/libexec/pistar-archive"
+// Set from DASHBOARD_UI_DIR and DASHBOARD_LIB_DIR by applySettings.
+var adminAssets, configHelper string
 
 // registerWizard is used only on the dedicated HTTPS management mux.
 func registerWizard(mux *http.ServeMux) {
@@ -89,12 +89,21 @@ func wizardCredential() ([32]byte, bool) {
 	return [32]byte{}, false
 }
 
+// wizardUser is the classic Pi-Star administrator login.
+const wizardUser = "pi-star"
+
+var dashboardClient = &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
 const wizardCookie = "__Host-pistar-csrf"
 const wizardConfigPath = "/manage/api/config"
 
 func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 	password, ready := wizardCredential()
 	slot := make(chan struct{}, 1)
+	bm := newBMManager(helper)
+	cal := newCalibrator(startCalibrationHelper, runSudo)
+	tgif := newTGIFClient()
+	hose := newHoseline()
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Cache-Control", "no-store")
@@ -107,24 +116,67 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		}
 		user, pass, ok := r.BasicAuth()
 		sum := sha256.Sum256([]byte(pass))
-		if !ok || user != "admin" || subtle.ConstantTimeCompare(sum[:], password[:]) != 1 {
+		if !ok || user != wizardUser || subtle.ConstantTimeCompare(sum[:], password[:]) != 1 {
 			h.Set("WWW-Authenticate", `Basic realm="Pi-Star", charset="UTF-8"`)
 			http.Error(w, "Требуется вход", 401)
 			return
 		}
 		path := r.URL.EscapedPath()
+		if strings.HasPrefix(path, "/manage/api/expert/") {
+			serveExpert(w, r, runConfigureHelper)
+			return
+		}
 		switch path {
+		case "/manage/api/bm/master", "/manage/api/bm/talkgroup", "/manage/api/bm/peer", "/manage/api/bm/profile", "/manage/api/bm/key", "/manage/api/bm/subscription":
+			bm.serve(w, r)
+			return
 		case "/manage/api/services", "/manage/api/protocols":
 			serveDMRServices(w, r, helper, slot)
 			return
 		case "/manage/api/system":
 			serveSystemInfo(w, r)
 			return
+		case "/manage/api/livelog", "/manage/api/livelog/download", "/manage/api/power", "/manage/api/update":
+			serveMaintenance(w, r, runMaintenanceHelper, time.Now())
+			return
+		case "/manage/api/links", "/manage/api/links/bm":
+			serveLinks(w, r, bm, sendRemoteCommand)
+			return
+		case "/manage/api/configure/factory-reset":
+			serveFactoryReset(w, r, runConfigureHelper)
+			return
+		case "/manage/api/hoseline", "/manage/api/hoseline/groups":
+			hose.serve(w, r)
+			return
+		case "/manage/api/links/dstar", "/manage/api/links/dstar/keeper":
+			serveDStarLinks(w, r, runRemoteControl)
+			return
+		case "/manage/api/links/tgif":
+			serveTGIF(w, r, tgif)
+			return
+		case "/manage/api/backup/classic":
+			serveClassicBackup(w, r, runConfigureHelper, time.Now())
+			return
+		case "/manage/api/configure":
+			serveConfigure(w, r, runConfigureHelper)
+			return
+		case "/manage/api/wifi":
+			serveWifi(w, r, runConfigureHelper)
+			return
+		case "/manage/api/calibration":
+			serveCalibration(w, r, cal, runConfigureHelper)
+			return
+		case "/manage/api/dashboard":
+			// The classic admin page shows the same tables as the dashboard.
+			if r.Method != http.MethodGet {
+				h.Set("Allow", "GET")
+				http.Error(w, "Метод не поддерживается", 405)
+				return
+			}
+			operatorProxy(w, r, dashboardClient, fmt.Sprintf("http://127.0.0.1:%d", cfgPanelPort), "/api/dashboard", true)
+			return
 		case "/manage/api/log", "/manage/api/log/download":
 			serveRadioLog(w, r)
-			return
-		case "/manage/api/backup", "/manage/api/restore":
-			serveArchive(w, r)
 			return
 		}
 		if path != "/" {
@@ -255,7 +307,7 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 	}
 }
 
-var wizardBundle = regexp.MustCompile(`^/manage/assets/([A-Za-z0-9_-][A-Za-z0-9._-]*\.(js|css))$`)
+var wizardBundle = regexp.MustCompile(`^/manage/assets/([A-Za-z0-9_-][A-Za-z0-9._-]*\.(js|css|png))$`)
 
 func serveWizardAsset(w http.ResponseWriter, r *http.Request, dir string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -277,8 +329,11 @@ func serveWizardAsset(w http.ResponseWriter, r *http.Request, dir string) {
 			return
 		}
 		bundle, name, contentType = true, match[1], "text/javascript; charset=utf-8"
-		if match[2] == "css" {
+		switch match[2] {
+		case "css":
 			contentType = "text/css; charset=utf-8"
+		case "png":
+			contentType = "image/png"
 		}
 	}
 
@@ -311,7 +366,13 @@ func serveWizardAsset(w http.ResponseWriter, r *http.Request, dir string) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	frames := ""
+	if port := shellPort(); port > 0 {
+		// Expert > SSH Access embeds the shellinabox client on this host.
+		frames = fmt.Sprintf(" frame-src http://*:%d https://*:%d;", port, port)
+	}
+	// The classic markup colours cells with style attributes; scripts stay same-origin only.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self';"+frames+" form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 	w.Header().Set("Content-Type", contentType)
 	http.ServeContent(w, r, name, info.ModTime(), f)
 }

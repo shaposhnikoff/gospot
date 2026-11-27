@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import Console from './Console.svelte';
   import LiveHeard from './LiveHeard.svelte';
-  import { asSnapshot, detectRuntime, readJSON } from './runtime';
+  import { asSnapshot, detectRuntime, readJSON, serviceOrigin } from './runtime';
   import { fetchSnapshot, scenarios, type Scenario } from './data';
   import './app.css';
 
@@ -18,7 +18,8 @@
   let generation = 0;
   const installed = location.pathname === '/operator' || location.pathname.startsWith('/operator/');
   let runtime = $state<'pi'|'demo'|'pending'|'error'>(installed ? 'pi' : 'pending');
-  let classicPort = $state<number|null>(null);
+  let management = $state<string | null>(null);
+  let preview = $state(false);
   function currentView() { return installed || location.hash === '#console' ? 'console' : 'overview'; }
   let view = $state(currentView());
   const filters: { id: Filter; label: string }[] = [
@@ -48,7 +49,8 @@
       if(runtime === 'error' || runtime === 'pending') {
         const config = await detectRuntime();
         runtime = config.mode;
-        classicPort = config.classicPort;
+        preview = config.preview;
+        management = preview ? location.origin : serviceOrigin(location.origin, 'https:', config.wizardPort);
       }
       const result = runtime === 'pi' ? asSnapshot(await readJSON('/api/status')) : await fetchSnapshot(scenario);
       if (id !== generation) return;
@@ -101,18 +103,18 @@
 
 <header class="masthead"><div class="mast-inner">
   <div class="brand"><span class="brand-mark">{@render icon('radio', 23)}</span><strong>Pi-Star</strong><span class="brand-divider"></span><span class="brand-sub">Пульт оператора</span></div>
-  <span class="demo-badge"><i></i>{installed ? 'Pi-Star' : runtime === 'pi' ? `В эфире · ${snapshot?.Node || 'Raspberry Pi'}` : runtime === 'demo' ? 'Локальный прототип' : 'Подключение'}</span>
+  <span class="demo-badge"><i></i>{preview ? 'Тестовый стенд · без эфира' : installed ? 'Pi-Star' : runtime === 'pi' ? `В эфире · ${snapshot?.Node || 'Raspberry Pi'}` : runtime === 'demo' ? 'Локальный прототип' : 'Подключение'}</span>
 </div></header>
 
 <main>
   <nav class="workspace-tabs" aria-label="Рабочая область">
     {#if installed}<a href="/">Статус узла</a>{:else}<a href="#overview" aria-current={view === 'overview' ? 'page' : undefined}>Обзор узла</a>{/if}
-    {#if installed || runtime==='pi'}<a href="/admin/configure.php" data-testid="open-radio-settings">Настроить MMDVMHost</a>{/if}
+    {#if installed || management}<a href="/admin/configure.php" data-testid="open-radio-settings">Настроить MMDVMHost</a>{/if}
     <a href="#console" aria-current={view === 'console' ? 'page' : undefined}>Все функции Pi-Star</a>
     <a href="./hoseline.html">Слушать TG · Hoseline</a>
   </nav>
   {#if view === 'console'}
-    <Console pi={!installed && runtime === 'pi'} {classicPort} />
+    <Console pi={!installed && runtime === 'pi'} {management} {preview} />
     {#if installed}<LiveHeard />{/if}
   {:else}
   <div class="view-heading">

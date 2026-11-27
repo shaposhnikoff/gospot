@@ -1,4 +1,5 @@
 """Run locally on pistar3 via `sudo python3 -`. Never submit an apply or rollback."""
+import re
 import base64
 import http.cookiejar
 import io
@@ -14,13 +15,13 @@ origin = 'https://192.168.210.194:8788'
 ctx = ssl.create_default_context(cafile=str(p/'tls-cert.pem'))
 api = u.build_opener(u.ProxyHandler({}), u.HTTPSHandler(context=ctx),
                      u.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-headers = {'Authorization': 'Basic '+base64.b64encode(b'admin:'+(p/'admin-password').read_bytes().strip()).decode()}
+headers = {'Authorization': 'Basic '+base64.b64encode(b'pi-star:'+(p/'admin-password').read_bytes().strip()).decode()}
 
 def req(path, *, extra=None, auth=True, data=None):
     return api.open(u.Request(origin+'/manage/'+path, data=data,
                               headers={**(headers if auth else {}), **(extra or {})}), timeout=15)
 
-for name in ('', 'api/config', 'api/system', 'api/log', 'api/log/download','api/backup','api/restore'):
+for name in ('', 'api/config', 'api/system', 'api/log', 'api/log/download','api/backup/classic','api/configure'):
     try:
         req(name, auth=False)
     except urllib.error.HTTPError as e:
@@ -34,12 +35,22 @@ print('PASS system:',system['hostname'],system['model'],system['kernel'])
 rows=json.load(req('api/log'))['rows']; assert isinstance(rows,list)
 assert req('api/log/download').headers.get_content_type()=='text/plain'
 print('PASS log and plain-text download;',len(rows),'sanitized rows')
-with req('api/backup') as r:
+with req('api/backup/classic') as r:
     assert r.headers.get_content_type()=='application/zip'
+    assert re.search(r'filename="Pi-Star_Config_[^"]+\.zip"', r.headers.get('Content-Disposition',''))
     archive=r.read()
 with zipfile.ZipFile(io.BytesIO(archive)) as z:
-    assert {'MMDVM-Host.ini','DMRGateway.ini'} <= set(z.namelist())
-preview=json.load(req('api/restore',data=archive,extra={'Origin':origin,'X-PiStar-CSRF':cfg['csrf'],
-                                                      'X-PiStar-Action':'preview','Content-Type':'application/zip'}))
-assert preview['changed']==[] and len(preview['receipt'])==64
-print('PASS private backup + read-only preview of unchanged live files (archive kept only in memory)')
+    assert {'mmdvmhost','dmrgateway'} <= set(z.namelist()) and not any(n.endswith('.php') for n in z.namelist())
+print('PASS classic Backup download (archive kept only in memory; restore not called on the board)')
+page = json.load(req('api/configure'))
+titles = [s['title'] for s in page['sections']]
+assert page['csrf'] and page['revision'] and {'Gateway Hardware Information', 'General Configuration', 'DMR Configuration'} <= set(titles), titles
+assert not any(c.get('kind') == 'password' and c.get('value') for s in page['sections'] if s['id'] == 'adminpass'
+               for r in s['rows'] for cell in r['cells'] for c in cell.get('controls') or [])
+print('PASS Configuration read:', len(titles), 'sections:', ', '.join(titles), '(no Apply submitted on the board)')
+css = json.load(req('api/expert/css'))
+assert css['csrf'] and css['revision'] and [s['name'] for s in css['sections']][:1] == ['Background'], css['sections'][:1]
+theme = json.load(req('api/dashboard'))['Theme']
+assert re.fullmatch(r'[0-9a-f]{3}([0-9a-f]{3})?', theme['Banners']) and theme['Lookup'] in ('RadioID', 'QRZ'), theme
+print('PASS CSS Tool read (file present: %s) and dashboard theme: banners #%s, lookup %s (nothing saved on the board)'
+      % (css['exists'], theme['Banners'], theme['Lookup']))

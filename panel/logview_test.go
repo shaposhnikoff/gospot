@@ -131,7 +131,7 @@ func TestRadioLogManagementBoundary(t *testing.T) {
 			{"https", "admin-secret", "GET", "?unit=other.service", 400},
 		} {
 			req := httptest.NewRequest(c.method, c.scheme+"://node"+path+c.query, nil)
-			req.SetBasicAuth("admin", c.password)
+			req.SetBasicAuth(wizardUser, c.password)
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
 			if w.Code != c.want {

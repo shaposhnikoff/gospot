@@ -1,0 +1,43 @@
+#!/usr/bin/python3 -I
+"""Test double of remotecontrold for the QA stand: there is no ircDDBGateway.
+
+The dashboard runs it with a private HOME holding ".Remote Control". It appends
+one JSON line per call to RECORD: its argv, the modes of HOME and the file, the
+address and port, and only a SHA-256 of the password. Then it answers like the
+real tool does when the gateway accepts the command.
+"""
+import hashlib
+import json
+import os
+import sys
+
+RECORD = "/run/pistar-qa/remotecontrold-calls"
+
+home = os.environ.get("HOME", "")
+conf = os.path.join(home, ".Remote Control")
+values = {}
+with open(conf, encoding="utf-8") as f:
+    for line in f:
+        key, _, value = line.rstrip("\n").partition("=")
+        values[key] = value
+password = values.pop("password", "")
+if len(password) >= 2 and password[0] == password[-1] == '"':
+    password = password[1:-1]
+entry = {
+    "argv": sys.argv[1:],
+    "home": home,
+    "home_mode": oct(os.stat(home).st_mode & 0o777),
+    "conf_mode": oct(os.stat(conf).st_mode & 0o777),
+    "address": values.get("address"),
+    "port": values.get("port"),
+    "password_sha256": hashlib.sha256(password.encode()).hexdigest(),
+    # the environment it was started with (Python itself may add LC_CTYPE)
+    "env": sorted(v.split(b"=", 1)[0].decode() for v in open("/proc/self/environ", "rb").read().split(b"\0") if v),
+}
+with open(RECORD, "a", encoding="utf-8") as f:
+    f.write(json.dumps(entry) + "\n")
+if len(sys.argv) in (3, 5) and sys.argv[2] in ("link", "unlink"):
+    print("remotecontrold: command accepted by the gateway/starnetserver")
+    sys.exit(0)
+print("remotecontrold: invalid command line usage", file=sys.stderr)
+sys.exit(1)

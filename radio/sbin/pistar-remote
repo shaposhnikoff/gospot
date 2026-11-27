@@ -1,0 +1,435 @@
+#!/usr/bin/python3 -I
+"""Pi-Star Auto Remote Control: RF keeper commands found in the radio logs.
+
+Python 3 port of Pi-Star's pistar-remote 1.9 (Andy Taylor, MW0MWZ). While
+CONF_PISTAR_REMOTE has "[enable] enabled=true", the callsign of its [keeper]
+section controls the hotspot over RF:
+
+  DMR     voice header to a [dmr] TG or ID              (MMDVMHost log)
+  P25     voice transmission to a [p25] TG              (MMDVMHost log)
+  D-Star  RF header with UR set to a [d-star] command   (MMDVMHost log, or the
+          DStarRepeater log when that controller runs)
+  YSF     keeper RF header, then a YSFGateway connect   (YSFGateway log)
+          request to a [ysf] room number
+
+Commands: svckill (stop the controller and the watchdog), svcrestart,
+reboot, shutdown and hostfiles (HostFilesUpdate.sh); D-Star also has getip,
+wifissid, wifirssi and 8Ball, answered as D-Star slow data text through
+texttransmitd, which also announces the other D-Star commands first.
+
+Every path and unit name comes from the pistar-radio paths file (written from
+pistar.conf when the package is built). Programs run as argument lists,
+never through a shell. Each log line is read once; a command acts only on
+lines of the last WINDOW seconds and at most once per COOLDOWN.
+
+  pistar-remote            run (exits at once when disabled)
+  pistar-remote --enabled  exit 0 when enabled, 1 otherwise
+  pistar-remote --once     one pass over the logs, then exit
+"""
+import argparse
+import configparser
+from datetime import datetime, timedelta, timezone
+import os
+import random
+import re
+import stat
+import subprocess
+import sys
+import time
+
+PATHS_FILE = "@RADIO_SHARE_DIR@/paths"
+PATH_KEYS = ("PISTAR_BIN_DIR", "PISTAR_SBIN_DIR", "PISTAR_LOG_DIR", "CONF_PISTAR_REMOTE", "CONF_MMDVMHOST",
+             "CONF_YSFGATEWAY", "IP_BIN", "IW_BIN", "SYSFS_NET_DIR")
+UNIT_KEYS = ("REMOTE_MMDVMHOST_STOP_UNITS", "REMOTE_DSTARREPEATER_STOP_UNITS", "REMOTE_DMR_RESTART_UNITS",
+             "REMOTE_P25_RESTART_UNITS", "REMOTE_DSTAR_RESTART_UNITS", "REMOTE_YSF_RESTART_UNITS",
+             "REMOTE_DSTARREPEATER_RESTART_UNITS")
+UNIT = re.compile(r"[A-Za-z0-9@_.-]+\.(?:service|timer)")
+POLL = 5            # seconds between passes (Pi-Star: 30)
+WINDOW = 60         # only lines this recent count (Pi-Star: 30 s MMDVMHost, 60 s DStarRepeater)
+COOLDOWN = 30       # the same command from the same mode at most once in this many seconds
+YSF_PAIRING = 30    # a YSFGateway request counts when the keeper's RF header came this recently
+HOSTFILES = "HostFilesUpdate.sh"
+# Programs whose logs are followed; names as in /proc/PID/comm.
+MMDVMHOST, YSFGATEWAY, DSTARREPEATER = "MMDVMHost", "YSFGateway", "dstarrepeaterd"
+DSTARREPEATER_LOGS = ("dstarrepeaterd", "DStarRepeater")  # newer name first
+
+COMMANDS = {
+    "dmr": ("svckill", "svcrestart", "reboot", "shutdown", "hostfiles"),
+    "p25": ("svckill", "svcrestart", "reboot", "shutdown", "hostfiles"),
+    "ysf": ("svckill", "svcrestart", "reboot", "shutdown", "hostfiles"),
+    "d-star": ("svckill", "svcrestart", "reboot", "shutdown", "hostfiles", "getip", "wifissid", "wifirssi", "8ball"),
+}
+ANNOUNCE = {
+    "svckill": "Shutting down at keeper request",
+    "svcrestart": "Restarting services at keeper request",
+    "reboot": "Rebooting OS at keeper request",
+    "shutdown": "Shutting down OS at keeper request",
+    "hostfiles": "Updating Hostfiles at keeper request",
+}
+MAGIC_8BALL = (
+    "It is certain", "It is decidedly so", "Without a doubt", "Yes definitely", "You may rely on it",
+    "As I see it, yes", "Most likely", "Outlook good", "Yes", "Signs point to yes", "Reply hazy try agn",
+    "Ask again later", "Tell you later", "Cannot predict now", "Concentrate, ask agn", "Dont count on it",
+    "My reply is no", "My sources say no", "Outlook not so good", "Very doubtful",
+)
+
+# MMDVMHost (PS4) lines, after the "M: YYYY-MM-DD HH:MM:SS.mmm " prefix.
+DMR_HEADER = re.compile(r"DMR Slot [12], received RF voice header from (\S+) to (?:TG )?(\d+)\b")
+P25_HEADER = re.compile(r"P25, received RF (?:voice )?transmission from (\S+) to (?:TG )?(\d+)\b")
+DSTAR_HEADER = re.compile(r"D-Star, received RF header from (.{8})/(.{4}) to (.{1,8})")
+YSF_HEADER = re.compile(r"YSF, received RF header from (.{10}) to ")
+# YSFGateway lines.
+YSF_NONEXISTENT = re.compile(r"Trying to find non existent (?:YSF )?reflector with an id of (\d+)\b")
+YSF_CONNECT = re.compile(r"Received Connect to (\d+) from (.{1,10})")
+# DStarRepeater line.
+DSTARREPEATER_HEADER = re.compile(r"Radio header decoded - My: (.{8})/(.{4})\s+Your: (.{8})\s+Rpt1:")
+
+
+def log(message):
+    print("pistar-remote: " + message, flush=True)
+
+
+def load_paths(path=None):
+    """Read the pistar-radio paths file (KEY=value), trusted only if no one
+    but its owner, root, can change it. Unprivileged runs (tests) may name
+    another file in PISTAR_RADIO_PATHS."""
+    if path is None:
+        path = PATHS_FILE
+        if os.geteuid() != 0:
+            path = os.environ.get("PISTAR_RADIO_PATHS", PATHS_FILE)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as e:
+        raise SystemExit(f"pistar-remote: cannot read {path}: {e.strerror}")
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o022:
+        os.close(fd)
+        raise SystemExit(f"pistar-remote: unsafe paths file {path}")
+    values = {}
+    with os.fdopen(fd, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                key, sep, value = line.partition("=")
+                if not sep or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or re.search(r"[\s\"'$`\\]", value):
+                    raise SystemExit(f"pistar-remote: invalid line in {path}")
+                values[key] = value
+    for key in PATH_KEYS:
+        value = values.get(key, "")
+        if not value.startswith("/") or os.path.normpath(value) != value:
+            raise SystemExit(f"pistar-remote: {key} must be a clean absolute path")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", values.get("WIFI_INTERFACE", "")):
+        raise SystemExit("pistar-remote: WIFI_INTERFACE must be an interface name")
+    for key in UNIT_KEYS:
+        units = values.get(key, "").split(",")
+        if not all(UNIT.fullmatch(u) for u in units):
+            raise SystemExit(f"pistar-remote: {key} must be a comma separated list of units")
+    return values
+
+
+def read_ini(path):
+    """A Pi-Star INI file, or an empty one when it is missing or unreadable."""
+    ini = configparser.RawConfigParser(strict=False, allow_no_value=True, interpolation=None)
+    try:
+        ini.read(path, encoding="utf-8")
+    except (configparser.Error, UnicodeDecodeError) as e:
+        log(f"cannot parse {path}: {e}")
+    return ini
+
+
+def ini_get(ini, section, option, default=""):
+    value = ini.get(section, option, fallback=default)
+    return default if value is None else value.strip()
+
+
+def utcnow():
+    """Pi-Star log timestamps and file dates are UTC."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def line_time(line):
+    """The time of a Pi-Star log line ("M: 2017-07-03 09:39:38.208 ...")."""
+    try:
+        return datetime.strptime(line[3:22], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def running(proc_dir, name):
+    """Whether a process of this name runs, like "pgrep NAME" (comm is cut to 15)."""
+    try:
+        pids = [p for p in os.listdir(proc_dir) if p.isdigit()]
+    except OSError:
+        return False
+    for pid in pids:
+        try:
+            with open(os.path.join(proc_dir, pid, "comm"), encoding="utf-8", errors="replace") as f:
+                if f.read().rstrip("\n") == name[:15]:
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def same_number(a, b):
+    return a.isdigit() and b.isdigit() and int(a) == int(b)
+
+
+class LogFollower:
+    """The complete lines appended to a dated log file since the last read.
+
+    A new file (another day, or a rotated or truncated one) is read from
+    its start."""
+
+    def __init__(self):
+        self.key, self.offset = None, 0
+
+    def read(self, path):
+        try:
+            f = open(path, "rb")
+        except OSError:
+            return []
+        with f:
+            st = os.fstat(f.fileno())
+            if (path, st.st_ino) != self.key or st.st_size < self.offset:
+                self.key, self.offset = (path, st.st_ino), 0
+            f.seek(self.offset)
+            data = f.read()
+        end = data.rfind(b"\n") + 1
+        self.offset += end
+        return data[:end].decode("utf-8", errors="replace").splitlines()
+
+
+class Settings:
+    def __init__(self, paths):
+        self.paths = paths
+        remote = read_ini(paths["CONF_PISTAR_REMOTE"])
+        self.keeper = ini_get(remote, "keeper", "callsign").upper()
+        self.enabled = ini_get(remote, "enable", "enabled") == "true" and bool(self.keeper)
+        self.commands = {}
+        for mode, actions in COMMANDS.items():
+            table = {}
+            for action in actions:
+                value = ini_get(remote, mode, action).upper()
+                if not value:
+                    continue
+                if mode != "d-star" and not value.isdigit():
+                    log(f"ignoring [{mode}] {action}={value}: not a number")
+                    continue
+                table[action] = value
+            self.commands[mode] = table
+        mmdvm = read_ini(paths["CONF_MMDVMHOST"])
+        ysf = read_ini(paths["CONF_YSFGATEWAY"])
+        logs = paths["PISTAR_LOG_DIR"]
+        self.mmdvm_log = (ini_get(mmdvm, "Log", "FilePath", logs), ini_get(mmdvm, "Log", "FileRoot", "MMDVM"))
+        self.ysf_log = (ini_get(ysf, "Log", "FilePath", logs), ini_get(ysf, "Log", "FileRoot", "YSFGateway"))
+        callsign, module = ini_get(mmdvm, "General", "Callsign"), ini_get(mmdvm, "D-Star", "Module")
+        # The repeater texttransmitd talks to: callsign padded to 7, then the module.
+        self.dstar_repeater = callsign.upper().ljust(7) + module.upper() if callsign and module else None
+        self.units = {key: paths[key].split(",") for key in UNIT_KEYS}
+        bins = paths["PISTAR_BIN_DIR"]
+        self.text_transmit = next((p for p in (os.path.join(bins, "texttransmitd"), os.path.join(bins, "texttransmit"))
+                                   if os.path.isfile(p)), None)
+
+    def match(self, mode, target):
+        """The commands of a mode whose value is this destination."""
+        if mode == "d-star":
+            return [a for a, v in self.commands[mode].items() if v == target.strip().upper()]
+        return [a for a, v in self.commands[mode].items() if same_number(v, target)]
+
+
+def run_command(argv, capture=False):
+    try:
+        done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=capture, text=capture,
+                              timeout=10 if capture else None, check=False)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log(f"{argv[0]} failed: {e}")
+        return 127, ""
+    if done.returncode:
+        log(f"{' '.join(argv)} exited with {done.returncode}")
+    return done.returncode, done.stdout if capture else ""
+
+
+class Remote:
+    def __init__(self, settings, run=run_command, sleep=time.sleep, clock=utcnow, proc_dir="/proc", rng=random):
+        self.s, self.run, self.sleep, self.clock, self.proc, self.rng = settings, run, sleep, clock, proc_dir, rng
+        self.mmdvm, self.ysf, self.dstar = LogFollower(), LogFollower(), LogFollower()
+        self.last = {}          # (mode, action) -> time of the line that last triggered it
+        self.ysf_headers = []   # times of the keeper's recent YSF RF headers
+        self.root_readonly = lambda: bool(os.statvfs("/").f_flag & os.ST_RDONLY)
+
+    # --- passes ----------------------------------------------------------------
+    def poll(self):
+        now = self.clock()
+        day = now.strftime("%Y-%m-%d")
+        if running(self.proc, MMDVMHOST):
+            path, root = self.s.mmdvm_log
+            self.mmdvm_lines(self.mmdvm.read(os.path.join(path, f"{root}-{day}.log")), now)
+            path, root = self.s.ysf_log
+            gateway = self.ysf.read(os.path.join(path, f"{root}-{day}.log"))
+            if running(self.proc, YSFGATEWAY):
+                self.ysf_lines(gateway, now)
+        if running(self.proc, DSTARREPEATER):
+            logs = self.s.paths["PISTAR_LOG_DIR"]
+            names = [os.path.join(logs, f"{n}-{day}.log") for n in DSTARREPEATER_LOGS]
+            path = next((p for p in names if os.path.isfile(p)), names[0])
+            self.dstarrepeater_lines(self.dstar.read(path), now)
+        horizon = now - timedelta(seconds=2 * WINDOW)
+        self.ysf_headers = [t for t in self.ysf_headers if t >= horizon]
+
+    def fresh(self, ts, now):
+        return ts is not None and now - timedelta(seconds=WINDOW) <= ts <= now + timedelta(seconds=1)
+
+    def mmdvm_lines(self, lines, now):
+        keeper = self.s.keeper
+        for line in lines:
+            ts = line_time(line)
+            if not self.fresh(ts, now):
+                continue
+            m = DMR_HEADER.search(line)
+            if m and m.group(1).upper() == keeper:
+                self.trigger("dmr", m.group(2), ts)
+                continue
+            m = P25_HEADER.search(line)
+            if m and m.group(1).upper() == keeper:
+                self.trigger("p25", m.group(2), ts)
+                continue
+            m = DSTAR_HEADER.search(line)
+            if m and m.group(1).strip().upper() == keeper:
+                self.trigger("d-star", m.group(3), ts)
+                continue
+            m = YSF_HEADER.search(line)
+            if m and m.group(1).strip().upper() == keeper:
+                self.ysf_headers.append(ts)
+
+    def ysf_lines(self, lines, now):
+        for line in lines:
+            ts = line_time(line)
+            if not self.fresh(ts, now):
+                continue
+            m = YSF_NONEXISTENT.search(line)
+            if not m:
+                m = YSF_CONNECT.search(line)
+                if not m or m.group(2).strip().upper() != self.s.keeper:
+                    continue
+            earliest = ts - timedelta(seconds=YSF_PAIRING)
+            if any(earliest <= h <= ts + timedelta(seconds=1) for h in self.ysf_headers):
+                self.trigger("ysf", m.group(1), ts)
+
+    def dstarrepeater_lines(self, lines, now):
+        for line in lines:
+            ts = line_time(line)
+            m = DSTARREPEATER_HEADER.search(line)
+            if self.fresh(ts, now) and m and m.group(1).strip().upper() == self.s.keeper:
+                self.trigger("d-star", m.group(3), ts, controller="dstarrepeater")
+
+    # --- commands --------------------------------------------------------------
+    def trigger(self, mode, target, ts, controller="mmdvmhost"):
+        for action in self.s.match(mode, target):
+            key = (mode, action)
+            last = self.last.get(key)
+            if last is not None and abs((ts - last).total_seconds()) < COOLDOWN:
+                log(f"{mode} {action} repeated within {COOLDOWN} s, ignored")
+                continue
+            self.last[key] = ts
+            log(f"{mode} {action} from {self.s.keeper}")
+            self.act(mode, action, controller)
+
+    def systemctl(self, verb, units):
+        for unit in units:
+            self.run(["systemctl", verb, unit])
+
+    def announce(self, text):
+        if not self.s.text_transmit or not self.s.dstar_repeater:
+            log(f"cannot send D-Star text \"{text}\": no texttransmitd or D-Star callsign/module")
+            return
+        self.run([self.s.text_transmit, "-text", text, self.s.dstar_repeater])
+
+    def act(self, mode, action, controller):
+        dstar = mode == "d-star"
+        if dstar and action in ANNOUNCE:
+            self.announce(ANNOUNCE[action])
+            self.sleep(5)
+        units = self.s.units
+        if action == "svckill":
+            key = "REMOTE_DSTARREPEATER_STOP_UNITS" if controller == "dstarrepeater" else "REMOTE_MMDVMHOST_STOP_UNITS"
+            self.systemctl("stop", units[key])
+        elif action == "svcrestart":
+            if controller == "dstarrepeater":
+                self.systemctl("restart", units["REMOTE_DSTARREPEATER_RESTART_UNITS"])
+            else:
+                key = {"dmr": "REMOTE_DMR_RESTART_UNITS", "p25": "REMOTE_P25_RESTART_UNITS",
+                       "d-star": "REMOTE_DSTAR_RESTART_UNITS", "ysf": "REMOTE_YSF_RESTART_UNITS"}[mode]
+                self.systemctl("restart", units[key])
+                self.sleep(30)
+        elif action in ("reboot", "shutdown"):
+            os.sync()
+            self.run(["systemctl", "reboot" if action == "reboot" else "poweroff"])
+        elif action == "hostfiles":
+            if self.root_readonly():
+                self.run(["mount", "-o", "remount,rw", "/"])
+            self.run([os.path.join(self.s.paths["PISTAR_SBIN_DIR"], HOSTFILES)])
+        elif action == "getip":
+            prefix = "My IP: " if controller == "dstarrepeater" else "IP: "
+            self.announce(prefix + (self.address() or "none"))
+        elif action == "wifissid":
+            link = self.wifi_link()
+            self.announce("SSID: " + link["ssid"] if link and link.get("ssid") else "WiFi: Not connected")
+        elif action == "wifirssi":
+            link = self.wifi_link()
+            self.announce("RSSI: " + link["signal"] if link and link.get("signal") else "WiFi: Not connected")
+        elif action == "8ball":
+            self.announce(self.rng.choice(MAGIC_8BALL))
+
+    def address(self):
+        """The first global address, IPv4 before IPv6 (Pi-Star: hostname -I | awk '{print $1}')."""
+        code, out = self.run([self.s.paths["IP_BIN"], "-o", "addr", "show", "scope", "global"], capture=True)
+        found = {"inet": [], "inet6": []}
+        for line in out.splitlines() if code == 0 else []:
+            fields = line.split()
+            if "global" not in fields:
+                continue
+            for family in found:
+                if family in fields[:-1]:
+                    found[family].append(fields[fields.index(family) + 1].split("/")[0])
+        return (found["inet"] + found["inet6"] or [None])[0]
+
+    def wifi_link(self):
+        """SSID and signal of the Wi-Fi interface (Pi-Star: iwconfig wlan0), None when absent."""
+        iface = self.s.paths["WIFI_INTERFACE"]
+        if not os.path.islink(os.path.join(self.s.paths["SYSFS_NET_DIR"], iface)):
+            return None
+        code, out = self.run([self.s.paths["IW_BIN"], "dev", iface, "link"], capture=True)
+        if code != 0 or not out.startswith("Connected"):
+            return None
+        link = {}
+        for line in out.splitlines():
+            key, _, value = line.strip().partition(": ")
+            if key == "SSID":
+                link["ssid"] = value
+            elif key == "signal":
+                link["signal"] = value
+        return link
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="pistar-remote", description="Pi-Star RF keeper remote control")
+    parser.add_argument("--enabled", action="store_true", help="exit 0 when enabled, 1 otherwise")
+    parser.add_argument("--once", action="store_true", help="one pass over the logs, then exit")
+    args = parser.parse_args(argv)
+    settings = Settings(load_paths())
+    if args.enabled:
+        return 0 if settings.enabled else 1
+    if not settings.enabled:
+        log("not enabled in " + settings.paths["CONF_PISTAR_REMOTE"])
+        return 0
+    remote = Remote(settings)
+    while True:
+        remote.poll()
+        if args.once:
+            return 0
+        time.sleep(POLL)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,353 @@
+#!/usr/bin/python3 -I
+"""Pi-Star Service Watchdog: keep the radio services running.
+
+Python 3 port of Pi-Star's pistar-watchdog 2.0 (Andy Taylor, MW0MWZ). After
+90 seconds for the services to settle, every 300 seconds it
+
+  * cleans the log volume when SYSTEM_LOG_DIR is over 90% full: rotated
+    *.1 and *.1.gz files at its top level, *.log files in PISTAR_LOG_DIR and
+    *.gz files anywhere under SYSTEM_LOG_DIR older than a day go; today's
+    controller log keeps its last 500 lines and the controller is restarted;
+  * restarts the processes of WATCHDOG_DSTARREPEATER_PROCESSES (when
+    MARKER_DSTARREPEATER exists), WATCHDOG_MMDVMHOST_PROCESSES (when
+    MARKER_MMDVMHOST exists) and WATCHDOG_COMMON_PROCESSES that are not
+    running, by stopping and starting their unit;
+  * restarts DStarRepeater after a DVAP failure ("Bad DVAP header",
+    "Cannot open the D-Star modem") or a full buffer ("No space to write")
+    in its log of the last five minutes;
+  * restarts UNIT_PISTAR_REMOTE when CONF_PISTAR_REMOTE enables it and its
+    handler reports it is not running.
+
+Pi-Star also trimmed the web server error log; this system has none.
+Every path and unit name comes from the pistar-radio paths file (written from
+pistar.conf when the package is built). Programs run as argument lists,
+never through a shell.
+
+  pistar-watchdog          run
+  pistar-watchdog --once   one check at once, then exit
+"""
+import argparse
+import collections
+import configparser
+from datetime import datetime, timedelta, timezone
+import os
+import re
+import stat
+import subprocess
+import sys
+import time
+
+PATHS_FILE = "@RADIO_SHARE_DIR@/paths"
+PATH_KEYS = ("PISTAR_SBIN_DIR", "PISTAR_LOG_DIR", "SYSTEM_LOG_DIR", "MARKER_MMDVMHOST", "MARKER_DSTARREPEATER",
+             "CONF_MMDVMHOST", "CONF_PISTAR_REMOTE")
+UNIT_KEYS = ("UNIT_MMDVMHOST", "UNIT_DSTARREPEATER", "UNIT_PISTAR_REMOTE")
+PROCESS_KEYS = ("WATCHDOG_DSTARREPEATER_PROCESSES", "WATCHDOG_MMDVMHOST_PROCESSES", "WATCHDOG_COMMON_PROCESSES")
+UNIT = re.compile(r"[A-Za-z0-9@_.-]+\.(?:service|timer)")
+PROCESS = re.compile(r"[A-Za-z0-9_.-]+")
+SETTLE, INTERVAL = 90, 300      # seconds before the first check, between checks
+DISK_LIMIT = 90                 # percent of the log volume in use
+KEEP_LINES, NOSPACE_LINES = 500, 50
+DVAP_WINDOW = 300               # seconds of the DStarRepeater log that count
+DAY = 86400
+DSTARREPEATER_LOGS = ("dstarrepeaterd", "DStarRepeater")  # newer name first
+DVAP_FAILURES = ("Bad DVAP header", "Cannot open the D-Star modem")
+
+
+def log(message):
+    print("pistar-watchdog: " + message, flush=True)
+
+
+def load_paths(path=None):
+    """Read the pistar-radio paths file (KEY=value), trusted only if no one
+    but its owner, root, can change it. Unprivileged runs (tests) may name
+    another file in PISTAR_RADIO_PATHS."""
+    if path is None:
+        path = PATHS_FILE
+        if os.geteuid() != 0:
+            path = os.environ.get("PISTAR_RADIO_PATHS", PATHS_FILE)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as e:
+        raise SystemExit(f"pistar-watchdog: cannot read {path}: {e.strerror}")
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o022:
+        os.close(fd)
+        raise SystemExit(f"pistar-watchdog: unsafe paths file {path}")
+    values = {}
+    with os.fdopen(fd, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                key, sep, value = line.partition("=")
+                if not sep or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or re.search(r"[\s\"'$`\\]", value):
+                    raise SystemExit(f"pistar-watchdog: invalid line in {path}")
+                values[key] = value
+    for key in PATH_KEYS:
+        value = values.get(key, "")
+        if not value.startswith("/") or os.path.normpath(value) != value:
+            raise SystemExit(f"pistar-watchdog: {key} must be a clean absolute path")
+    for key in UNIT_KEYS:
+        if not UNIT.fullmatch(values.get(key, "")):
+            raise SystemExit(f"pistar-watchdog: {key} must be a unit name")
+    for key in PROCESS_KEYS:
+        processes(values, key)
+    return values
+
+
+def processes(paths, key):
+    """[(process name, unit)] of a "name:unit,name:unit" setting."""
+    pairs = []
+    for item in paths.get(key, "").split(","):
+        name, _, unit = item.partition(":")
+        if not PROCESS.fullmatch(name) or not UNIT.fullmatch(unit):
+            raise SystemExit(f"pistar-watchdog: {key} must be a comma separated list of process:unit")
+        pairs.append((name, unit))
+    return pairs
+
+
+def read_ini(path):
+    """A Pi-Star INI file, or an empty one when it is missing or unreadable."""
+    ini = configparser.RawConfigParser(strict=False, allow_no_value=True, interpolation=None)
+    try:
+        ini.read(path, encoding="utf-8")
+    except (configparser.Error, UnicodeDecodeError) as e:
+        log(f"cannot parse {path}: {e}")
+    return ini
+
+
+def ini_get(ini, section, option, default=""):
+    value = ini.get(section, option, fallback=default)
+    return default if value is None else value.strip()
+
+
+def utcnow():
+    """Pi-Star log timestamps and file dates are UTC."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def line_time(line):
+    """The time of a Pi-Star log line ("M: 2017-12-24 20:40:15: ...")."""
+    try:
+        return datetime.strptime(line[3:22], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def running(proc_dir, name):
+    """Whether a process of this name runs, like "pgrep NAME" (comm is cut to 15)."""
+    try:
+        pids = [p for p in os.listdir(proc_dir) if p.isdigit()]
+    except OSError:
+        return False
+    for pid in pids:
+        try:
+            with open(os.path.join(proc_dir, pid, "comm"), encoding="utf-8", errors="replace") as f:
+                if f.read().rstrip("\n") == name[:15]:
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def disk_percent(path):
+    """Percent of the volume in use, as Pi-Star computes it (df rounds up)."""
+    st = os.statvfs(path)
+    used = st.f_blocks - st.f_bfree
+    total = used + st.f_bavail
+    return used * 100 // total + 1 if total else 0
+
+
+def keep_last_lines(path, count):
+    """Cut a log to its last lines in place (Pi-Star: echo "$(tail -N f)" > f)."""
+    try:
+        with open(path, "r+b") as f:
+            lines = collections.deque(f, maxlen=count)
+            f.seek(0)
+            data = b"".join(lines).rstrip(b"\n") + b"\n"
+            f.write(data)
+            f.truncate()
+            return len(data)
+    except OSError as e:
+        log(f"cannot trim {path}: {e.strerror}")
+        return None
+
+
+def files_in(directory):
+    """The regular files directly in a directory (no symlinks)."""
+    try:
+        with os.scandir(directory) as entries:
+            return [e for e in entries if e.is_file(follow_symlinks=False)]
+    except OSError:
+        return []
+
+
+def remove(path):
+    try:
+        os.unlink(path)
+        log(f"removed {path}")
+    except OSError as e:
+        log(f"cannot remove {path}: {e.strerror}")
+
+
+def run_command(argv, capture=False):
+    try:
+        done = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=capture, text=capture,
+                              timeout=30 if capture else None, check=False)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log(f"{argv[0]} failed: {e}")
+        return 127, ""
+    if done.returncode and not capture:
+        log(f"{' '.join(argv)} exited with {done.returncode}")
+    return done.returncode, done.stdout if capture else ""
+
+
+class Watchdog:
+    def __init__(self, paths, run=run_command, sleep=time.sleep, clock=utcnow, proc_dir="/proc",
+                 disk=disk_percent):
+        self.p, self.run, self.sleep, self.clock, self.proc, self.disk = paths, run, sleep, clock, proc_dir, disk
+        self.dvap_key, self.dvap_offset = None, 0
+
+    def check(self):
+        """One pass, in the order of the Pi-Star watchdog."""
+        p = self.p
+        dstar, mmdvm = os.path.isfile(p["MARKER_DSTARREPEATER"]), os.path.isfile(p["MARKER_MMDVMHOST"])
+        if self.disk(p["SYSTEM_LOG_DIR"]) > DISK_LIMIT:
+            self.clean_logs(dstar, mmdvm)
+        if dstar:
+            self.keep_running(processes(p, "WATCHDOG_DSTARREPEATER_PROCESSES"))
+            self.check_dstarrepeater_log()
+        if mmdvm:
+            self.keep_running(processes(p, "WATCHDOG_MMDVMHOST_PROCESSES"))
+        self.keep_running(processes(p, "WATCHDOG_COMMON_PROCESSES"))
+        self.check_remote()
+
+    def restart(self, unit, pause_before_start=2, pause_after=10):
+        self.run(["systemctl", "stop", unit])
+        self.sleep(pause_before_start)
+        self.run(["systemctl", "start", unit])
+        self.sleep(pause_after)
+
+    def keep_running(self, pairs):
+        for name, unit in pairs:
+            if not running(self.proc, name):
+                log(f"{name} is not running, restarting {unit}")
+                self.restart(unit)
+
+    # --- log volume ------------------------------------------------------------
+    def dstarrepeater_logs(self):
+        day = self.clock().strftime("%Y-%m-%d")
+        return [os.path.join(self.p["PISTAR_LOG_DIR"], f"{n}-{day}.log") for n in DSTARREPEATER_LOGS]
+
+    def mmdvm_log(self):
+        ini = read_ini(self.p["CONF_MMDVMHOST"])
+        path = ini_get(ini, "Log", "FilePath", self.p["PISTAR_LOG_DIR"])
+        root = ini_get(ini, "Log", "FileRoot", "MMDVM")
+        return os.path.join(path, f"{root}-{self.clock().strftime('%Y-%m-%d')}.log")
+
+    def clean_logs(self, dstar, mmdvm):
+        log_dir, pistar_logs = self.p["SYSTEM_LOG_DIR"], self.p["PISTAR_LOG_DIR"]
+        log(f"{log_dir} is over {DISK_LIMIT}% full, cleaning up")
+        now = time.time()
+        old = lambda st: now - st.st_mtime > DAY  # noqa: E731 - find -mtime +0
+        for e in files_in(log_dir):
+            if e.name.endswith(".1") or e.name.endswith(".1.gz"):
+                remove(e.path)
+        for e in files_in(pistar_logs):
+            if e.name.endswith(".log") and old(e.stat(follow_symlinks=False)):
+                remove(e.path)
+        for top, _, files in os.walk(log_dir):
+            for name in files:
+                path = os.path.join(top, name)
+                if ".gz" in name:
+                    try:
+                        st = os.lstat(path)
+                    except OSError:
+                        continue
+                    if stat.S_ISREG(st.st_mode) and old(st):
+                        remove(path)
+        if dstar:
+            for path in self.dstarrepeater_logs():
+                if os.path.isfile(path):
+                    keep_last_lines(path, KEEP_LINES)
+            self.run(["systemctl", "restart", self.p["UNIT_DSTARREPEATER"]])
+            self.sleep(60)
+        if mmdvm:
+            path = self.mmdvm_log()
+            if os.path.isfile(path):
+                keep_last_lines(path, KEEP_LINES)
+            self.run(["systemctl", "restart", self.p["UNIT_MMDVMHOST"]])
+            self.sleep(60)
+
+    # --- DStarRepeater failures ------------------------------------------------
+    def new_dstarrepeater_lines(self, path):
+        """Lines of the DStarRepeater log not yet looked at."""
+        try:
+            f = open(path, "rb")
+        except OSError:
+            return []
+        with f:
+            st = os.fstat(f.fileno())
+            if (path, st.st_ino) != self.dvap_key or st.st_size < self.dvap_offset:
+                self.dvap_key, self.dvap_offset = (path, st.st_ino), 0
+            f.seek(self.dvap_offset)
+            data = f.read()
+        end = data.rfind(b"\n") + 1
+        self.dvap_offset += end
+        return data[:end].decode("utf-8", errors="replace").splitlines()
+
+    def check_dstarrepeater_log(self):
+        names = self.dstarrepeater_logs()
+        path = next((p for p in names if os.path.isfile(p)), None)
+        if path is None:
+            return
+        now = self.clock()
+        since = now - timedelta(seconds=DVAP_WINDOW)
+        unit = self.p["UNIT_DSTARREPEATER"]
+        for line in self.new_dstarrepeater_lines(path):
+            ts = line_time(line)
+            if ts is None or not since <= ts <= now + timedelta(seconds=1):
+                continue
+            if any(f in line for f in DVAP_FAILURES):
+                log(f"DStarRepeater modem failure, restarting {unit}")
+                self.restart(unit, pause_before_start=30, pause_after=270)  # give the DVAP time to recover
+                return
+            if "No space to write" in line:
+                log(f"DStarRepeater buffer full, restarting {unit}")
+                size = keep_last_lines(path, NOSPACE_LINES)
+                if size is not None:
+                    self.dvap_offset = size   # the kept lines were already looked at
+                self.run(["systemctl", "restart", unit])
+                self.sleep(60)
+                return
+
+    # --- pistar-remote ---------------------------------------------------------
+    def check_remote(self):
+        remote = read_ini(self.p["CONF_PISTAR_REMOTE"])
+        if ini_get(remote, "enable", "enabled") != "true":
+            return
+        unit = self.p["UNIT_PISTAR_REMOTE"]
+        handler = os.path.join(self.p["PISTAR_SBIN_DIR"], unit)  # Pi-Star handlers are named like their unit
+        code, out = self.run([handler, "status"], capture=True)
+        if code == 127:
+            return
+        if "not" in out:
+            log(f"pistar-remote is enabled but not running, restarting {unit}")
+            self.restart(unit)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="pistar-watchdog", description="Pi-Star service watchdog")
+    parser.add_argument("--once", action="store_true", help="one check at once, then exit")
+    args = parser.parse_args(argv)
+    watchdog = Watchdog(load_paths())
+    if args.once:
+        watchdog.check()
+        return 0
+    time.sleep(SETTLE)  # assuming the Pi has just started, let the services settle
+    while True:
+        watchdog.check()
+        time.sleep(INTERVAL)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

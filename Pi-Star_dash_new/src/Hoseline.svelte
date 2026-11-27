@@ -1,10 +1,11 @@
 <script lang="ts">
   // BrandMeister Hoseline, listen only: one talkgroup relayed by this board
-  // (panel/hoseline.go), μ-law decoded here and played through an AudioWorklet.
+  // (panel/hoseline.go), μ-law decoded here and played through an AudioWorklet
+  // (secure contexts) or scheduled buffer sources (the operator page over HTTP).
   import { onMount } from 'svelte';
   import workletURL from './hoseline-worklet.ts?worker&url';
   import { callsign } from './classic';
-  import { apiBase, decodeMulaw, parseEvent, parseGroups, refusal, socketURL } from './hoseline';
+  import { apiBase, decodeMulaw, parseEvent, parseGroups, refusal, socketURL, startAt, RATE } from './hoseline';
 
   let { admin = false, lookup = 'RadioID' }: { admin?: boolean; lookup?: string } = $props();
 
@@ -68,16 +69,39 @@
     }
     const ctx = audio;
     void ctx.resume().catch(() => {});
-    try {
-      await ctx.audioWorklet.addModule(workletURL);
-    } catch {
-      fail(mine, 'Audio playback unavailable in this browser');
-      return;
+    // AudioWorklet exists only in secure contexts (HTTPS or localhost); over
+    // plain HTTP frames are scheduled as buffer sources instead.
+    let worklet: AudioWorkletNode | null = null;
+    if (ctx.audioWorklet) {
+      try {
+        await ctx.audioWorklet.addModule(workletURL);
+        if (mine !== session) return;
+        worklet = new AudioWorkletNode(ctx, 'hoseline-audio', { numberOfInputs: 0, outputChannelCount: [1] });
+        worklet.connect(ctx.destination);
+      } catch {
+        worklet = null;
+      }
     }
     if (mine !== session) return;
-    node = new AudioWorkletNode(ctx, 'hoseline-audio', { numberOfInputs: 0, outputChannelCount: [1] });
-    node.connect(ctx.destination);
-    const out = node;
+    node = worklet;
+    let next = 0;
+    const out = {
+      audio(samples: Float32Array) {
+        if (worklet) { worklet.port.postMessage({ type: 'audio', samples }, [samples.buffer]); return; }
+        const buf = ctx.createBuffer(1, samples.length, RATE);
+        buf.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ctx.destination);
+        const at = startAt(ctx.currentTime, next);
+        src.start(at);
+        next = at + buf.duration;
+      },
+      flush() {
+        if (worklet) worklet.port.postMessage({ type: 'flush' });
+        else next = 0;
+      },
+    };
     const ws = new WebSocket(socketURL(location, admin, group));
     ws.binaryType = 'arraybuffer';
     socket = ws;
@@ -86,15 +110,14 @@
     ws.onmessage = (e: MessageEvent) => {
       if (mine !== session) return;
       if (e.data instanceof ArrayBuffer) {
-        const samples = decodeMulaw(new Uint8Array(e.data));
-        out.port.postMessage({ type: 'audio', samples }, [samples.buffer]);
+        out.audio(decodeMulaw(new Uint8Array(e.data)));
         return;
       }
       const ev = typeof e.data === 'string' ? parseEvent(e.data) : null;
       if (!ev) return;
       if (ev.type === 'listening') { phase = 'listening'; listening = ev.tg; }
       else if (ev.type === 'start') caller = ev.source;
-      else if (ev.type === 'end') { caller = null; out.port.postMessage({ type: 'flush' }); }
+      else if (ev.type === 'end') { caller = null; out.flush(); }
       else fail(mine, ev.message);
     };
     ws.onclose = () => {

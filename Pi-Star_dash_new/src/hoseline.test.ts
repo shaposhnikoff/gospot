@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JitterBuffer, MULAW, decodeMulaw, mulawSample, parseEvent, parseGroups, refusal, socketURL } from './hoseline';
+import { startAt, PREBUFFER } from './hoseline';
 
 test('μ-law decoding matches G.711', () => {
   // python3.12 -c 'import audioop,struct; print(struct.unpack("<h", audioop.ulaw2lin(bytes([c]), 2))[0])'
@@ -75,4 +76,10 @@ test('relay events and groups are validated', () => {
 test('the socket stays on the page origin', () => {
   assert.equal(socketURL({ protocol: 'http:', host: 'pistar:8789' }, false, 91), 'ws://pistar:8789/api/hoseline?tg=91');
   assert.equal(socketURL({ protocol: 'https:', host: 'pistar:8788' }, true, 2504), 'wss://pistar:8788/manage/api/hoseline?tg=2504');
+});
+
+test('fallback scheduling plays frames back to back and rebuffers after a gap', () => {
+  assert.equal(startAt(10, 0), 10 + PREBUFFER);      // first frame: prebuffer
+  assert.equal(startAt(10, 10.5), 10.5);             // queued: continue seamlessly
+  assert.equal(startAt(10, 10.01), 10 + PREBUFFER);  // underrun: rebuffer
 });

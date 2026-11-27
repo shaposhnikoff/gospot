@@ -23,6 +23,7 @@ var operatorHeard = regexp.MustCompile(`^/api/last_heard\.php(?:\?num_transmissi
 func operatorHandler(assetDir, upstream string, managementPort int) http.Handler {
 	client := &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	var requests atomic.Uint64
+	hose := newHoseline()
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requests.Add(1)
 		writer.Header().Set("Cache-Control", "no-store")
@@ -31,6 +32,10 @@ func operatorHandler(assetDir, upstream string, managementPort int) http.Handler
 		if request.Method != http.MethodGet && request.Method != http.MethodHead {
 			writer.Header().Set("Allow", "GET, HEAD")
 			http.Error(writer, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if path := request.URL.EscapedPath(); path == "/api/hoseline" || path == "/api/hoseline/groups" {
+			hose.serve(writer, request)
 			return
 		}
 		target := request.URL.RequestURI()

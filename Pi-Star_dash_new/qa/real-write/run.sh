@@ -24,6 +24,8 @@ if [[ ${1:-} == --calibration ]]; then scenario+=(--calibration); shift; fi
 if [[ ${1:-} == --jitter ]]; then scenario+=(--jitter); shift; fi
 tgif=false
 if [[ ${1:-} == --tgif ]]; then scenario+=(--tgif); tgif=true; shift; fi
+hoseline=false
+if [[ ${1:-} == --hoseline ]]; then scenario+=(--hoseline); hoseline=true; shift; fi
 if (($#)); then
   [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
@@ -86,6 +88,14 @@ if $tgif; then
   sed -i -e 's/^Address=192\.0\.2\.11$/Address=tgif.network/' -e 's/^Id=10001$/Id=234123401/' "$work/DMRGateway.ini"
   grep -qx 'Address=tgif.network' "$work/DMRGateway.ini" && grep -qx 'Id=234123401' "$work/DMRGateway.ini"
 fi
+if $hoseline; then
+  # The container has no internet: only the stand's pistar.conf points the
+  # Hoseline page and spotter at fake_hoseline.py inside it (HTTPS/WSS with the
+  # stand certificate).
+  sed -i -e 's|^HOSELINE_PAGE_URL=.*|HOSELINE_PAGE_URL=https://127.0.0.1:8603/|' \
+         -e 's|^HOSELINE_SPOTTER_URL=.*|HOSELINE_SPOTTER_URL=wss://127.0.0.1:8603/spotter/|' "$work/pistar.conf"
+  grep -qx 'HOSELINE_SPOTTER_URL=wss://127.0.0.1:8603/spotter/' "$work/pistar.conf"
+fi
 test -s "$work/sudoers"
 docker network create --internal "$name" >/dev/null
 docker run -d --name "$name" --network "$name" \
@@ -134,6 +144,13 @@ if $tgif; then
   docker exec -d "$name" python3 -I /usr/local/libexec/fake_tgif.py --settings /etc/pistar-dashboard/pistar.conf \
     --cert /run/credentials/cert.pem --key /run/credentials/key.pem --log /run/pistar-qa/tgif-requests --delay 1.5
   # Trust the stand certificate for the fake HTTPS API only in this stand.
+  wizard_env=(-e SSL_CERT_FILE=/run/credentials/cert.pem)
+fi
+if $hoseline; then
+  docker cp "$fixture/fake_hoseline.py" "$name:/usr/local/libexec/fake_hoseline.py"
+  docker exec -d "$name" python3 -I /usr/local/libexec/fake_hoseline.py --settings /etc/pistar-dashboard/pistar.conf \
+    --cert /run/credentials/cert.pem --key /run/credentials/key.pem --log /run/pistar-qa/hoseline-events
+  # Trust the stand certificate for the fake page and spotter only in this stand.
   wizard_env=(-e SSL_CERT_FILE=/run/credentials/cert.pem)
 fi
 # The status panel feeds /manage/api/dashboard (theme, versions); it listens on PANEL_PORT from pistar.conf.

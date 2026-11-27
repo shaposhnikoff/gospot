@@ -154,6 +154,15 @@ func applySettings(s settings) error {
 		return v
 	}
 	tgifAPI, tgifSession := baseURL("TGIF_API_URL", "https"), baseURL("TGIF_SESSION_URL", "http", "https")
+	hosePage, hoseSpotter := baseURL("HOSELINE_PAGE_URL", "https"), baseURL("HOSELINE_SPOTTER_URL", "wss")
+	hoseMax, err := strconv.Atoi(s["HOSELINE_MAX_LISTENERS"])
+	if err != nil || hoseMax < 1 || hoseMax > 32 {
+		errs = append(errs, "HOSELINE_MAX_LISTENERS must be 1 to 32")
+	}
+	hoseGroups, err := talkgroupList(s["HOSELINE_TALKGROUPS"])
+	if err != nil {
+		errs = append(errs, "HOSELINE_TALKGROUPS "+err.Error())
+	}
 	binDir, sbinDir := path("PISTAR_BIN_DIR"), path("PISTAR_SBIN_DIR")
 	source := s["RADIO_LOG_SOURCE"]
 	if source != "files" && source != "journal" {
@@ -192,10 +201,28 @@ func applySettings(s settings) error {
 	pistarBinDir, pistarSbinDir = binDir, sbinDir
 	bmKeyFile = bmKey
 	tgifKeyFile, tgifAPIURL, tgifSessionURL = tgifKey, tgifAPI, tgifSession
+	hoselinePageURL, hoselineSpotterURL, hoselineMaxListeners, hoselineTalkgroups = hosePage, hoseSpotter, hoseMax, hoseGroups
 	pistarCSSFile = cssFile
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort = pp, mp, op
 	modemDiagnostic, masterDiagnostic = diagnosticFor(modem, modemRules), diagnosticFor(master, masterRules)
 	return nil
+}
+
+// talkgroupList parses a comma separated list of BrandMeister talkgroups.
+func talkgroupList(v string) ([]int, error) {
+	parts := strings.Split(v, ",")
+	if v == "" || len(parts) > 64 {
+		return nil, fmt.Errorf("must list 1 to 64 talkgroups")
+	}
+	var out []int
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || !hoselineTGPattern.MatchString(p) || n < hoselineMinTG || n > hoselineMaxTG {
+			return nil, fmt.Errorf("must be comma separated talkgroups %d to %d", hoselineMinTG, hoselineMaxTG)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 func loadSettings(path string) error {

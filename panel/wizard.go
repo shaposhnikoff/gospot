@@ -103,6 +103,7 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 	bm := newBMManager(helper)
 	cal := newCalibrator(startCalibrationHelper, runSudo)
 	tgif := newTGIFClient()
+	hose := newHoseline()
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Cache-Control", "no-store")
@@ -143,6 +144,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 			return
 		case "/manage/api/configure/factory-reset":
 			serveFactoryReset(w, r, runConfigureHelper)
+			return
+		case "/manage/api/hoseline", "/manage/api/hoseline/groups":
+			hose.serve(w, r)
 			return
 		case "/manage/api/links/tgif":
 			serveTGIF(w, r, tgif)

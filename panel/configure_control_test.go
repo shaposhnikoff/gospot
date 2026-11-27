@@ -166,12 +166,12 @@ TXFrequency=438800000
 Latitude=51.5
 Longitude=-0.12
 Description="United Kingdom"
-Name=M0ABC_Pi-Star
+Name=M0ABC_GoSpot
 
 [aprs.fi]
 Server=euro.aprs2.net
 Password=` + ctlPass + `
-Description=M0ABC_Pi-Star
+Description=M0ABC_GoSpot
 `,
 		"dmrgateway": `[General]
 RFTimeout=20
@@ -225,7 +225,7 @@ Name="London"
 Description="United Kingdom"
 
 [aprs.fi]
-Description=M0ABC_Pi-Star
+Description=M0ABC_GoSpot
 Password=` + ctlPass + `
 
 [Network]
@@ -243,7 +243,7 @@ Latitude=51.5
 Longitude=-0.12
 Location="London"
 URL=https://www.qrz.com/db/M0ABC
-Description=M0ABC_Pi-Star
+Description=M0ABC_GoSpot
 
 [YSF Network]
 Callsign=M0ABC
@@ -253,7 +253,7 @@ Suffix=ND
 Server=euro.aprs2.net
 Enable=0
 Password=` + ctlPass + `
-Description=M0ABC_Pi-Star
+Description=M0ABC_GoSpot
 `,
 		"dmr2ysf":       "[Enabled]\nEnabled=0\n\n[YSF Network]\nCallsign=M0ABC\nSuffix=ND\n\n[DMR Network]\nId=2345678\n",
 		"dapnetgateway": "[General]\nCallsign=M0ABC\n",
@@ -269,7 +269,7 @@ RXFrequency=438800000
 TXFrequency=438800000
 Latitude=51.5
 Longitude=-0.12
-Description=M0ABC_Pi-Star
+Description=M0ABC_GoSpot
 
 [YSF Network]
 RFHangTime=20
@@ -360,10 +360,10 @@ func ctlEnv(t *testing.T, devices ...string) string {
 	if err := os.WriteFile(hosts, []byte("; APRS hosts\neuro.aprs2.net:14580\nnoam.aprs2.net:14580\n\nrotate.aprs2.net:14580\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	root, devDir, plat, addrs, zones, version, hostsFile := ctlSysRoot, ctlDevDir, ctlPlatform, ctlAddresses, ctlTimezones, ctlPistarVersion, ctlAPRSHostsFile
+	root, devDir, plat, addrs, zones, version, hostsFile := ctlSysRoot, ctlDevDir, ctlPlatform, ctlAddresses, ctlTimezones, ctlReleaseVersion, ctlAPRSHostsFile
 	sections := cfgSections
 	t.Cleanup(func() {
-		ctlSysRoot, ctlDevDir, ctlPlatform, ctlAddresses, ctlTimezones, ctlPistarVersion, ctlAPRSHostsFile = root, devDir, plat, addrs, zones, version, hostsFile
+		ctlSysRoot, ctlDevDir, ctlPlatform, ctlAddresses, ctlTimezones, ctlReleaseVersion, ctlAPRSHostsFile = root, devDir, plat, addrs, zones, version, hostsFile
 		cfgSections = sections
 	})
 	ctlSysRoot = fstest.MapFS{
@@ -377,7 +377,7 @@ func ctlEnv(t *testing.T, devices ...string) string {
 	ctlPlatform = func() string { return "Raspberry Pi 2 Model B" }
 	ctlAddresses = func() []string { return []string{"192.168.1.10", "fd00::10"} }
 	ctlTimezones = func() []string { return []string{"Europe/London", "Europe/Kyiv", "UTC"} }
-	ctlPistarVersion = func() string { return "4.2.1" }
+	ctlReleaseVersion = func() string { return "4.2.1" }
 	ctlAPRSHostsFile = func() string { return hosts }
 	var mine []cfgSectionImpl
 	for _, s := range sections {
@@ -557,7 +557,7 @@ func TestCtlHardwareInfo(t *testing.T) {
 	if !reflect.DeepEqual(labels, []string{"Hostname", "Kernel", "Platform", "CPU Load", "CPU Temp"}) || head[2].Colspan != 2 {
 		t.Fatalf("%v", labels)
 	}
-	if *head[0].Tooltip != (cfgTooltip{"Hostname", "The name of host\nrunning the Pi-Star Software."}) ||
+	if *head[0].Tooltip != (cfgTooltip{"Hostname", "The name of host\nrunning the GoSpot Software."}) ||
 		*head[1].Tooltip != (cfgTooltip{"Release", "This is the version\nnumber of the Linux Kernel running\non this Raspberry Pi."}) ||
 		*head[2].Tooltip != (cfgTooltip{"Uptime:", "up 1 day,\n 3 hours,\n 1 minute"}) ||
 		*head[3].Tooltip != (cfgTooltip{"CPU Load", "This is the standard Linux\nsystem load indicator."}) ||
@@ -889,7 +889,7 @@ func TestCtlGeneralBuild(t *testing.T) {
 		"confHostame":       {"Hostname:", "System Hostname", "This is the system hostname, used for access to the dashboard etc."},
 		"confCallsign":      {"Node Callsign:", "Gateway Callsign", `This is your licenced callsign for use on this gateway, do not append the "G"`},
 		"dmrId":             {"CCS7/DMR ID:", "CCS7/DMR ID", "Enter your CCS7 / DMR ID here"},
-		"confFREQ":          {"Radio Frequency:", "Radio Frequency", "This is the Frequency your\nPi-Star is on"},
+		"confFREQ":          {"Radio Frequency:", "Radio Frequency", "This is the Frequency your\nGoSpot is on"},
 		"confLatitude":      {"Latitude:", "Gateway Latitude", "This is the latitude where the gateway is located (positive number for North, negative number for South) - Set to 0 to hide your hotspot location"},
 		"confLongitude":     {"Longitude:", "Gateway Longitude", "This is the longitude where the gateway is located (positive number for East, negative number for West) - Set to 0 to hide your hotspot location"},
 		"confDesc1":         {"Town:", "Gateway Town", "The town where the gateway is located"},
@@ -1048,13 +1048,13 @@ func TestCtlGeneralApply(t *testing.T) {
 			"dstarrepeater||callsign=M0XYZ  B", "dstarrepeater||gateway=M0XYZ  G", "dstarrepeater||beaconText=M0XYZ  B",
 			"timeserver||callsign=M0XYZ", "starnetserver||callsign=M0XYZ", "starnetserver||ircddbUsername=M0XYZ",
 			"mmdvmhost|General|Callsign=M0XYZ", "mmdvmhost|Info|URL=https://www.qrz.com/db/M0XYZ",
-			"ysfgateway|General|Callsign=M0XYZ", "ysfgateway|aprs.fi|Password=" + newPass, "ysfgateway|aprs.fi|Description=M0XYZ_Pi-Star",
-			"ysfgateway|Info|Name=M0XYZ_Pi-Star",
-			"ysf2dmr|aprs.fi|Password=" + newPass, "ysf2dmr|aprs.fi|Description=M0XYZ_Pi-Star", "ysf2dmr|YSF Network|Callsign=M0XYZ",
-			"ysf2dmr|Info|Description=M0XYZ_Pi-Star", "ysf2dmr|Info|URL=https://www.qrz.com/db/M0XYZ",
+			"ysfgateway|General|Callsign=M0XYZ", "ysfgateway|aprs.fi|Password=" + newPass, "ysfgateway|aprs.fi|Description=M0XYZ_GoSpot",
+			"ysfgateway|Info|Name=M0XYZ_GoSpot",
+			"ysf2dmr|aprs.fi|Password=" + newPass, "ysf2dmr|aprs.fi|Description=M0XYZ_GoSpot", "ysf2dmr|YSF Network|Callsign=M0XYZ",
+			"ysf2dmr|Info|Description=M0XYZ_GoSpot", "ysf2dmr|Info|URL=https://www.qrz.com/db/M0XYZ",
 			"dmr2ysf|YSF Network|Callsign=M0XYZ", "p25gateway|General|Callsign=M0XYZ",
-			"nxdngateway|aprs.fi|Description=M0XYZ_Pi-Star", "nxdngateway|aprs.fi|Password=" + newPass, "nxdngateway|General|Callsign=M0XYZ",
-			"m17gateway|General|Callsign=M0XYZ", "dgidgateway|General|Callsign=M0XYZ", "dgidgateway|Info|Description=M0XYZ_Pi-Star",
+			"nxdngateway|aprs.fi|Description=M0XYZ_GoSpot", "nxdngateway|aprs.fi|Password=" + newPass, "nxdngateway|General|Callsign=M0XYZ",
+			"m17gateway|General|Callsign=M0XYZ", "dgidgateway|General|Callsign=M0XYZ", "dgidgateway|Info|Description=M0XYZ_GoSpot",
 			"dmrgateway|Info|URL=https://www.qrz.com/db/M0XYZ",
 			"aprsgateway|General|Callsign=M0XYZ", "aprsgateway|APRS-IS|Password=" + newPass}},
 		{"APRS position reporting on", map[string]string{"APRSGatewayEnable": "ON"}, []string{"aprsgateway|Enabled|Enabled=1"}},
@@ -1181,7 +1181,7 @@ func TestCtlGeneralApply(t *testing.T) {
 	}
 
 	// Pi-Star before 4.1.4: no APRSGateway callsign, ircDDBGateway keeps its aprsPassword.
-	ctlPistarVersion = func() string { return "4.1.2" }
+	ctlReleaseVersion = func() string { return "4.1.2" }
 	st = ctlBase()
 	st.Files["ircddbgateway"][""]["aprsPassword"] = ctlPass
 	st.Layout["ircddbgateway"][0].Keys = append(st.Layout["ircddbgateway"][0].Keys, [2]string{"aprsPassword", ctlPass})
@@ -1189,7 +1189,7 @@ func TestCtlGeneralApply(t *testing.T) {
 	if err != nil || !ctlHas(ch, "ircddbgateway||aprsPassword="+newPass) || ctlHas(ch, "aprsgateway|General|Callsign=") || ctlHas(ch, "aprsgateway|APRS-IS|Server=") {
 		t.Fatalf("old release: %v %v", err, ctlList(ch))
 	}
-	ctlPistarVersion = func() string { return "4.10" }
+	ctlReleaseVersion = func() string { return "4.10" }
 	ch, err = ctlRun(st, nil)
 	ctlCheck(t, "4.1.4+ deletes aprsPassword", ch, err, []string{"ircddbgateway||aprsPassword<del>"})
 

@@ -27,7 +27,7 @@
   const title=(mode:string)=>mode==='System Fusion'?'YSF':mode;
   function show(mode:string){
     current=mode;
-    try{sessionStorage.setItem('pistar.radio.editor',mode)}catch{/* optional UI preference */}
+    try{sessionStorage.setItem('gospot.radio.editor',mode)}catch{/* optional UI preference */}
   }
   async function load(){
     const r=await fetch(endpoint,{cache:'no-store'});
@@ -47,7 +47,7 @@
     busy=true; error=''; message='';
     try{
       if(save){
-        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf},body:JSON.stringify({revision,changes})});
+        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-GoSpot-CSRF':csrf},body:JSON.stringify({revision,changes})});
         if(!r.ok)throw Error((await r.text()).trim() || `HTTP ${r.status}`);
       }
       await load();
@@ -55,7 +55,7 @@
     }catch(e){error=e instanceof Error?e.message:'Ошибка связи';}
     finally{busy=false;}
   }
-  onMount(()=>{try{current=sessionStorage.getItem('pistar.radio.editor')??''}catch{}void run(false)});
+  onMount(()=>{try{current=sessionStorage.getItem('gospot.radio.editor')??''}catch{}void run(false)});
 </script>
 <section class="radio" aria-label="Протоколы MMDVMHost">
   <header><div><p class="kicker">Configuration / MMDVMHost</p><h1>Протоколы радиостанции</h1></div><a href="#settings">Общие настройки станции →</a></header>

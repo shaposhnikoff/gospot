@@ -50,12 +50,12 @@ type systemSnapshot struct {
 	Classic   []systemService `json:"classicServices"`
 }
 
-// systemUnits is built on use: the radio unit names come from pistar.conf.
+// systemUnits is built on use: the radio unit names come from gospot.conf.
 func systemUnits() []struct{ unit, name string } {
 	return []struct{ unit, name string }{
-		{modemUnit, "MMDVMHost"}, {masterUnit, "DMRGateway"}, {"pistar-panel.service", "Pi-Star Panel"},
+		{modemUnit, "MMDVMHost"}, {masterUnit, "DMRGateway"}, {"gospot-panel.service", "GoSpot Panel"},
 		{"dstarrepeater.service", "DStarRepeater"}, {"ircddbgateway.service", "ircDDBGateway"},
-		{"timeserver.service", "TimeServer"}, {"pistar-watchdog.service", "Pi-Star Watchdog"}, {"pistar-remote.service", "Pi-Star Remote"},
+		{"timeserver.service", "TimeServer"}, {"gospot-watchdog.service", "GoSpot Watchdog"}, {"gospot-remote.service", "GoSpot Remote"},
 	}
 }
 
@@ -255,7 +255,7 @@ func systemPlatform(ctx context.Context) string {
 	platform.Do(func() {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		out, err := runDiagnostic(ctx, filepath.Join(pistarBinDir, "platformDetect.sh"))
+		out, err := runDiagnostic(ctx, filepath.Join(gospotBinDir, "platformDetect.sh"))
 		if err == nil {
 			platform.text = strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
 		}
@@ -300,7 +300,7 @@ func classicServices(names map[string]bool, cmdlines []string) []systemService {
 		{"DStarRepeater", state(names["dstarrepeaterd"])},
 		{"ircDDBGateway", state(names["ircddbgatewayd"])},
 		{"TimeServer", state(names["timeserverd"])},
-		{"PiStar-Watchdog", state(script(filepath.Join(pistarSbinDir, "pistar-watchdog")))},
-		{"PiStar-Remote", state(script(filepath.Join(pistarSbinDir, "pistar-remote")))},
+		{"GoSpot-Watchdog", state(script(filepath.Join(gospotSbinDir, "gospot-watchdog")))},
+		{"GoSpot-Remote", state(script(filepath.Join(gospotSbinDir, "gospot-remote")))},
 	}
 }

@@ -14,7 +14,7 @@ import (
 // dashboardVersion is set at build time (-X main.dashboardVersion=...).
 var dashboardVersion = "dev"
 
-// Locations come from pistar.conf via applySettings.
+// Locations come from gospot.conf via applySettings.
 var (
 	mmdvmINI, dmrGWINI, dapnetINI, ircddbINI, dstarRptINI = newINIFile(), newINIFile(), newINIFile(), newINIFile(), newINIFile()
 	ysf2dmrINI, ysf2nxdnINI, ysf2p25INI                   = newINIFile(), newINIFile(), newINIFile()
@@ -54,6 +54,10 @@ type dashRow struct {
 	RSSI     *float64  `json:"rssi"`
 	Live     bool      `json:"live"`
 	Note     string    `json:"note"`
+	// Name and TargetName come from DMRIds.dat and the TGList files in
+	// GOSPOT_HOSTS_DIR ("" when unknown); the classic pages ignore them.
+	Name       string `json:"name"`
+	TargetName string `json:"targetName"`
 }
 
 type dashDStar struct {
@@ -79,7 +83,7 @@ type dashboard struct {
 	Hostname   string
 	Callsign   string
 	Version    string
-	PiStar     string
+	Release    string
 	Controller string
 	Modes      []dashCell
 	Networks   []dashCell
@@ -135,6 +139,7 @@ type dashInputs struct {
 	hostname                        string
 	controller                      string
 	now                             time.Time
+	names                           heardNames // nil: no name lookups
 }
 
 func (in dashInputs) running(name string) bool {
@@ -357,7 +362,7 @@ func buildDashboard(in dashInputs) dashboard {
 		return mhz(v)
 	}
 	zone, _ := in.now.In(time.Local).Zone()
-	d := dashboard{Hostname: in.hostname, Callsign: callsign, Version: dashboardVersion, PiStar: in.release.get("Pi-Star", "Version"), Controller: in.controller,
+	d := dashboard{Hostname: in.hostname, Callsign: callsign, Version: dashboardVersion, Release: releaseVersion(in.release), Controller: in.controller,
 		TX: freq("TXFrequency"), RX: freq("RXFrequency"), Firmware: in.firmware, TCXO: in.tcxo,
 		HeardReady: in.heardOK, TimeZone: zone, Now: in.now.UTC()}
 	if in.controller != "mmdvmhost" {
@@ -416,10 +421,14 @@ func buildDashboard(in dashInputs) dashboard {
 		row := dashRow{Time: r.At, Clock: classicClock(r.At), Mode: heardMode(r), Callsign: r.From, Suffix: r.Suffix, Target: r.To, Source: r.Source,
 			Duration: r.Duration, Loss: r.Loss, BER: r.BER, RSSI: r.RSSI, Note: r.Note,
 			Live: r.Duration == nil && r.Note == "" && live[callKey{r.At, r.Source, r.From, r.To, r.Slot, r.Mode}]}
-		if len(d.Heard) < 20 {
+		heard, local := len(d.Heard) < 20, r.Source == "RF" && r.Mode != "POCSAG" && len(d.Local) < 20
+		if in.names != nil && r.Mode != "POCSAG" && (heard || local) {
+			row.Name, row.TargetName = in.names.operator(r.From), in.names.target(trxMode(r), r.To)
+		}
+		if heard {
 			d.Heard = append(d.Heard, row)
 		}
-		if r.Source == "RF" && r.Mode != "POCSAG" && len(d.Local) < 20 {
+		if local {
 			d.Local = append(d.Local, row)
 		}
 	}
@@ -472,7 +481,7 @@ func gatherDashboard(now time.Time) dashboard {
 		dmr2ysf: dmr2ysfINI.load(), dmr2nxdn: dmr2nxdnINI.load(),
 		procs: procs, login: login, firmware: firmware, tcxo: tcxo, release: releaseINI(),
 		rows: rows, active: active, heardOK: ok, hostname: strings.TrimSpace(string(host)),
-		controller: controllerMode(), now: now,
+		controller: controllerMode(), now: now, names: currentHostNames(),
 	})
 	d.DStarInfo = dstarDashboard(d.Controller, mmdvm, ircddbINI.load())
 	d.Theme = currentTheme()
@@ -525,11 +534,20 @@ func classicClock(t time.Time) string {
 	return t.Format("15:04:05 Jan ") + strconv.Itoa(day) + suffix
 }
 
-var pistarRelease = newINIFile()
+var gospotRelease = newINIFile()
 
 func releaseINI() iniData {
-	if pistarRelease.location() != pistarReleaseFile {
-		pistarRelease.setPath(pistarReleaseFile)
+	if gospotRelease.location() != gospotReleaseFile {
+		gospotRelease.setPath(gospotReleaseFile)
 	}
-	return pistarRelease.load()
+	return gospotRelease.load()
+}
+
+// releaseVersion is Version of the release file: section [GoSpot], or [Pi-Star]
+// in a classic Pi-Star file (an upgraded board or a restored classic backup).
+func releaseVersion(d iniData) string {
+	if v := d.get("GoSpot", "Version"); v != "" {
+		return v
+	}
+	return d.get("Pi-Star", "Version")
 }

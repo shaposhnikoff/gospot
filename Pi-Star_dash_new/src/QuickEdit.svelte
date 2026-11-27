@@ -25,7 +25,7 @@
     e.preventDefault();
     message = ''; error = '';
     const r = await fetch(`/manage/api/expert/${file}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf },
       body: JSON.stringify({ revision, values }),
     }).catch(() => null);
     if (!r || !r.ok) { error = r ? (await r.text()).trim() : 'No response from the board'; return; }

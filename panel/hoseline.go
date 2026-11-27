@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-// Set from pistar.conf by applySettings.
+// Set from gospot.conf by applySettings.
 var (
 	hoselinePageURL, hoselineSpotterURL string
 	hoselineMaxListeners                int

@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// settingsPath is the installed copy of Pi-Star_dash_new/pistar.conf, the
+// settingsPath is the installed copy of Pi-Star_dash_new/gospot.conf, the
 // single source of system paths (see AGENTS.md).
-var settingsPath = "/etc/pistar-dashboard/pistar.conf"
+var settingsPath = "/etc/gospot/gospot.conf"
 
 type settings map[string]string
 
@@ -84,9 +84,9 @@ var (
 	markerMMDVMHost, markerDStarRepeater             string
 	hostnameFile                                     string
 	bmStateDir                                       string
-	pistarLogDir, radioLogSource, pistarReleaseFile  string
-	pistarHostsDir                                   string
-	pistarBinDir, pistarSbinDir                      string
+	gospotLogDir, radioLogSource, gospotReleaseFile  string
+	gospotHostsDir                                   string
+	gospotBinDir, gospotSbinDir                      string
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort int
 )
 
@@ -135,12 +135,12 @@ func applySettings(s settings) error {
 	modem, master := unit("UNIT_MMDVMHOST"), unit("UNIT_DMRGATEWAY")
 	mm, ds, host := path("MARKER_MMDVMHOST"), path("MARKER_DSTARREPEATER"), path("HOSTNAME_FILE")
 	lib, ui, bm := path("DASHBOARD_LIB_DIR"), path("DASHBOARD_UI_DIR"), path("DASHBOARD_BM_STATE_DIR")
-	logDir, release, hosts := path("PISTAR_LOG_DIR"), path("PISTAR_RELEASE_FILE"), path("PISTAR_HOSTS_DIR")
-	cssFile := path("PISTAR_CSS_FILE")
-	keeperLog := path("PISTAR_KEEPER_LOG")
-	update := path("PISTAR_UPDATE_LOG")
+	logDir, release, hosts := path("GOSPOT_LOG_DIR"), path("GOSPOT_RELEASE_FILE"), path("GOSPOT_HOSTS_DIR")
+	cssFile := path("GOSPOT_CSS_FILE")
+	keeperLog := path("GOSPOT_KEEPER_LOG")
+	update := path("GOSPOT_UPDATE_LOG")
 	path("MODEM_FLASH_LOG")
-	jitter, jitterLimit := path("PISTAR_JITTER_LOG"), seconds("JITTER_TIMEOUT", 1, 9999)
+	jitter, jitterLimit := path("GOSPOT_JITTER_LOG"), seconds("JITTER_TIMEOUT", 1, 9999)
 	calIdle := seconds("CALIBRATION_IDLE_TIMEOUT", 5, 3600)
 	path("SHELLINABOX_DEFAULTS")
 	bmKey := path("BM_API_KEY_FILE")
@@ -164,7 +164,7 @@ func applySettings(s settings) error {
 	if err != nil {
 		errs = append(errs, "HOSELINE_TALKGROUPS "+err.Error())
 	}
-	binDir, sbinDir := path("PISTAR_BIN_DIR"), path("PISTAR_SBIN_DIR")
+	binDir, sbinDir := path("GOSPOT_BIN_DIR"), path("GOSPOT_SBIN_DIR")
 	source := s["RADIO_LOG_SOURCE"]
 	if source != "files" && source != "journal" {
 		errs = append(errs, "RADIO_LOG_SOURCE must be files or journal")
@@ -192,19 +192,19 @@ func applySettings(s settings) error {
 	modemUnit, masterUnit = modem, master
 	markerMMDVMHost, markerDStarRepeater, hostnameFile = mm, ds, host
 	adminAssets, operatorAssets = ui, ui
-	configHelper = filepath.Join(lib, "pistar-config")
-	powerHelper, updateHelper, updateLog = filepath.Join(lib, "pistar-power"), filepath.Join(lib, "pistar-native-update"), update
+	configHelper = filepath.Join(lib, "gospot-config")
+	powerHelper, updateHelper, updateLog = filepath.Join(lib, "gospot-power"), filepath.Join(lib, "gospot-native-update"), update
 	setConfigHelper(lib, s)
 	setToolPaths(lib, s)
 	setCalibrationPaths(lib, calIdle, jitter, jitterLimit)
 	bmStateDir = bm
-	pistarLogDir, radioLogSource, pistarReleaseFile, pistarHostsDir = logDir, source, release, hosts
-	pistarBinDir, pistarSbinDir = binDir, sbinDir
+	gospotLogDir, radioLogSource, gospotReleaseFile, gospotHostsDir = logDir, source, release, hosts
+	gospotBinDir, gospotSbinDir = binDir, sbinDir
 	bmKeyFile = bmKey
 	tgifKeyFile, tgifAPIURL, tgifSessionURL = tgifKey, tgifAPI, tgifSession
 	hoselinePageURL, hoselineSpotterURL, hoselineMaxListeners, hoselineTalkgroups = hosePage, hoseSpotter, hoseMax, hoseGroups
-	pistarCSSFile = cssFile
-	pistarKeeperLog = keeperLog
+	gospotCSSFile = cssFile
+	gospotKeeperLog = keeperLog
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort = pp, mp, op
 	modemDiagnostic, masterDiagnostic = diagnosticFor(modem, modemRules), diagnosticFor(master, masterRules)
 	return nil

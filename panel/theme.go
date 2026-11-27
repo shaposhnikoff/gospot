@@ -17,10 +17,10 @@ import (
 // css/pistar-css.php, index.php (BannerH1/BannerExtText) and the callsign
 // lookup links (lh.php, localtx.php).
 
-var pistarCSSFile string
+var gospotCSSFile string
 
-// The classic file the editor shows when /etc/pistar-css.ini is missing.
-const defaultPistarCSS = "[Background]\nPage=edf0f5\nContent=ffffff\nBanners=dd4b39\n\n" +
+// The classic file the editor shows when /etc/gospot-css.ini is missing.
+const defaultGoSpotCSS = "[Background]\nPage=edf0f5\nContent=ffffff\nBanners=dd4b39\n\n" +
 	"[Text]\nBanners=ffffff\nBannersDrop=303030\n\n" +
 	"[Tables]\nHeadDrop=8b0000\nBgEven=f7f7f7\nBgOdd=d0d0d0\n\n" +
 	"[Content]\nText=000000\n\n" +
@@ -34,7 +34,7 @@ type themeData struct {
 	Lookup                                                                    string
 }
 
-var pistarCSS = newINIFile()
+var gospotCSS = newINIFile()
 
 var cssColour = regexp.MustCompile(`^(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$`)
 
@@ -42,10 +42,10 @@ var cssColour = regexp.MustCompile(`^(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$`)
 // palette when the file is missing; a value that is not a hex colour keeps
 // the default (the classic page would emit broken CSS).
 func currentTheme() themeData {
-	if pistarCSS.location() != pistarCSSFile {
-		pistarCSS.setPath(pistarCSSFile)
+	if gospotCSS.location() != gospotCSSFile {
+		gospotCSS.setPath(gospotCSSFile)
 	}
-	d := pistarCSS.load()
+	d := gospotCSS.load()
 	t := themeData{Page: "edf0f5", Content: "ffffff", Banners: "dd4b39", BannerText: "ffffff", BannerDrop: "303030",
 		HeadDrop: "8b0000", Text: "000000", Even: "f7f7f7", Odd: "d0d0d0", Lookup: "RadioID"}
 	for _, f := range []struct {
@@ -116,7 +116,7 @@ func cssRevision(b []byte, exists bool) string {
 }
 
 // serveCSSTool: GET shows the file (or the classic defaults), POST saves the
-// edited values or resets the theme through pistar-configure.
+// edited values or resets the theme through gospot-configure.
 func serveCSSTool(w http.ResponseWriter, r *http.Request, run configHelperFunc) {
 	switch r.Method {
 	case http.MethodGet:
@@ -124,7 +124,7 @@ func serveCSSTool(w http.ResponseWriter, r *http.Request, run configHelperFunc) 
 		if csrf == "" {
 			return
 		}
-		b, err := os.ReadFile(pistarCSSFile)
+		b, err := os.ReadFile(gospotCSSFile)
 		exists := err == nil
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			http.Error(w, "Could not read the CSS settings", 502)
@@ -132,7 +132,7 @@ func serveCSSTool(w http.ResponseWriter, r *http.Request, run configHelperFunc) 
 		}
 		text := string(b)
 		if !exists {
-			text = defaultPistarCSS
+			text = defaultGoSpotCSS
 		}
 		writeJSON(w, 200, map[string]any{"csrf": csrf, "revision": cssRevision(b, exists), "exists": exists, "sections": cssLayout(text)})
 	case http.MethodPost:

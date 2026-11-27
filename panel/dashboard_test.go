@@ -181,3 +181,16 @@ func TestClassicClock(t *testing.T) {
 		}
 	}
 }
+
+func TestReleaseVersionSections(t *testing.T) {
+	for text, want := range map[string]string{
+		"[GoSpot]\nVersion = 4.3-native\n":                             "4.3-native",
+		"[Pi-Star]\nVersion = 4.1.6\nHardware = RPi\n":                 "4.1.6",
+		"[Pi-Star]\nVersion = 4.1.6\n[GoSpot]\nVersion = 4.3-native\n": "4.3-native",
+		"": "",
+	} {
+		if got := releaseVersion(parseINI(strings.NewReader(text))); got != want {
+			t.Errorf("%q: %q, want %q", text, got, want)
+		}
+	}
+}

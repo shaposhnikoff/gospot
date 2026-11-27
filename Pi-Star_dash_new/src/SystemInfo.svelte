@@ -14,16 +14,16 @@
     memory: Usage | null; swap: Usage | null; rootDisk: Usage | null; services: Service[];
   };
   const example: Snapshot = {
-    at: '2026-02-12T09:30:00Z', hostname: 'pi-star-demo', model: 'Raspberry Pi 4 Model B Rev 1.5',
+    at: '2026-02-12T09:30:00Z', hostname: 'gospot-demo', model: 'Raspberry Pi 4 Model B Rev 1.5',
     kernel: '6.12.47+rpt-rpi-v8', uptimeSeconds: 279641, loadAverage: [0.18, 0.12, 0.09], cpuTempC: 46.7,
     memory: { totalBytes: 1958735872, usedBytes: 320786432, availableBytes: 1637949440 },
     swap: { totalBytes: 104857600, usedBytes: 0, availableBytes: 104857600 },
     rootDisk: { totalBytes: 30333206528, usedBytes: 3591372800, availableBytes: 25196232704 },
     services: [
       { name: 'MMDVMHost', state: 'active' }, { name: 'DMRGateway', state: 'active' },
-      { name: 'Pi-Star Panel', state: 'active' }, { name: 'DStarRepeater', state: 'not-found' },
+      { name: 'GoSpot Panel', state: 'active' }, { name: 'DStarRepeater', state: 'not-found' },
       { name: 'ircDDBGateway', state: 'not-found' }, { name: 'TimeServer', state: 'not-found' },
-      { name: 'Pi-Star Watchdog', state: 'not-found' }, { name: 'Pi-Star Remote', state: 'not-found' }
+      { name: 'GoSpot Watchdog', state: 'not-found' }, { name: 'GoSpot Remote', state: 'not-found' }
     ]
   };
   const missing = 'Нет данных';

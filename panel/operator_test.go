@@ -29,9 +29,15 @@ func TestOperatorStaticAndRouting(t *testing.T) {
 		body         string
 	}{
 		{"GET", "/", 200, "native dashboard"},
+		{"GET", "/kiosk", 200, "native dashboard"},
+		{"GET", "/kiosk?rotate=1", 200, "native dashboard"},
+		{"HEAD", "/kiosk", 200, ""},
+		{"POST", "/kiosk", 405, ""},
+		{"GET", "/kiosk/assets/x.js", 404, ""},
+		{"GET", "/kiosk.html", 404, ""},
 		{"HEAD", "/", 200, ""},
 		{"GET", "/health", 200, "ok\n"},
-		{"GET", "/runtime.json", 200, `{"backend":"pistar-go","wizardPort":8788}`},
+		{"GET", "/runtime.json", 200, `{"backend":"gospot-go","wizardPort":8788}`},
 		{"POST", "/api/status", 405, ""},
 		{"GET", "/escape.html", 404, ""},
 		{"GET", "/%2e%2e/secret.html", 404, ""},
@@ -55,6 +61,7 @@ func TestOperatorStaticAndRouting(t *testing.T) {
 		"/admin/configure.php": "https://station.example:8788/manage/#configuration",
 		"/admin/expert/":       "https://station.example:8788/manage/#expert",
 		"/mmdvmhost/lh.php":    "/",
+		"/kiosk/":              "/kiosk",
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest("GET", "http://station.example:8789"+path, nil))
@@ -116,7 +123,7 @@ func TestOperatorUsesConfiguredManagementPort(t *testing.T) {
 	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest("GET", "/runtime.json", nil))
-	if response.Body.String() != `{"backend":"pistar-go","wizardPort":8791}` {
+	if response.Body.String() != `{"backend":"gospot-go","wizardPort":8791}` {
 		t.Fatalf("incorrect advertised runtime: %s", response.Body.String())
 	}
 }

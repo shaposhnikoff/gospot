@@ -19,7 +19,7 @@ func TestConfigureReadCache(t *testing.T) {
 	if err := os.WriteFile(sudo, []byte("#!/bin/sh\nshift\nexec \"$@\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	helper := filepath.Join(dir, "pistar-configure")
+	helper := filepath.Join(dir, "gospot-configure")
 	if err := os.WriteFile(helper, []byte("#!/bin/sh\necho x >> "+count+"\necho \"{\\\"verb\\\":\\\"$1\\\"}\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

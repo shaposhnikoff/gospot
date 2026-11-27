@@ -31,7 +31,7 @@ export function serviceOrigin(origin: string, protocol: 'http:'|'https:', port: 
 }
 export async function detectRuntime(): Promise<{mode:'demo'|'pi', classicPort:number|null, wizardPort:number|null, preview:boolean}> {
   const x = await readJSON('./runtime.json');
-  if (object(x) && x.backend === 'pistar-go') {
+  if (object(x) && x.backend === 'gospot-go') {
     const port = x.classicHttpsPort;
     return {mode:'pi', classicPort:typeof port === 'number' && Number.isInteger(port) && port > 0 && port <= 65535 ? port : null,
       wizardPort:typeof x.wizardPort === 'number' ? x.wizardPort : null, preview:x.preview === true};

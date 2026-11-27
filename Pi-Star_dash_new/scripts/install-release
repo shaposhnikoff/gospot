@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # Install only the published, verified Debian package; no source sync or rebuild.
 set -euo pipefail
-# Target board, ports and paths come from pistar.conf (see AGENTS.md).
-# shellcheck source=../pistar.conf
-source "$(dirname "$0")/../pistar.conf"
+# Target board, ports and paths come from gospot.conf (see AGENTS.md).
+# shellcheck source=../gospot.conf
+source "$(dirname "$0")/../gospot.conf"
 tag=${1:?usage: install-release deb-RUN-COMMIT}
 [[ $tag =~ ^deb-[0-9]+-[0-9a-f]{12}$ ]]
 d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
 cd "$d"
-url=https://github.com/shaposhnikoff/pi-star-dashboard-new/releases/download/$tag
+url=https://github.com/shaposhnikoff/gospot/releases/download/$tag
 curl -fsSL --retry 2 "$url/SHA256SUMS" -o SHA256SUMS
 read -r sha deb < SHA256SUMS
-[[ $(wc -l < SHA256SUMS) == 1 && $sha =~ ^[0-9a-f]{64}$ && $deb =~ ^pistar-dashboard_[0-9][0-9a-z.+~-]*_armhf\.deb$ ]]
+[[ $(wc -l < SHA256SUMS) == 1 && $sha =~ ^[0-9a-f]{64}$ && $deb =~ ^gospot_[0-9][0-9a-z.+~-]*_armhf\.deb$ ]]
 curl -fsSL --retry 2 "$url/${deb//+/%2B}" -o "$deb"
 sha256sum -c SHA256SUMS
-test "$(dpkg-deb -f "$deb" Package)" = pistar-dashboard
+test "$(dpkg-deb -f "$deb" Package)" = gospot
 test "$(dpkg-deb -f "$deb" Architecture)" = armhf
 echo "GitHub Release $tag; SHA256=$sha"
 ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_HOST" "set -eu
@@ -24,8 +24,10 @@ ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes "$DEPLOY_HOST" "set -eu
   f=\$(mktemp); trap 'rm -f \"\$f\"' EXIT
   cat >\"\$f\"; echo '$sha  '\"\$f\" | sha256sum -c -
   sudo -n dpkg -i \"\$f\"
-  dpkg-query -W pistar-dashboard; { sudo -n dpkg -V pistar-dashboard || true; } | grep -v ' c /etc/pistar-dashboard/pistar.conf\$' | { ! grep .; }
-  for unit in psdash-stage pistar-wizard pistar-panel $UNIT_MMDVMHOST $UNIT_DMRGATEWAY; do systemctl is-active \"\$unit\"; done
+  # Conflicts/Replaces: the old pistar-dashboard package is gone after the takeover.
+  if dpkg-query -W -f='\${db:Status-Status}' pistar-dashboard 2>/dev/null | grep -qx installed; then echo 'pistar-dashboard is still installed' >&2; exit 1; fi
+  dpkg-query -W gospot; { sudo -n dpkg -V gospot || true; } | grep -v ' c /etc/gospot/gospot.conf\$' | { ! grep .; }
+  for unit in gospot-stage gospot-wizard gospot-panel $UNIT_MMDVMHOST $UNIT_DMRGATEWAY; do systemctl is-active \"\$unit\"; done
   test \"\$(curl --noproxy '*' --retry 5 --retry-connrefused --cacert $WIZARD_CONFIG_DIR/tls-cert.pem -sS -o /dev/null -w '%{http_code}' https://$DEPLOY_ADDRESS:$MANAGEMENT_PORT/manage/)\" = 401
   curl --retry 5 --retry-connrefused --noproxy '*' -fsS http://$DEPLOY_ADDRESS:$OPERATOR_PORT/ | cmp - $DASHBOARD_UI_DIR/index.html
   after=\$(state); test \"\$before\" = \"\$after\"

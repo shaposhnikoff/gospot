@@ -10,12 +10,12 @@ import urllib.error
 import urllib.request as u
 import zipfile
 
-p = Path('/etc/pistar-wizard')
+p = Path('/etc/gospot/wizard')
 origin = 'https://192.168.210.194:8788'
 ctx = ssl.create_default_context(cafile=str(p/'tls-cert.pem'))
 api = u.build_opener(u.ProxyHandler({}), u.HTTPSHandler(context=ctx),
                      u.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-headers = {'Authorization': 'Basic '+base64.b64encode(b'pi-star:'+(p/'admin-password').read_bytes().strip()).decode()}
+headers = {'Authorization': 'Basic '+base64.b64encode(b'gospot:'+(p/'admin-password').read_bytes().strip()).decode()}
 
 def req(path, *, extra=None, auth=True, data=None):
     return api.open(u.Request(origin+'/manage/'+path, data=data,
@@ -37,7 +37,7 @@ assert req('api/log/download').headers.get_content_type()=='text/plain'
 print('PASS log and plain-text download;',len(rows),'sanitized rows')
 with req('api/backup/classic') as r:
     assert r.headers.get_content_type()=='application/zip'
-    assert re.search(r'filename="Pi-Star_Config_[^"]+\.zip"', r.headers.get('Content-Disposition',''))
+    assert re.search(r'filename="GoSpot_Config_[^"]+\.zip"', r.headers.get('Content-Disposition',''))
     archive=r.read()
 with zipfile.ZipFile(io.BytesIO(archive)) as z:
     assert {'mmdvmhost','dmrgateway'} <= set(z.namelist()) and not any(n.endswith('.php') for n in z.namelist())

@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-const previewCookie = "pistar-preview-csrf"
-const upstreamCookie = "__Host-pistar-csrf"
+const previewCookie = "gospot-preview-csrf"
+const upstreamCookie = "__Host-gospot-csrf"
 
 func loopbackHost(authority string) bool {
 	host, _, err := net.SplitHostPort(authority)
@@ -33,7 +33,7 @@ func previewHandler(assets string, upstream *url.URL, password string, roots *x5
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.SetURL(upstream)
 			request.Out.Host = upstream.Host
-			request.Out.SetBasicAuth("pi-star", password)
+			request.Out.SetBasicAuth("gospot", password)
 			if request.In.Header.Get("Origin") != "" {
 				request.Out.Header.Set("Origin", upstream.String())
 			}
@@ -85,7 +85,7 @@ func previewHandler(assets string, upstream *url.URL, password string, roots *x5
 		switch path {
 		case "/runtime.json", "/manage/runtime.json":
 			writer.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(writer, `{"backend":"pistar-go","preview":true}`)
+			fmt.Fprint(writer, `{"backend":"gospot-go","preview":true}`)
 			return
 		case "/health":
 			fmt.Fprintln(writer, "isolated-preview")

@@ -22,11 +22,11 @@ import (
 // (admin/expert/jitter_test.php). Dispatch only after wizardHandler's TLS and
 // Basic Auth checks.
 //
-// A calibration session is one long-running `sudo pistar-calibrate run`: the
+// A calibration session is one long-running `sudo gospot-calibrate run`: the
 // helper holds MMDVMHost, runs MMDVMCal in a pseudo-terminal and restores
 // everything when MMDVMCal quits or its stdin closes. The panel keeps its
 // stdin open while the page polls, writes only allowlisted keys into it and
-// keeps the output for the page; `pistar-calibrate restore` runs after every
+// keeps the output for the page; `gospot-calibrate restore` runs after every
 // session in case the helper died before it could restore.
 
 // Set from settings by applySettings.
@@ -34,7 +34,7 @@ var calibrationHelper, jitterHelper, jitterLog string
 var calibrationIdle, jitterTimeout time.Duration
 
 func setCalibrationPaths(lib string, idle time.Duration, log string, limit time.Duration) {
-	calibrationHelper, jitterHelper = filepath.Join(lib, "pistar-calibrate"), filepath.Join(lib, "pistar-jitter")
+	calibrationHelper, jitterHelper = filepath.Join(lib, "gospot-calibrate"), filepath.Join(lib, "gospot-jitter")
 	calibrationIdle, jitterLog, jitterTimeout = idle, log, limit
 }
 

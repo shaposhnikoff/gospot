@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Pi-Star — Hoseline TG91
+Name=GoSpot — Hoseline TG91
 Comment=Открыть приёмный плеер BrandMeister
 Exec=firefox-esr http://192.168.210.194:8789/hoseline.html
 Icon=audio-volume-high

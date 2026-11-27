@@ -1,7 +1,7 @@
 <script lang="ts">
   // admin/live_modem_log.php: today's MMDVMHost log, new lines every second.
   import { onMount } from 'svelte';
-  import PiStarFrame from './PiStarFrame.svelte';
+  import GoSpotFrame from './GoSpotFrame.svelte';
 
   let text = $state('Starting logging, please wait...\n');
   let tail: HTMLDivElement;
@@ -30,7 +30,7 @@
   });
 </script>
 
-<PiStarFrame title="Live Logs" links={['Dashboard', 'Admin', 'Power', 'Backup/Restore', 'Configuration']}>
+<GoSpotFrame title="Live Logs" links={['Dashboard', 'Admin', 'Power', 'Backup/Restore', 'Configuration']}>
   <table width="100%">
     <tbody>
       <tr><th>Live Logs</th></tr>
@@ -38,4 +38,4 @@
       <tr><th>Download the log: <a href="/manage/api/livelog/download" style="color: #ffffff;">here</a></th></tr>
     </tbody>
   </table>
-</PiStarFrame>
+</GoSpotFrame>

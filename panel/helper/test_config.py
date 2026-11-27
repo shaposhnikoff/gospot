@@ -9,9 +9,9 @@ import unittest
 from unittest.mock import patch
 
 
-# pistar-config reads its paths at import; use the repository settings file.
-os.environ.setdefault("PISTAR_SETTINGS", str(Path(__file__).resolve().parents[2] / "Pi-Star_dash_new" / "pistar.conf"))
-loader = importlib.machinery.SourceFileLoader("helper", str(Path(__file__).with_name("pistar-config")))
+# gospot-config reads its paths at import; use the repository settings file.
+os.environ.setdefault("GOSPOT_SETTINGS", str(Path(__file__).resolve().parents[2] / "Pi-Star_dash_new" / "gospot.conf"))
+loader = importlib.machinery.SourceFileLoader("helper", str(Path(__file__).with_name("gospot-config")))
 h = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(h)
 

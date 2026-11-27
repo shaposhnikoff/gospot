@@ -3,7 +3,7 @@
   import { groups, isOperatorPath, searchGroups, stockOrigin } from './routes';
 
   let { pi = false, management = null, preview = false }: { pi?: boolean; management?: string | null; preview?: boolean } = $props();
-  const storageKey = 'pistar.console.stock-origin.v1';
+  const storageKey = 'gospot.console.stock-origin.v1';
   let here = $state('');
   let operatorPath = $state(false);
   let saved = $state<string | null>(null);
@@ -43,7 +43,7 @@
     const origin = stockOrigin(draft);
     invalid = !origin || origin === here;
     if (!origin) {
-      message = 'Введите адрес вида http://pi-star.local или https://имя:порт без логина, пароля, пути и параметров.';
+      message = 'Введите адрес вида http://gospot.local или https://имя:порт без логина, пароля, пути и параметров.';
       return;
     }
     if (origin === here) {
@@ -76,7 +76,7 @@
 <section class="console" aria-labelledby="console-title" lang="ru" data-testid="console">
   <header class="console-heading">
     <p class="eyebrow"><span></span>РАБОЧЕЕ МЕСТО ОПЕРАТОРА</p>
-    <h1 id="console-title">Консоль Pi-Star</h1>
+    <h1 id="console-title">Консоль GoSpot</h1>
     <p>Найдите нужную функцию и откройте её на устройстве.</p>
   </header>
 
@@ -110,7 +110,7 @@
         <label for="console-origin">Адрес штатной панели</label>
         <div class="input-row">
           <input id="console-origin" data-testid="console-origin" type="url" inputmode="url" autocomplete="off" spellcheck="false"
-            aria-invalid={invalid} aria-describedby="origin-help origin-message" placeholder="http://pi-star.local" bind:value={draft}
+            aria-invalid={invalid} aria-describedby="origin-help origin-message" placeholder="http://gospot.local" bind:value={draft}
             oninput={() => { invalid = false; message = ''; }} />
           <button class="apply" type="submit" data-testid="console-origin-save">Сохранить адрес</button>
           {#if saved}

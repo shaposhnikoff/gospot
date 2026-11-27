@@ -3,12 +3,12 @@
 set -euo pipefail
 [[ $(hostname -s) == pistar3 && $EUID == 0 ]]
 src=$(cd "$(dirname "$0")" && pwd)
-base=/opt/psdash-stage
-svc=psdash-stage.service
-acct=psdash-stage
+base=/opt/gospot-stage
+svc=gospot-stage.service
+acct=gospot-stage
 unit=/etc/systemd/system/$svc
 action=$1
-exec 9>/run/lock/psdash-stage.lock
+exec 9>/run/lock/gospot-stage.lock
 flock -x 9
 
 radio_ids() {
@@ -99,7 +99,7 @@ fi
 url=http://192.168.210.194:8789
 check() {
     curl --noproxy '*' -fsS --max-time 5 --retry 4 --retry-connrefused --retry-delay 1 "$url/runtime.json" |
-        python3 -c 'import json,sys; d=json.load(sys.stdin); p=d.pop("classicHttpsPort",None); sys.exit(d!={"backend":"pistar-go","wizardPort":8788} or (p is not None and not (type(p) is int and 1<=p<=65535)))' &&
+        python3 -c 'import json,sys; d=json.load(sys.stdin); p=d.pop("classicHttpsPort",None); sys.exit(d!={"backend":"gospot-go","wizardPort":8788} or (p is not None and not (type(p) is int and 1<=p<=65535)))' &&
     curl --noproxy '*' -fsS --max-time 5 "$url/api/status" |
         python3 -c 'import json,sys; sys.exit(not isinstance(json.load(sys.stdin),dict))' &&
     curl --noproxy '*' -fsS --max-time 5 "$url/" | cmp -s - "$base/$target/dist/index.html"

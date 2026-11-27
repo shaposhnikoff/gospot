@@ -4,7 +4,7 @@
 # version line, answers the keys the Calibration page sends and quits on q.
 # Every byte it reads is appended to FAKE_MMDVMCAL_LOG; its arguments to
 # FAKE_MMDVMCAL_LOG.args.
-log=${FAKE_MMDVMCAL_LOG:-/run/pistar-qa/mmdvmcal-input}
+log=${FAKE_MMDVMCAL_LOG:-/run/gospot-qa/mmdvmcal-input}
 printf '%s\n' "$*" >>"$log.args"
 stty raw -echo
 freq=435000000

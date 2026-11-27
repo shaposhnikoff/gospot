@@ -45,7 +45,7 @@ export async function checkOperator(origin, { preview = false, container = '' } 
       }
       throw Error('Navigation did not reach expected state: ' + expression);
     }
-    await command('Page.addScriptToEvaluateOnNewDocument', { source: "localStorage.setItem('pistar.console.stock-origin.v1','https://other-board.invalid')" });
+    await command('Page.addScriptToEvaluateOnNewDocument', { source: "localStorage.setItem('gospot.console.stock-origin.v1','https://other-board.invalid')" });
     for (const [width, height] of [[1366, 900], [390, 844]]) {
       await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width < 500 });
       await webdriver('/url', { url: origin + '/#console' });
@@ -109,7 +109,7 @@ export async function checkOperator(origin, { preview = false, container = '' } 
       const gateway = execFileSync('docker', ['exec', container, 'cat', '/etc/DMRGateway.ini']);
       const metadata = () => execFileSync('docker', ['exec', container, 'stat', '-c', '%n %u:%g %a', '/etc/MMDVM-Host.ini', '/etc/DMRGateway.ini']);
       const originalMetadata = metadata();
-      const events = () => execFileSync('docker', ['exec', container, 'cat', '/run/pistar-qa/events']).toString();
+      const events = () => execFileSync('docker', ['exec', container, 'cat', '/run/gospot-qa/events']).toString();
       const originalEvents = events();
       await webdriver('/url', { url: origin + '/manage/#configuration' });
       await until("!!document.querySelector('input[name=cc]')");

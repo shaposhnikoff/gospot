@@ -1,4 +1,4 @@
-"""radio/sbin/pistar-remote: RF keeper commands from Pi-Star logs.
+"""radio/sbin/gospot-remote: RF keeper commands from Pi-Star logs.
 
 The script is loaded as a module and driven with temporary configs, logs, a
 fake /proc, a command recorder and a fixed clock; the program and its
@@ -18,8 +18,8 @@ import unittest
 from unittest import mock
 
 HERE = Path(__file__).resolve().parent
-SCRIPT = HERE / "sbin" / "pistar-remote"
-HANDLER = HERE / "sbin" / "pistar-remote.service"
+SCRIPT = HERE / "sbin" / "gospot-remote"
+HANDLER = HERE / "sbin" / "gospot-remote.service"
 
 
 def load(path, name):
@@ -30,7 +30,7 @@ def load(path, name):
     return module
 
 
-remote = load(SCRIPT, "pistar_remote")
+remote = load(SCRIPT, "gospot_remote")
 sys.dont_write_bytecode = True
 
 NOW = datetime(2026, 11, 27, 12, 0, 0)
@@ -100,9 +100,9 @@ FileRoot=YSFGateway
 """
 
 UNITS = {
-    "REMOTE_MMDVMHOST_STOP_UNITS": "mmdvmhost.timer,pistar-watchdog.timer,mmdvmhost.service,pistar-watchdog.service",
+    "REMOTE_MMDVMHOST_STOP_UNITS": "mmdvmhost.timer,gospot-watchdog.timer,mmdvmhost.service,gospot-watchdog.service",
     "REMOTE_DSTARREPEATER_STOP_UNITS":
-        "dstarrepeater.timer,pistar-watchdog.timer,dstarrepeater.service,pistar-watchdog.service",
+        "dstarrepeater.timer,gospot-watchdog.timer,dstarrepeater.service,gospot-watchdog.service",
     "REMOTE_DMR_RESTART_UNITS": "mmdvmhost.service,dmrgateway.service",
     "REMOTE_P25_RESTART_UNITS": "mmdvmhost.service,dmrgateway.service",
     "REMOTE_DSTAR_RESTART_UNITS": "ircddbgateway.service,mmdvmhost.service",
@@ -169,14 +169,14 @@ class Fixture(unittest.TestCase):
         self.root = root = Path(tmp.name)
         for d in ("etc", "bin", "sbin", "log", "proc", "sys"):
             (root / d).mkdir()
-        (root / "etc" / "pistar-remote").write_text(REMOTE_CONF)
+        (root / "etc" / "gospot-remote").write_text(REMOTE_CONF)
         (root / "etc" / "mmdvmhost").write_text(MMDVMHOST_CONF.format(log=root / "log"))
         (root / "etc" / "ysfgateway").write_text(YSFGATEWAY_CONF.format(log=root / "log"))
         (root / "bin" / "texttransmitd").write_text("")
         (root / "sys" / "wlan0").symlink_to(root / "proc")
         self.paths = {
-            "PISTAR_BIN_DIR": str(root / "bin"), "PISTAR_SBIN_DIR": str(root / "sbin"),
-            "PISTAR_LOG_DIR": str(root / "log"), "CONF_PISTAR_REMOTE": str(root / "etc" / "pistar-remote"),
+            "GOSPOT_BIN_DIR": str(root / "bin"), "GOSPOT_SBIN_DIR": str(root / "sbin"),
+            "GOSPOT_LOG_DIR": str(root / "log"), "CONF_GOSPOT_REMOTE": str(root / "etc" / "gospot-remote"),
             "CONF_MMDVMHOST": str(root / "etc" / "mmdvmhost"), "CONF_YSFGATEWAY": str(root / "etc" / "ysfgateway"),
             "IP_BIN": "/usr/bin/ip", "IW_BIN": "/usr/sbin/iw", "SYSFS_NET_DIR": str(root / "sys"),
             "WIFI_INTERFACE": "wlan0", **UNITS,
@@ -255,7 +255,7 @@ class DMR(Fixture):
                                        [str(self.root / "sbin" / "HostFilesUpdate.sh")]])
 
     def test_commented_command_is_not_configured(self):
-        conf = self.root / "etc" / "pistar-remote"
+        conf = self.root / "etc" / "gospot-remote"
         conf.write_text(REMOTE_CONF.replace("shutdown=9999996", "#shutdown=9999996"))
         self.new_remote()
         self.append("MMDVM", mmdvm("DMR Slot 2, received RF voice header from M1ABC to TG 9999996"))
@@ -349,7 +349,7 @@ class DStarViaMMDVMHost(Fixture):
         self.assertEqual(self.poll(), [])
 
     def test_lowercase_keeper_in_config(self):
-        (self.root / "etc" / "pistar-remote").write_text(REMOTE_CONF.replace("callsign=M1ABC", "callsign=m1abc"))
+        (self.root / "etc" / "gospot-remote").write_text(REMOTE_CONF.replace("callsign=M1ABC", "callsign=m1abc"))
         self.new_remote()
         self.append("MMDVM", mmdvm(dstar_header(your="REBOOTPI")))
         self.assertIn(["systemctl", "reboot"], self.poll())
@@ -513,7 +513,7 @@ class Reading(Fixture):
 
 class Settings(Fixture):
     def test_disabled_missing_or_without_keeper(self):
-        conf = self.root / "etc" / "pistar-remote"
+        conf = self.root / "etc" / "gospot-remote"
         self.assertTrue(remote.Settings(self.paths).enabled)
         conf.write_text(REMOTE_CONF.replace("enabled=true", "enabled=false"))
         self.assertFalse(remote.Settings(self.paths).enabled)
@@ -525,12 +525,12 @@ class Settings(Fixture):
         self.assertFalse(remote.Settings(self.paths).enabled)
 
     def test_pi_star_default_config(self):
-        """config_clean.zip's pistar-remote: disabled, four commands per mode."""
+        """config_clean.zip member pistar-remote (the Pi-Star name), seeded as gospot-remote: disabled, four commands per mode."""
         zip_path = HERE.parent / "Pi-Star_v4_Binaries_Bin" / "config_clean.zip"
         if not zip_path.exists():
             self.skipTest("Pi-Star_v4_Binaries_Bin is not checked out here")
         import zipfile
-        (self.root / "etc" / "pistar-remote").write_bytes(zipfile.ZipFile(zip_path).read("pistar-remote"))
+        (self.root / "etc" / "gospot-remote").write_bytes(zipfile.ZipFile(zip_path).read("pistar-remote"))
         settings = remote.Settings(self.paths)
         self.assertFalse(settings.enabled)
         self.assertEqual(settings.keeper, "M1ABC")
@@ -547,7 +547,7 @@ class Settings(Fixture):
     def test_paths_file(self):
         body = "".join(f"{k}={v}\n" for k, v in self.paths.items())
         self.assertEqual(remote.load_paths(self.paths_file("# comment\n\n" + body)), self.paths)
-        for bad, mode in ((body, 0o664), (body.replace("PISTAR_LOG_DIR=/", "PISTAR_LOG_DIR="), 0o644),
+        for bad, mode in ((body, 0o664), (body.replace("GOSPOT_LOG_DIR=/", "GOSPOT_LOG_DIR="), 0o644),
                           (body + "X='y'\n", 0o644), (body.replace("WIFI_INTERFACE=wlan0", "WIFI_INTERFACE=../x"), 0o644),
                           (body.replace("mmdvmhost.timer,", "mmdvmhost.timer;reboot,"), 0o644),
                           ("".join(l for l in body.splitlines(True) if not l.startswith("IW_BIN")), 0o644)):
@@ -567,7 +567,7 @@ class Commands(Fixture):
 
 
 class Program(Fixture):
-    """The script and its handler as programs, with PISTAR_RADIO_PATHS."""
+    """The script and its handler as programs, with GOSPOT_RADIO_PATHS."""
 
     def setUp(self):
         super().setUp()
@@ -576,7 +576,7 @@ class Program(Fixture):
         (fake / "systemctl").write_text('#!/bin/sh\nprintf "%s\\n" "$*" >>"$FAKE_SYSTEMCTL_LOG"\n')
         (fake / "systemctl").chmod(0o755)
         (fake / "MMDVMHost").symlink_to("/bin/sleep")
-        self.env = dict(os.environ, PISTAR_RADIO_PATHS=self.paths_file(), PATH=f"{fake}:{os.environ['PATH']}",
+        self.env = dict(os.environ, GOSPOT_RADIO_PATHS=self.paths_file(), PATH=f"{fake}:{os.environ['PATH']}",
                         FAKE_SYSTEMCTL_LOG=str(self.root / "systemctl.log"))
         sbin = self.root / "sbin"
         for src in (SCRIPT, HANDLER):
@@ -589,7 +589,7 @@ class Program(Fixture):
         f.chmod(0o644)
         return str(f)
 
-    def program(self, *args, name="pistar-remote"):
+    def program(self, *args, name="gospot-remote"):
         # Output goes to a file: a daemon the handler starts keeps it open.
         with tempfile.TemporaryFile("w+") as out:
             done = subprocess.run([str(self.root / "sbin" / name), *args], env=self.env, stdout=out,
@@ -600,7 +600,7 @@ class Program(Fixture):
 
     def test_enabled_flag(self):
         self.assertEqual(self.program("--enabled").returncode, 0)
-        (self.root / "etc" / "pistar-remote").write_text(REMOTE_CONF.replace("enabled=true", "enabled=false"))
+        (self.root / "etc" / "gospot-remote").write_text(REMOTE_CONF.replace("enabled=true", "enabled=false"))
         self.assertEqual(self.program("--enabled").returncode, 1)
         done = self.program()
         self.assertEqual(done.returncode, 0)
@@ -619,21 +619,21 @@ class Program(Fixture):
                          [" ".join(c[1:]) for c in MMDVM_STOP])
 
     def test_handler_respects_enabled_and_manages_the_daemon(self):
-        (self.root / "etc" / "pistar-remote").write_text(REMOTE_CONF.replace("enabled=true", "enabled=false"))
-        done = self.program("start", name="pistar-remote.service")
-        self.assertEqual((done.returncode, done.stdout), (0, "pistar-remote is disabled\n"))
-        self.assertIn("is not running", self.program("status", name="pistar-remote.service").stdout)
-        (self.root / "etc" / "pistar-remote").write_text(REMOTE_CONF)
-        self.assertIn("started as PID", self.program("start", name="pistar-remote.service").stdout)
-        self.addCleanup(self.program, "stop", name="pistar-remote.service")
+        (self.root / "etc" / "gospot-remote").write_text(REMOTE_CONF.replace("enabled=true", "enabled=false"))
+        done = self.program("start", name="gospot-remote.service")
+        self.assertEqual((done.returncode, done.stdout), (0, "gospot-remote is disabled\n"))
+        self.assertIn("is not running", self.program("status", name="gospot-remote.service").stdout)
+        (self.root / "etc" / "gospot-remote").write_text(REMOTE_CONF)
+        self.assertIn("started as PID", self.program("start", name="gospot-remote.service").stdout)
+        self.addCleanup(self.program, "stop", name="gospot-remote.service")
         deadline = time.monotonic() + 10
-        while "is running" not in self.program("status", name="pistar-remote.service").stdout:
-            self.assertLess(time.monotonic(), deadline, "pistar-remote did not start")
+        while "is running" not in self.program("status", name="gospot-remote.service").stdout:
+            self.assertLess(time.monotonic(), deadline, "gospot-remote did not start")
             time.sleep(0.1)
-        self.assertIn("already running", self.program("start", name="pistar-remote.service").stdout)
-        self.assertIn("Killing", self.program("stop", name="pistar-remote.service").stdout)
-        self.assertIn("is not running", self.program("status", name="pistar-remote.service").stdout)
-        self.assertIn("Usage", self.program("bogus", name="pistar-remote.service").stdout)
+        self.assertIn("already running", self.program("start", name="gospot-remote.service").stdout)
+        self.assertIn("Killing", self.program("stop", name="gospot-remote.service").stdout)
+        self.assertIn("is not running", self.program("status", name="gospot-remote.service").stdout)
+        self.assertIn("Usage", self.program("bogus", name="gospot-remote.service").stdout)
 
 
 if __name__ == "__main__":

@@ -64,7 +64,7 @@
 
   async function send(title: string, url: string, body: object, back: number) {
     const r = await fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': data?.csrf ?? '' }, body: JSON.stringify(body),
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': data?.csrf ?? '' }, body: JSON.stringify(body),
     }).catch(() => null);
     let text = 'No response from the board';
     if (r) text = r.ok ? (await r.json()).output : (await r.text()).trim();

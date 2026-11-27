@@ -54,7 +54,7 @@ cleanup() {
 }
 trap cleanup EXIT
 systemctl --user show -p Version
-docker build -q -t pistar-write-qa-runtime:bookworm - < "$fixture/Dockerfile"
+docker build -q -t gospot-write-qa-runtime:bookworm - < "$fixture/Dockerfile"
 if [[ -z $dist ]]; then
   dist=$work/dist
   npm run build -- --outDir "$dist"
@@ -74,91 +74,91 @@ openssl rand -hex 20 >"$work/admin-password"
 openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout "$work/key.pem" -out "$work/cert.pem" \
   -subj /CN=127.0.0.1 -addext 'subjectAltName=IP:127.0.0.1' 2>/dev/null
 sed 's|@DASHBOARD_LIB_DIR@|/usr/local/libexec|g' debian/sudoers >"$work/sudoers"
-# The fixture keeps its own layout; only its copy of pistar.conf differs.
+# The fixture keeps its own layout; only its copy of gospot.conf differs.
 # --wifi: the Wi-Fi page edits a wpa_supplicant.conf fixture (no NetworkManager here).
 stand_conf=()
 if $wifi; then stand_conf=(-e 's|^WIFI_BACKEND=.*|WIFI_BACKEND=wpa_supplicant|'); fi
 sed "${stand_conf[@]}" -e 's|^CONF_MMDVMHOST=.*|CONF_MMDVMHOST=/etc/MMDVM-Host.ini|' -e 's|^CONF_DMRGATEWAY=.*|CONF_DMRGATEWAY=/etc/DMRGateway.ini|' \
-    -e 's|^DASHBOARD_LIB_DIR=.*|DASHBOARD_LIB_DIR=/usr/local/libexec|' -e 's|^DASHBOARD_UI_DIR=.*|DASHBOARD_UI_DIR=/usr/local/share/pistar-native-ui|' \
-    pistar.conf >"$work/pistar.conf"
+    -e 's|^DASHBOARD_LIB_DIR=.*|DASHBOARD_LIB_DIR=/usr/local/libexec|' -e 's|^DASHBOARD_UI_DIR=.*|DASHBOARD_UI_DIR=/usr/local/share/gospot-native-ui|' \
+    gospot.conf >"$work/gospot.conf"
 if $tgif; then
-  # The container has no internet: only the stand's pistar.conf points TGIF at
+  # The container has no internet: only the stand's gospot.conf points TGIF at
   # fake_tgif.py inside it (HTTPS with the stand certificate, legacy over HTTP).
   # DMRGateway network 1 becomes the TGIF master with a 9-digit ID.
   sed -i -e 's|^TGIF_API_URL=.*|TGIF_API_URL=https://127.0.0.1:8601/v1/|' \
-         -e 's|^TGIF_SESSION_URL=.*|TGIF_SESSION_URL=http://127.0.0.1:8602/api/sessions/update/|' "$work/pistar.conf"
+         -e 's|^TGIF_SESSION_URL=.*|TGIF_SESSION_URL=http://127.0.0.1:8602/api/sessions/update/|' "$work/gospot.conf"
   sed -i -e 's/^Address=192\.0\.2\.11$/Address=tgif.network/' -e 's/^Id=10001$/Id=234123401/' "$work/DMRGateway.ini"
   grep -qx 'Address=tgif.network' "$work/DMRGateway.ini" && grep -qx 'Id=234123401' "$work/DMRGateway.ini"
 fi
 if $hoseline; then
-  # The container has no internet: only the stand's pistar.conf points the
+  # The container has no internet: only the stand's gospot.conf points the
   # Hoseline page and spotter at fake_hoseline.py inside it (HTTPS/WSS with the
   # stand certificate).
   sed -i -e 's|^HOSELINE_PAGE_URL=.*|HOSELINE_PAGE_URL=https://127.0.0.1:8603/|' \
-         -e 's|^HOSELINE_SPOTTER_URL=.*|HOSELINE_SPOTTER_URL=wss://127.0.0.1:8603/spotter/|' "$work/pistar.conf"
-  grep -qx 'HOSELINE_SPOTTER_URL=wss://127.0.0.1:8603/spotter/' "$work/pistar.conf"
+         -e 's|^HOSELINE_SPOTTER_URL=.*|HOSELINE_SPOTTER_URL=wss://127.0.0.1:8603/spotter/|' "$work/gospot.conf"
+  grep -qx 'HOSELINE_SPOTTER_URL=wss://127.0.0.1:8603/spotter/' "$work/gospot.conf"
 fi
 test -s "$work/sudoers"
 docker network create --internal "$name" >/dev/null
 docker run -d --name "$name" --network "$name" \
   --mount type=bind,source="$work/bridge",target=/qa-bridge,readonly \
-  --pids-limit=120 pistar-write-qa-runtime:bookworm sleep infinity >/dev/null
-docker exec "$name" mkdir -p /usr/local/libexec /usr/local/share/pistar-native-ui /run/credentials /run/pistar-qa /etc/pistar-dashboard
-docker cp "$work/pistar.conf" "$name:/etc/pistar-dashboard/pistar.conf"
-docker cp "$dist/." "$name:/usr/local/share/pistar-native-ui/"
+  --pids-limit=120 gospot-write-qa-runtime:bookworm sleep infinity >/dev/null
+docker exec "$name" mkdir -p /usr/local/libexec /usr/local/share/gospot-native-ui /run/credentials /run/gospot-qa /etc/gospot
+docker cp "$work/gospot.conf" "$name:/etc/gospot/gospot.conf"
+docker cp "$dist/." "$name:/usr/local/share/gospot-native-ui/"
 (cd "$dist" && sha256sum index.html assets/*) >"$work/ui.sha256"
 echo "Admin UI source: $dist; verifying container files against source hashes"
-docker exec -i -w /usr/local/share/pistar-native-ui "$name" sha256sum -c - <"$work/ui.sha256"
+docker exec -i -w /usr/local/share/gospot-native-ui "$name" sha256sum -c - <"$work/ui.sha256"
 for f in MMDVM-Host.ini DMRGateway.ini; do docker cp "$work/$f" "$name:/etc/$f"; done
-# Pi-Star default configurations for Factory Reset, where pistar-radio installs them.
-radio_share=$(sed -n 's/^RADIO_SHARE_DIR=//p' pistar.conf)
-bins=$(sed -n 's/^PISTAR_BINARIES_BIN_DIR=//p' pistar.conf)
+# Pi-Star default configurations for Factory Reset, where gospot-radio installs them.
+radio_share=$(sed -n 's/^RADIO_SHARE_DIR=//p' gospot.conf)
+bins=$(sed -n 's/^REFERENCE_BINARIES_BIN_DIR=//p' gospot.conf)
 docker exec "$name" mkdir -p "$radio_share"
 docker cp "$bins/config_clean.zip" "$name:$radio_share/config_clean.zip"
-for h in pistar-config pistar-configure pistar-calibrate pistar-jitter; do
+for h in gospot-config gospot-configure gospot-calibrate gospot-jitter; do
   docker cp "../panel/helper/$h" "$name:/usr/local/libexec/$h"
   test "$(sha256sum "../panel/helper/$h"|cut -d' ' -f1)" = "$(docker exec "$name" sha256sum "/usr/local/libexec/$h"|cut -d' ' -f1)"
 done
-docker cp "$work/server" "$name:/usr/local/bin/pistar-wizard"
+docker cp "$work/server" "$name:/usr/local/bin/gospot-wizard"
 docker cp "$fixture/systemctl-client" "$name:/usr/bin/systemctl"
-docker cp "$work/sudoers" "$name:/etc/sudoers.d/pistar-wizard"
+docker cp "$work/sudoers" "$name:/etc/sudoers.d/gospot-wizard"
 for f in admin-password key.pem cert.pem; do docker cp "$work/$f" "$name:/run/credentials/$f"; done
 docker exec "$name" sh -eu -c '
-  chmod 755 /usr/local/bin/pistar-wizard /usr/bin/systemctl /usr/local/libexec/pistar-*
-  chmod -R a+rX /usr/local/share/pistar-native-ui
+  chmod 755 /usr/local/bin/gospot-wizard /usr/bin/systemctl /usr/local/libexec/gospot-*
+  chmod -R a+rX /usr/local/share/gospot-native-ui
   chown mmdvm:mmdvm /etc/DMRGateway.ini /etc/MMDVM-Host.ini
   chmod 600 /etc/DMRGateway.ini; chmod 640 /etc/MMDVM-Host.ini
-  chown -R pistar-wizard:pistar-wizard /run/credentials; chmod -R go-rwx /run/credentials
-  chown root:root /etc/sudoers.d/pistar-wizard /usr/local/libexec/pistar-* /usr/bin/systemctl /etc/pistar-dashboard/pistar.conf
-  chmod 644 /etc/pistar-dashboard/pistar.conf
-  chmod 0440 /etc/sudoers.d/pistar-wizard; visudo -c
-  touch /run/pistar-qa/events
+  chown -R gospot-wizard:gospot-wizard /run/credentials; chmod -R go-rwx /run/credentials
+  chown root:root /etc/sudoers.d/gospot-wizard /usr/local/libexec/gospot-* /usr/bin/systemctl /etc/gospot/gospot.conf
+  chmod 644 /etc/gospot/gospot.conf
+  chmod 0440 /etc/sudoers.d/gospot-wizard; visudo -c
+  touch /run/gospot-qa/events
 '
 wizard_env=()
 if $tgif; then
   docker cp "$fixture/fake_tgif.py" "$name:/usr/local/libexec/fake_tgif.py"
   docker exec "$name" sh -eu -c '
-    printf "[Pi-Star]\nVersion=4.3.9\n" >/etc/pistar-release
+    printf "[GoSpot]\nVersion=4.3.9\n" >/etc/gospot-release
     # Pi-Star keeps the radio configs world-readable (classic restore writes 0644);
     # the admin page reads them to find the TGIF master and ID.
     chmod 644 /etc/DMRGateway.ini /etc/MMDVM-Host.ini
   '
-  docker exec -d "$name" python3 -I /usr/local/libexec/fake_tgif.py --settings /etc/pistar-dashboard/pistar.conf \
-    --cert /run/credentials/cert.pem --key /run/credentials/key.pem --log /run/pistar-qa/tgif-requests --delay 1.5
+  docker exec -d "$name" python3 -I /usr/local/libexec/fake_tgif.py --settings /etc/gospot/gospot.conf \
+    --cert /run/credentials/cert.pem --key /run/credentials/key.pem --log /run/gospot-qa/tgif-requests --delay 1.5
   # Trust the stand certificate for the fake HTTPS API only in this stand.
   wizard_env=(-e SSL_CERT_FILE=/run/credentials/cert.pem)
 fi
 if $hoseline; then
   docker cp "$fixture/fake_hoseline.py" "$name:/usr/local/libexec/fake_hoseline.py"
-  docker exec -d "$name" python3 -I /usr/local/libexec/fake_hoseline.py --settings /etc/pistar-dashboard/pistar.conf \
-    --cert /run/credentials/cert.pem --key /run/credentials/key.pem --log /run/pistar-qa/hoseline-events
+  docker exec -d "$name" python3 -I /usr/local/libexec/fake_hoseline.py --settings /etc/gospot/gospot.conf \
+    --cert /run/credentials/cert.pem --key /run/credentials/key.pem --log /run/gospot-qa/hoseline-events
   # Trust the stand certificate for the fake page and spotter only in this stand.
   wizard_env=(-e SSL_CERT_FILE=/run/credentials/cert.pem)
 fi
-# The status panel feeds /manage/api/dashboard (theme, versions); it listens on PANEL_PORT from pistar.conf.
-docker exec -d --user pistar-wizard "$name" sh -c 'exec /usr/local/bin/pistar-wizard 2>>/tmp/pistar-panel.log'
-docker exec -d --user pistar-wizard -e CREDENTIALS_DIRECTORY=/run/credentials ${wizard_env[@]+"${wizard_env[@]}"} "$name" \
-  sh -c 'exec /usr/local/bin/pistar-wizard -admin-listen :8443 -tls-cert /run/credentials/cert.pem -tls-key /run/credentials/key.pem 2>>/tmp/pistar-wizard.log'
+# The status panel feeds /manage/api/dashboard (theme, versions); it listens on PANEL_PORT from gospot.conf.
+docker exec -d --user gospot-wizard "$name" sh -c 'exec /usr/local/bin/gospot-wizard 2>>/tmp/gospot-panel.log'
+docker exec -d --user gospot-wizard -e CREDENTIALS_DIRECTORY=/run/credentials ${wizard_env[@]+"${wizard_env[@]}"} "$name" \
+  sh -c 'exec /usr/local/bin/gospot-wizard -admin-listen :8443 -tls-cert /run/credentials/cert.pem -tls-key /run/credentials/key.pem 2>>/tmp/gospot-wizard.log'
 ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name")
 [[ $ip =~ ^([0-9]+\.){3}[0-9]+$ ]]
 # An internal-only Docker network deliberately has no published ports. Relay
@@ -184,7 +184,7 @@ if $preview; then
   exit $?
 fi
 python3 qa/real_write_browser.py "${scenario[@]}" --origin "$origin" --work "$work" --key "$work/key.pem" --container "$name" || {
-  cat "$work/service-results"; echo "wizard log:"; docker exec "$name" tail -n 20 /tmp/pistar-wizard.log; exit 1;
+  cat "$work/service-results"; echo "wizard log:"; docker exec "$name" tail -n 20 /tmp/gospot-wizard.log; exit 1;
 }
 cat "$work/service-results"
 for role in dmrgateway mmdvmhost; do

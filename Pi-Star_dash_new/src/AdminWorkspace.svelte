@@ -27,9 +27,9 @@
     window.addEventListener('hashchange',change); return () => window.removeEventListener('hashchange',change);
   });
 </script>
-<svelte:head><title>Pi-Star · Администрирование</title></svelte:head>
+<svelte:head><title>GoSpot · Администрирование</title></svelte:head>
 <div class="workspace">
-  <header><strong>Pi-Star · Admin{preview ? ' · тестовый стенд' : ''}</strong>{#if operator}<a href={operator + '/'} data-testid="admin-back-operator">Обзор узла →</a>{/if}</header>
+  <header><strong>GoSpot · Admin{preview ? ' · тестовый стенд' : ''}</strong>{#if operator}<a href={operator + '/'} data-testid="admin-back-operator">Обзор узла →</a>{/if}</header>
   <nav aria-label="Администрирование">
     {#each pages as p}<a href={'#'+p[0]} aria-current={p[0]===page?'page':undefined}>{p[1]}</a>{/each}
   </nav>

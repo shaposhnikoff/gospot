@@ -1,7 +1,7 @@
-"""pistar-calibrate and pistar-jitter, run as programs against fake tools.
+"""gospot-calibrate and gospot-jitter, run as programs against fake tools.
 
-The helpers take every tool location from pistar.conf; the tests write their
-own settings file (PISTAR_SETTINGS is honoured for unprivileged runs only) and
+The helpers take every tool location from gospot.conf; the tests write their
+own settings file (GOSPOT_SETTINGS is honoured for unprivileged runs only) and
 put a recording systemctl first in PATH."""
 import os
 from pathlib import Path
@@ -14,8 +14,8 @@ import unittest
 
 HERE = Path(__file__).resolve().parent
 FIXTURES = HERE.parents[1] / "Pi-Star_dash_new" / "qa" / "fixtures"
-CALIBRATE = HERE / "pistar-calibrate"
-JITTER = HERE / "pistar-jitter"
+CALIBRATE = HERE / "gospot-calibrate"
+JITTER = HERE / "gospot-jitter"
 
 SYSTEMCTL = """#!/bin/bash
 printf '%s\\n' "$*" >>"$FAKE_SYSTEMCTL_LOG"
@@ -54,27 +54,27 @@ class Fixture(unittest.TestCase):
         for d in ("bin", "sbin", "fakebin", "log"):
             (root / d).mkdir()
         (root / "bin" / "MMDVMCal").symlink_to(FIXTURES / "fake-mmdvmcal")
-        (root / "sbin" / "pistar-jittertest").symlink_to(FIXTURES / "fake-jittertest")
+        (root / "sbin" / "gospot-jittertest").symlink_to(FIXTURES / "fake-jittertest")
         (root / "fakebin" / "systemctl").write_text(SYSTEMCTL)
         (root / "fakebin" / "systemctl").chmod(0o755)
-        (root / "active").write_text("pistar-watchdog.service\nmmdvmhost.service\n")
+        (root / "active").write_text("gospot-watchdog.service\nmmdvmhost.service\n")
         (root / "mmdvmhost").write_text(MMDVMHOST)
         self.settings = {
-            "CONF_MMDVMHOST": root / "mmdvmhost", "PISTAR_BIN_DIR": root / "bin", "PISTAR_SBIN_DIR": root / "sbin",
+            "CONF_MMDVMHOST": root / "mmdvmhost", "GOSPOT_BIN_DIR": root / "bin", "GOSPOT_SBIN_DIR": root / "sbin",
             "DASHBOARD_STATE_DIR": root / "state", "UNIT_MMDVMHOST": "mmdvmhost.service",
-            "CALIBRATION_HOLD_UNITS": "pistar-watchdog.timer,pistar-watchdog.service,mmdvmhost.timer",
+            "CALIBRATION_HOLD_UNITS": "gospot-watchdog.timer,gospot-watchdog.service,mmdvmhost.timer",
             "CALIBRATION_WARMUP": "0", "CALIBRATION_MAX_RUNTIME": "60",
-            "PISTAR_JITTER_LOG": root / "log" / "pi-star_icmptest.log", "JITTER_TIMEOUT": "20",
+            "GOSPOT_JITTER_LOG": root / "log" / "gospot_icmptest.log", "JITTER_TIMEOUT": "20",
         }
         self.write_settings()
-        self.env = dict(os.environ, PATH=f"{root / 'fakebin'}:/usr/bin:/bin", PISTAR_SETTINGS=str(root / "pistar.conf"),
+        self.env = dict(os.environ, PATH=f"{root / 'fakebin'}:/usr/bin:/bin", GOSPOT_SETTINGS=str(root / "gospot.conf"),
                         FAKE_SYSTEMCTL_LOG=str(root / "systemctl.log"), FAKE_SYSTEMCTL_ACTIVE=str(root / "active"),
                         FAKE_MMDVMCAL_LOG=str(root / "input"))
         self.env.pop("FAKE_JITTER_SLEEP", None)
 
     def write_settings(self, mode=0o600, **changes):
         self.settings.update(changes)
-        conf = self.root / "pistar.conf"
+        conf = self.root / "gospot.conf"
         conf.write_text("# test settings\n" + "".join(f"{k}={v}\n" for k, v in self.settings.items()))
         conf.chmod(mode)
 
@@ -88,7 +88,7 @@ class Fixture(unittest.TestCase):
 
 
 class Session:
-    """pistar-calibrate run with its stdin and stdout attached to the test."""
+    """gospot-calibrate run with its stdin and stdout attached to the test."""
 
     def __init__(self, test):
         self.proc = subprocess.Popen([str(CALIBRATE), "run"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -125,9 +125,9 @@ class Session:
                 pass
 
 
-HELD = ["is-active --quiet pistar-watchdog.timer", "is-active --quiet pistar-watchdog.service",
-        "is-active --quiet mmdvmhost.timer", "stop pistar-watchdog.service", "stop mmdvmhost.service"]
-RESTORED = ["start pistar-watchdog.service", "restart mmdvmhost.service"]
+HELD = ["is-active --quiet gospot-watchdog.timer", "is-active --quiet gospot-watchdog.service",
+        "is-active --quiet mmdvmhost.timer", "stop gospot-watchdog.service", "stop mmdvmhost.service"]
+RESTORED = ["start gospot-watchdog.service", "restart mmdvmhost.service"]
 
 
 class CalibrateTest(Fixture):
@@ -150,7 +150,7 @@ class CalibrateTest(Fixture):
         self.assertEqual(s.wait(), 0)
         self.assertEqual(self.read("input"), "ke435000150\nq")
         self.assertEqual(self.systemctl(), HELD + RESTORED)
-        self.assertIn("Starting Pi-Star Services...\r\nFinnished...\r\n", s.text())
+        self.assertIn("Starting GoSpot Services...\r\nFinnished...\r\n", s.text())
         self.assertFalse((self.root / "state" / "calibration-held.json").exists())
 
     def test_quit_key_ends_the_session(self):
@@ -240,7 +240,7 @@ class JitterTest(Fixture):
         return subprocess.run([str(JITTER), *args], env=self.env, stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
 
     def test_run_writes_the_log(self):
-        log = Path(self.settings["PISTAR_JITTER_LOG"])
+        log = Path(self.settings["GOSPOT_JITTER_LOG"])
         log.write_text("previous run\n")
         r = self.jitter("run", "DMR+")
         self.assertEqual((r.returncode, r.stdout), (0, b"started\n"), r.stderr)
@@ -252,7 +252,7 @@ class JitterTest(Fixture):
         for args in (("run", "BM;reboot"), ("run",), ("run", "BM", "x"), ("start", "BM"), ("run", "bm")):
             r = self.jitter(*args)
             self.assertEqual(r.returncode, 2, args)
-        self.assertFalse(Path(self.settings["PISTAR_JITTER_LOG"]).exists())
+        self.assertFalse(Path(self.settings["GOSPOT_JITTER_LOG"]).exists())
 
     def test_timeout(self):
         self.write_settings(JITTER_TIMEOUT="1")
@@ -265,7 +265,7 @@ class JitterTest(Fixture):
     def test_log_symlink_is_replaced_not_followed(self):
         victim = self.root / "victim"
         victim.write_text("keep\n")
-        log = Path(self.settings["PISTAR_JITTER_LOG"])
+        log = Path(self.settings["GOSPOT_JITTER_LOG"])
         log.symlink_to(victim)
         r = self.jitter("run", "BM")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -278,7 +278,7 @@ class JitterTest(Fixture):
         r = self.jitter("run", "BM")
         self.assertEqual(r.returncode, 1)
         self.assertIn(b"unsafe settings file", r.stderr)
-        self.assertFalse(Path(self.settings["PISTAR_JITTER_LOG"]).exists())
+        self.assertFalse(Path(self.settings["GOSPOT_JITTER_LOG"]).exists())
 
 
 if __name__ == "__main__":

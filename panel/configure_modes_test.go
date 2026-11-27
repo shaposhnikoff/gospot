@@ -35,15 +35,15 @@ func modesFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	oldHosts, oldLog, oldDev, oldSections := pistarHostsDir, pistarLogDir, modesDevDir, cfgSections
-	pistarHostsDir, pistarLogDir, modesDevDir = hosts, "/var/log/pi-star", dev
+	oldHosts, oldLog, oldDev, oldSections := gospotHostsDir, gospotLogDir, modesDevDir, cfgSections
+	gospotHostsDir, gospotLogDir, modesDevDir = hosts, "/var/log/gospot", dev
 	cfgSections = append([]cfgSectionImpl{}, modesSections...)
 	t.Cleanup(func() {
-		pistarHostsDir, pistarLogDir, modesDevDir, cfgSections = oldHosts, oldLog, oldDev, oldSections
+		gospotHostsDir, gospotLogDir, modesDevDir, cfgSections = oldHosts, oldLog, oldDev, oldSections
 	})
 }
 
-// modesState parses INI texts as pistar-configure read does (first key wins).
+// modesState parses INI texts as gospot-configure read does (first key wins).
 func modesState(files map[string]string, marker bool) configState {
 	var s configState
 	s.Files = map[string]map[string]map[string]string{}
@@ -191,7 +191,7 @@ WhiteList=1234,5678
 [Log]
 DisplayLevel=0
 FileLevel=2
-FilePath=/var/log/pi-star
+FilePath=/var/log/gospot
 FileRoot=DAPNETGateway
 [DAPNET]
 Address=dapnet.afu.rwth-aachen.de
@@ -207,7 +207,7 @@ Debug=0
 [Log]
 DisplayLevel=0
 FileLevel=1
-FilePath=/var/log/pi-star
+FilePath=/var/log/gospot
 [GPS]
 Port=/dev/ttyACM0
 Speed=4800
@@ -759,7 +759,7 @@ func TestConfigureModesDefaults(t *testing.T) {
 			f["mmdvmhost"] = strings.Replace(f["mmdvmhost"], "GatewayPort=14020", "GatewayPort=41007", 1)
 		}, want: map[string]string{
 			"nxdngateway/Network/HostsFile1": "/usr/local/etc/NXDNHosts.txt", "nxdngateway/Network/HostsFile": modesDel,
-			"nxdngateway/Network/HostsFile2":   filepath.Join(pistarHostsDir, "NXDNHostsLocal.txt"),
+			"nxdngateway/Network/HostsFile2":   filepath.Join(gospotHostsDir, "NXDNHostsLocal.txt"),
 			"mmdvmhost/NXDN Network/LocalPort": "14021", "mmdvmhost/NXDN Network/GatewayPort": "14020",
 			"nxdngateway/Info/Power": "1", "nxdngateway/Info/Height": "0",
 			"nxdngateway/Remote Commands/Enable": "1", "nxdngateway/Remote Commands/Port": "6075",
@@ -784,7 +784,7 @@ func TestConfigureModesDefaults(t *testing.T) {
 		}, want: map[string]string{
 			"dapnetgateway/General/RptAddress": "127.0.0.1", "dapnetgateway/General/RptPort": "3800",
 			"dapnetgateway/General/LocalAddress": "127.0.0.1", "dapnetgateway/General/LocalPort": "4800", "dapnetgateway/General/Daemon": "0",
-			"dapnetgateway/Log/DisplayLevel": "0", "dapnetgateway/Log/FileLevel": "2", "dapnetgateway/Log/FilePath": "/var/log/pi-star",
+			"dapnetgateway/Log/DisplayLevel": "0", "dapnetgateway/Log/FileLevel": "2", "dapnetgateway/Log/FilePath": "/var/log/gospot",
 			"dapnetgateway/Log/FileRoot": "DAPNETGateway", "dapnetgateway/DAPNET/Address": "dapnet.afu.rwth-aachen.de",
 			"dapnetgateway/DAPNET/Port": "43434", "dapnetgateway/DAPNET/AuthKey": "TOPSECRET",
 			"dapnetgateway/DAPNET/SuppressTimeWhenBusy": "1", "dapnetgateway/DAPNET/Debug": "0",
@@ -794,12 +794,12 @@ func TestConfigureModesDefaults(t *testing.T) {
 		{name: "Mobile GPS defaults", edit: func(f map[string]string) {
 			f["mmdvmhost"] = strings.Replace(f["mmdvmhost"], "[Mobile GPS]\nEnable=0\nAddress=127.0.0.1\nPort=7834\n", "", 1)
 			f["ysfgateway"] = "[General]\nSuffix=RPT\n[Info]\nName=Pi-Star\n"
-			f["mobilegps"] = strings.Replace(f["mobilegps"], "FilePath=/var/log/pi-star", "FilePath=.", 1)
+			f["mobilegps"] = strings.Replace(f["mobilegps"], "FilePath=/var/log/gospot", "FilePath=.", 1)
 			f["mobilegps"] = strings.Replace(f["mobilegps"], "Daemon=0", "Daemon=1", 1)
 		}, want: map[string]string{
 			"mmdvmhost/Mobile GPS/Enable": "0", "mmdvmhost/Mobile GPS/Address": "127.0.0.1", "mmdvmhost/Mobile GPS/Port": "7834",
 			"ysfgateway/Mobile GPS/Enable": "0", "ysfgateway/Mobile GPS/Address": "127.0.0.1", "ysfgateway/Mobile GPS/Port": "7834",
-			"mobilegps/Log/FilePath": "/var/log/pi-star", "mobilegps/General/Daemon": "0",
+			"mobilegps/Log/FilePath": "/var/log/gospot", "mobilegps/General/Daemon": "0",
 		}},
 	}
 	for _, tc := range cases {

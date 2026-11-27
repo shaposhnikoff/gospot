@@ -20,7 +20,7 @@ const linkTail = 64 << 10
 
 func gatewayLogLines(root string, now time.Time) []string {
 	for _, day := range []time.Time{now, now.Add(-24 * time.Hour)} {
-		path := filepath.Join(pistarLogDir, root+"-"+day.UTC().Format("2006-01-02")+".log")
+		path := filepath.Join(gospotLogDir, root+"-"+day.UTC().Format("2006-01-02")+".log")
 		f, err := os.Open(path)
 		if err != nil {
 			continue
@@ -131,7 +131,7 @@ func ysfRoomName(linked string) string {
 	if linked == "Not Linked" || linked == "Service Not Started" {
 		return linked
 	}
-	path := filepath.Join(pistarHostsDir, "YSFHosts.txt")
+	path := filepath.Join(gospotHostsDir, "YSFHosts.txt")
 	ysfHosts.Lock()
 	defer ysfHosts.Unlock()
 	if st, err := os.Stat(path); err == nil && !st.ModTime().Equal(ysfHosts.mod) {

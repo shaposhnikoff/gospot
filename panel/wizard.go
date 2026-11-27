@@ -89,12 +89,12 @@ func wizardCredential() ([32]byte, bool) {
 	return [32]byte{}, false
 }
 
-// wizardUser is the classic Pi-Star administrator login.
-const wizardUser = "pi-star"
+// wizardUser is the administrator login (classic Pi-Star used "pi-star").
+const wizardUser = "gospot"
 
 var dashboardClient = &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
-const wizardCookie = "__Host-pistar-csrf"
+const wizardCookie = "__Host-gospot-csrf"
 const wizardConfigPath = "/manage/api/config"
 
 func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
@@ -117,7 +117,7 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		user, pass, ok := r.BasicAuth()
 		sum := sha256.Sum256([]byte(pass))
 		if !ok || user != wizardUser || subtle.ConstantTimeCompare(sum[:], password[:]) != 1 {
-			h.Set("WWW-Authenticate", `Basic realm="Pi-Star", charset="UTF-8"`)
+			h.Set("WWW-Authenticate", `Basic realm="GoSpot", charset="UTF-8"`)
 			http.Error(w, "Требуется вход", 401)
 			return
 		}
@@ -379,7 +379,7 @@ func serveWizardAsset(w http.ResponseWriter, r *http.Request, dir string) {
 
 var wizardPage = template.Must(template.New("wizard").Parse(`<!doctype html>
 <html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Настройки Pi-Star</title><main><h1>Настройки Pi-Star</h1>
+<title>Настройки GoSpot</title><main><h1>Настройки GoSpot</h1>
 {{if eq .Done "apply"}}<p role="status">Настройки применены.</p>{{else if eq .Done "rollback"}}<p role="status">Предыдущие настройки восстановлены.</p>{{end}}
 <form method="post" action="/"><input type="hidden" name="csrf" value="{{.Token}}">
 <fieldset><legend>Радиостанция</legend>

@@ -1,0 +1,147 @@
+#!/usr/bin/python3 -I
+"""Apply radio/gospot-rename.table to Pi-Star scripts and configurations.
+
+  gospot-rebrand resolve TABLE SETTINGS   print TABLE with ${KEY} resolved from
+                                          SETTINGS (KEY=value lines)
+  gospot-rebrand apply TABLE [NAME]       rewrite stdin to stdout; exit 1 when a
+                                          pistar/pi-star occurrence the table
+                                          neither renames nor allows remains
+                                          (NAME labels the messages)
+  gospot-rebrand check TABLE [NAME]       like apply, but nothing is rewritten:
+                                          stdin must already be clean
+  gospot-rebrand tools TABLE              print "OLD NEW" for every tool rule
+  gospot-rebrand name TABLE NAME          print NAME with the tool and literal
+                                          rules applied
+
+Text is processed line by line; bytes that are not UTF-8 pass through as they are.
+"""
+import re
+import sys
+
+KINDS = ("tool", "literal", "word", "delete", "allow", "allow-comment")
+LEFTOVER = re.compile(r"pistar|pi-star|pi_star", re.IGNORECASE)
+COMMENT = re.compile(r"^\s*[#;]")
+
+
+def fail(message):
+    print("gospot-rebrand: " + message, file=sys.stderr)
+    sys.exit(1)
+
+
+def read_table(path):
+    rules = []
+    with open(path, encoding="utf-8") as f:
+        for n, line in enumerate(f, 1):
+            line = line.rstrip("\n")
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 2 or fields[0] not in KINDS or (fields[0] in ("tool", "literal", "word", "delete") and len(fields) != 3):
+                fail(f"{path}:{n}: expected KIND<TAB>OLD<TAB>NEW")
+            rules.append((n, fields))
+    return rules
+
+
+def read_settings(path):
+    values = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                values[k] = v
+    return values
+
+
+def resolve(table, settings):
+    values = read_settings(settings)
+
+    def value(m):
+        if m.group(1) not in values or not values[m.group(1)]:
+            fail(f"{settings} has no {m.group(1)}")
+        return values[m.group(1)]
+
+    out = []
+    for n, fields in read_table(table):
+        if fields[0] in ("tool", "literal", "word"):
+            fields[2] = re.sub(r"\$\{([A-Z][A-Z0-9_]*)\}", value, fields[2])
+        out.append("\t".join(fields))
+    return "\n".join(out) + "\n"
+
+
+class Table:
+    def __init__(self, path):
+        rules = read_table(path)
+        for n, fields in rules:
+            if fields[0] in ("tool", "literal", "word") and "${" in fields[2]:
+                fail(f"{path}:{n}: unresolved {fields[2]} (run resolve first)")
+        self.tools = [(f[1], f[2]) for _, f in rules if f[0] == "tool"]
+        self.literals = [(f[1], f[2]) for _, f in rules if f[0] in ("tool", "literal")]
+        self.words = [(re.compile(re.escape(f[1]) + r"(?![\w/-])(?! compatible)"), f[2]) for _, f in rules if f[0] == "word"]
+        self.deletes = [(f[1], f[2]) for _, f in rules if f[0] == "delete"]
+        self.allow = [re.compile(f[1]) for _, f in rules if f[0] == "allow"]
+        self.allow_comment = [re.compile(f[1]) for _, f in rules if f[0] == "allow-comment"]
+
+    def name(self, s):
+        for old, new in self.literals:
+            s = s.replace(old, new)
+        return s
+
+    def line(self, s):
+        s = self.name(s)
+        if not COMMENT.match(s):
+            for pattern, new in self.words:
+                s = pattern.sub(new, s)
+        return s
+
+    def leftover(self, s):
+        rest = s
+        for pattern in self.allow:
+            rest = pattern.sub("", rest)
+        if COMMENT.match(rest):
+            for pattern in self.allow_comment:
+                rest = pattern.sub("", rest)
+        return LEFTOVER.search(rest)
+
+
+def main(argv):
+    if len(argv) == 4 and argv[1] == "resolve":
+        sys.stdout.write(resolve(argv[2], argv[3]))
+        return 0
+    if len(argv) == 3 and argv[1] == "tools":
+        for old, new in Table(argv[2]).tools:
+            print(old, new)
+        return 0
+    if len(argv) == 4 and argv[1] == "name":
+        print(Table(argv[2]).name(argv[3]))
+        return 0
+    if len(argv) in (3, 4) and argv[1] in ("apply", "check"):
+        table, label = Table(argv[2]), argv[3] if len(argv) == 4 else "-"
+        data = sys.stdin.buffer.read().decode("utf-8", "surrogateescape")
+        out, bad, until = [], 0, None
+        for n, line in enumerate(data.splitlines(keepends=True), 1):
+            if argv[1] == "apply":
+                if until is not None:
+                    until = None if line.rstrip("\r\n") == until else until
+                    continue
+                until = next((last for first, last in table.deletes if line.rstrip("\r\n") == first), None)
+                if until is not None:
+                    continue
+            if argv[1] == "apply":
+                line = table.line(line)
+            if table.leftover(line):
+                print(f"gospot-rebrand: {label}:{n}: not in gospot-rename.table: {line.strip()}", file=sys.stderr)
+                bad += 1
+            out.append(line)
+        if until is not None:
+            print(f"gospot-rebrand: {label}: a delete rule found no closing line {until!r}", file=sys.stderr)
+            bad += 1
+        if argv[1] == "apply":
+            sys.stdout.buffer.write("".join(out).encode("utf-8", "surrogateescape"))
+        return 1 if bad else 0
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

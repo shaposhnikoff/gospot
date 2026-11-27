@@ -24,7 +24,6 @@
   let d = $state<Dashboard | null>(null);
   let failed = $state(false);
   const dstar = $derived(dstarVisibility(d?.Controller, d?.DStarInfo, admin));
-  const year = new Date().getFullYear();
   const pairs = <T,>(items: T[] | null) => {
     const out: T[][] = [];
     for (let i = 0; i < (items?.length ?? 0); i += 2) out.push(items!.slice(i, i + 2));
@@ -34,7 +33,7 @@
   onMount(() => {
     // Workspace pages share this document; the class gives the classic body
     // rules precedence while this page is mounted.
-    document.body.classList.add('pistar-classic');
+    document.body.classList.add('gospot-classic');
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
@@ -64,7 +63,7 @@
         if (origin) operator = origin + '/';
       }).catch(() => {});
     }
-    return () => { stop = true; clearTimeout(timer); clearTimeout(sysTimer); document.body.classList.remove('pistar-classic'); };
+    return () => { stop = true; clearTimeout(timer); clearTimeout(sysTimer); document.body.classList.remove('gospot-classic'); };
   });
 
   // system.php: CPU temperature colours and `uptime -p` wording.
@@ -90,7 +89,7 @@
   });
 </script>
 
-<svelte:head><title>{d?.Callsign ?? 'Pi-Star'} - Digital Voice Dashboard</title></svelte:head>
+<svelte:head><title>GoSpot - Digital Voice Dashboard{d?.Callsign ? ` - ${d.Callsign}` : ''}</title></svelte:head>
 
 {#snippet head(local: boolean)}
   <tr>
@@ -144,8 +143,8 @@
 <div class="container" id="top">
   <div class="header">
     <div style="font-size: 8px; text-align: left; padding-left: 8px; float: left;">Hostname: {d?.Hostname ?? ''}</div>
-    <div style="font-size: 8px; text-align: right; padding-right: 8px;">Pi-Star:{d?.PiStar || 'native'} / Dashboard: {d?.Version ?? ''}</div>
-    <h1>Pi-Star Digital Voice Dashboard for {d?.Callsign ?? ''}</h1>
+    <div style="font-size: 8px; text-align: right; padding-right: 8px;">GoSpot: {d?.Version ?? ''}</div>
+    <h1>GoSpot Digital Voice Dashboard for {d?.Callsign ?? ''}</h1>
     {#if d?.Theme?.BannerH1}<h1>{d.Theme.BannerH1}</h1>{/if}
     {#if d?.Theme?.BannerExt}<p style="text-align: center; color: #ffffff;">{d.Theme.BannerExt}</p>{/if}
     <p style="padding-right: 5px; text-align: right; color: #ffffff;">
@@ -155,11 +154,13 @@
         <a href="/manage/#logs" style="color: #ffffff;">Live Logs</a> |
         <a href="/manage/#power" style="color: #ffffff;">Power</a> |
         <a href="/manage/#update" style="color: #ffffff;">Update</a> |
-        <a href="/manage/#configuration" style="color: #ffffff;">Configuration</a>
+        <a href="/manage/#configuration" style="color: #ffffff;">Configuration</a> |
+        <a href={operator + 'kiosk'} style="color: #ffffff;">Kiosk</a>
       {:else}
         <a href="/" style="color: #ffffff;">Dashboard</a> |
         <a href="/admin/" style="color: #ffffff;">Admin</a> |
-        <a href="/admin/configure.php" style="color: #ffffff;">Configuration</a>
+        <a href="/admin/configure.php" style="color: #ffffff;">Configuration</a> |
+        <a href="/kiosk" style="color: #ffffff;">Kiosk</a>
       {/if}
     </p>
   </div>
@@ -343,19 +344,18 @@
   {/if}
 
   <div class="footer">
-    Pi-Star / Pi-Star Dashboard, &copy; Andy Taylor (MW0MWZ) 2014-{year}.<br />
+    GoSpot — Pi-Star compatible.<br />
     ircDDBGateway Dashboard by Hans-J. Barthen (DL5DI),<br />
     MMDVMDash developed by Kim Huebel (DG9VH), <br />
-    Need help? Click <a style="color: #ffffff;" href="https://www.facebook.com/groups/pistarusergroup/" target="_blank" rel="noopener noreferrer">here for the Facebook Group</a><br />
-    or Click <a style="color: #ffffff;" href="https://forum.pistar.uk/" target="_blank" rel="noopener noreferrer">here to join the Support Forum</a><br />
-    Get your copy of Pi-Star from <a style="color: #ffffff;" href="http://www.pistar.uk/downloads/" target="_blank" rel="noopener noreferrer">here</a>.<br />
+    Need help? Click <a style="color: #ffffff;" href="https://github.com/shaposhnikoff/gospot/issues" target="_blank" rel="noopener noreferrer">here for the GoSpot issues</a><br />
+    Get your copy of GoSpot from <a style="color: #ffffff;" href="https://github.com/shaposhnikoff/gospot/releases" target="_blank" rel="noopener noreferrer">here</a>.<br />
   </div>
 </div>
 
 <style>
   /* css/pistar-css.php with its built-in palette */
   .container { width: 820px; text-align: left; margin: auto; border-radius: 10px; box-shadow: 3px 3px 3px #707070; background: #ffffff; }
-  :global(body.pistar-classic) { margin: 8px; font: 12px verdana, arial, sans-serif; background: var(--ps-page, #edf0f5); color: #000000; }
+  :global(body.gospot-classic) { margin: 8px; font: 12px verdana, arial, sans-serif; background: var(--ps-page, #edf0f5); color: #000000; }
   .header { background: var(--ps-banners, #dd4b39); text-decoration: none; color: var(--ps-banner-text, #ffffff); font-family: verdana, arial, sans-serif; text-align: left; padding: 5px 0; border-radius: 10px 10px 0 0; }
   .header p { margin: 12px 0; }
   .nav { float: left; margin: 0; padding: 3px; width: 160px; background: #242d31; font-weight: normal; min-height: 100%; }

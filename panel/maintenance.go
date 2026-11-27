@@ -38,13 +38,13 @@ func liveLogPath(now time.Time) string {
 	day := now.UTC().Format("2006-01-02")
 	if _, err := os.Stat(markerDStarRepeater); err == nil {
 		for _, root := range []string{"dstarrepeaterd", "DStarRepeater"} {
-			if p := filepath.Join(pistarLogDir, root+"-"+day+".log"); fileExists(p) {
+			if p := filepath.Join(gospotLogDir, root+"-"+day+".log"); fileExists(p) {
 				return p
 			}
 		}
 		return ""
 	}
-	return filepath.Join(pistarLogDir, "MMDVM-"+day+".log")
+	return filepath.Join(gospotLogDir, "MMDVM-"+day+".log")
 }
 
 type tailReply struct {
@@ -126,9 +126,9 @@ func serveMaintenance(w http.ResponseWriter, r *http.Request, run maintenanceRun
 		}
 		defer f.Close()
 		host, _ := os.ReadFile(hostnameFile)
-		name := "Pi-Star_" + filepath.Base(file)
-		if h := strings.TrimSpace(string(host)); h != "" && h != "pi-star" && !strings.ContainsAny(h, "\"/\\\r\n") {
-			name = "Pi-Star_" + h + "_" + filepath.Base(file)
+		name := "GoSpot_" + filepath.Base(file)
+		if h := strings.TrimSpace(string(host)); h != "" && h != "gospot" && !strings.ContainsAny(h, "\"/\\\r\n") {
+			name = "GoSpot_" + h + "_" + filepath.Base(file)
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
@@ -212,6 +212,6 @@ func maintenancePost(w http.ResponseWriter, r *http.Request, out any) bool {
 var updateRunning = func(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	out, _ := runDiagnostic(ctx, "systemctl", "is-active", "pistar-native-update.service")
+	out, _ := runDiagnostic(ctx, "systemctl", "is-active", "gospot-native-update.service")
 	return strings.TrimSpace(string(out)) == "active"
 }

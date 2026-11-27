@@ -1,5 +1,5 @@
 #!/bin/sh
-# pistar-conf-merge CONF DEFAULT: append to a locally edited pistar.conf the
+# gospot-conf-merge CONF DEFAULT: append to a locally edited gospot.conf the
 # settings a newer package introduced (KEY=value lines of DEFAULT whose KEY is
 # missing from CONF). Existing lines are never changed; prints the added keys.
 set -eu
@@ -7,5 +7,5 @@ conf=$1 default=$2
 missing=$(awk -F= 'NR == FNR { if ($0 ~ /^[A-Z][A-Z0-9_]*=/) have[$1] = 1; next }
                   /^[A-Z][A-Z0-9_]*=/ && !($1 in have)' "$conf" "$default")
 [ -n "$missing" ] || exit 0
-printf '\n# Added by a pistar-dashboard upgrade: new settings with their packaged defaults.\n%s\n' "$missing" >>"$conf"
-printf '%s\n' "$missing" | cut -d= -f1 | sed 's/^/pistar-dashboard: added setting /'
+printf '\n# Added by a gospot upgrade: new settings with their packaged defaults.\n%s\n' "$missing" >>"$conf"
+printf '%s\n' "$missing" | cut -d= -f1 | sed 's/^/gospot: added setting /'

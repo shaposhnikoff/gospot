@@ -1,18 +1,18 @@
 # Бэклог дашборда
 
-Статусы и результаты ведутся только в [GitHub Issues](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues).
+Статусы и результаты ведутся только в [GitHub Issues](https://github.com/shaposhnikoff/gospot/issues).
 
-- [#1 — Полный перенос без PHP](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/1)
-- [#2 — Нативная сборка и пакет](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/2)
-- [#3 — Инвентаризация операций](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/3)
-- [#4 — Configuration, включая CFG-01](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/4)
-- [#5 — Expert Quick Edit](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/5)
-- [#6 — Full Edit и ключи](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/6)
-- [#7 — Мониторинг и сети, включая BM-01](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/7)
-- [#8 — Wi-Fi и Auto AP](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/8)
-- [#9 — Диагностика и архивы](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/9)
-- [#10 — Tools и обслуживание](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/10)
-- [#11 — Полная приёмка и пилот](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/11)
+- [#1 — Полный перенос без PHP](https://github.com/shaposhnikoff/gospot/issues/1)
+- [#2 — Нативная сборка и пакет](https://github.com/shaposhnikoff/gospot/issues/2)
+- [#3 — Инвентаризация операций](https://github.com/shaposhnikoff/gospot/issues/3)
+- [#4 — Configuration, включая CFG-01](https://github.com/shaposhnikoff/gospot/issues/4)
+- [#5 — Expert Quick Edit](https://github.com/shaposhnikoff/gospot/issues/5)
+- [#6 — Full Edit и ключи](https://github.com/shaposhnikoff/gospot/issues/6)
+- [#7 — Мониторинг и сети, включая BM-01](https://github.com/shaposhnikoff/gospot/issues/7)
+- [#8 — Wi-Fi и Auto AP](https://github.com/shaposhnikoff/gospot/issues/8)
+- [#9 — Диагностика и архивы](https://github.com/shaposhnikoff/gospot/issues/9)
+- [#10 — Tools и обслуживание](https://github.com/shaposhnikoff/gospot/issues/10)
+- [#11 — Полная приёмка и пилот](https://github.com/shaposhnikoff/gospot/issues/11)
 
 ### CFG-01
 

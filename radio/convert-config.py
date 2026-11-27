@@ -117,7 +117,7 @@ def gateway(text, log_dir):
 
 def write(path, data, like):
     st = os.stat(like)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".pistar-")
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".gospot-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(data)

@@ -1,7 +1,7 @@
 <script lang="ts">
   // admin/power.php: Reboot / Shutdown with confirmation and CSRF.
   import { onMount } from 'svelte';
-  import PiStarFrame from './PiStarFrame.svelte';
+  import GoSpotFrame from './GoSpotFrame.svelte';
   import { operatorOrigin } from './runtime';
   import reboot from './images/reboot.png';
   import shutdown from './images/shutdown.png';
@@ -21,7 +21,7 @@
     if (!confirm('Are you sure?')) return;
     error = '';
     const r = await fetch('/manage/api/power', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf }, body: JSON.stringify({ action }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf }, body: JSON.stringify({ action }),
     }).catch(() => null);
     if (!r || r.status !== 202) {
       error = r ? (await r.text()).trim() : 'Could not reach the board.';
@@ -38,7 +38,7 @@
   }
 </script>
 
-<PiStarFrame title="Power" links={['Dashboard', 'Admin', 'Update', 'Backup/Restore', 'Configuration']}>
+<GoSpotFrame title="Power" links={['Dashboard', 'Admin', 'Update', 'Backup/Restore', 'Configuration']}>
   <table width="100%">
     <tbody>
       <tr><th colspan="2">Power</th></tr>
@@ -59,4 +59,4 @@
       {/if}
     </tbody>
   </table>
-</PiStarFrame>
+</GoSpotFrame>

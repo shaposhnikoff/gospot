@@ -34,7 +34,7 @@
     if (!modem) return;
     if (!confirm('This will flash the modem firmware. Are you sure?')) return;
     const r = await fetch('/manage/api/expert/fw', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf }, body: JSON.stringify({ modem }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf }, body: JSON.stringify({ modem }),
     }).catch(() => null);
     if (!r || r.status !== 202) { error = r ? (await r.text()).trim() : 'No response from the board'; return; }
     offset = 0; text = 'Starting FW Upgrade, please wait...\n'; started = true;

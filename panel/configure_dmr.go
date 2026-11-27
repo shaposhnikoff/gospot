@@ -33,7 +33,7 @@ var dmrHostSplit = regexp.MustCompile(`\s+`)
 // columns read as "". File order is kept. hostsFile() is not used because it
 // trims leading whitespace and drops short lines, which the page does not.
 func dmrHostList() []dmrHost {
-	rows, _ := cachedHostFile("dmr-hosts", filepath.Join(pistarHostsDir, "DMR_Hosts.txt"), parseDMRHosts)
+	rows, _ := cachedHostFile("dmr-hosts", filepath.Join(gospotHostsDir, "DMR_Hosts.txt"), parseDMRHosts)
 	return cloneRows(rows)
 }
 

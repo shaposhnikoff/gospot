@@ -7,7 +7,7 @@ import { auditNative } from './audit-native.mjs';
 import { packageNative, readSettings } from './package-native.mjs';
 
 function fixture(context) {
-  const root = mkdtempSync(join(tmpdir(), 'pistar-native-'));
+  const root = mkdtempSync(join(tmpdir(), 'gospot-native-'));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const dist = join(root, 'dist');
   mkdirSync(dist);
@@ -21,7 +21,7 @@ test('native package needs only frontend assets and preserves the demo input', c
   const release = packageNative(setup);
   const ui = join(release, 'ui');
   assert.equal(readFileSync(join(ui, 'index.html'), 'utf8'), '<html>native</html>');
-  assert.deepEqual(JSON.parse(readFileSync(join(ui, 'runtime.json'))), { backend: 'pistar-go', wizardPort: Number(readSettings().MANAGEMENT_PORT) });
+  assert.deepEqual(JSON.parse(readFileSync(join(ui, 'runtime.json'))), { backend: 'gospot-go', wizardPort: Number(readSettings().MANAGEMENT_PORT) });
   assert.equal(JSON.parse(readFileSync(join(setup.dist, 'runtime.json'))).backend, 'demo');
   assert.equal(statSync(join(ui, 'index.html')).mode & 0o777, 0o644);
   assert.equal(auditNative(release), 2);

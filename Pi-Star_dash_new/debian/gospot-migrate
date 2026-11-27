@@ -1,0 +1,202 @@
+#!/bin/sh
+# gospot-migrate [ROOT]: one-time takeover of a pistar-dashboard installation
+# by the gospot package, run by postinst after the new accounts exist and
+# before the services start. ROOT (default /) prefixes every path, so the
+# test runs it on a fixture tree.
+#
+#   /etc/pistar-dashboard/pistar.conf -> /etc/gospot/gospot.conf: the new
+#       packaged file with the user's values for keys that still exist (old
+#       key names map PISTAR_* -> GOSPOT_*, PISTAR_BINARIES_* ->
+#       REFERENCE_BINARIES_*); a value equal to the old packaged default takes
+#       the new default; build-time settings keep the new default.
+#   WIZARD_CONFIG_DIR (admin password, TLS key and certificate), the helper
+#       state directory and the BrandMeister cache: copied with modes, times
+#       and owners; files owned by the old service accounts move to the new
+#       ones. Nothing in the old locations is changed or removed.
+#   API key files owned by the old admin account: owner moved to the new one.
+#   The Wi-Fi country modprobe file: renamed to the new name.
+#   Old pistar-panel / pistar-wizard / psdash-stage units: stopped and
+#       disabled, so the gospot units can take their ports.
+#
+# The old names below exist only for this migration. Output names files and
+# keys, never their contents. A marker in the new state directory makes later
+# runs a no-op, so edits made to the new settings file are never overwritten.
+set -eu
+umask 077
+root=${1:-/}
+root=${root%/}
+here=$(cd "$(dirname "$0")" && pwd)
+new_default=${GOSPOT_MIGRATE_NEW_DEFAULT:-$here/gospot.conf.default}
+old_default=${GOSPOT_MIGRATE_OLD_DEFAULT:-$here/pistar-dashboard.conf.default}
+accounts=${GOSPOT_MIGRATE_ACCOUNTS:-pistar-wizard:gospot-wizard pistar-panel:gospot-panel psdash-stage:gospot-stage}
+legacy_units="pistar-panel.service pistar-wizard.service psdash-stage.service"
+if [ -n "${GOSPOT_MIGRATE_SYSTEMCTL+set}" ]; then
+    systemctl=$GOSPOT_MIGRATE_SYSTEMCTL
+elif [ -z "$root" ] && [ -d /run/systemd/system ]; then
+    systemctl=systemctl
+else
+    systemctl=
+fi
+old_conf=$root/etc/pistar-dashboard/pistar.conf
+new_conf=$root/etc/gospot/gospot.conf
+# Settings that are compiled into the packages (unit files, drop-ins, paths
+# file): a local value cannot take effect, so the new default always wins.
+build_time="DASHBOARD_LIB_DIR DASHBOARD_UI_DIR DASHBOARD_BM_STATE_DIR WIZARD_CONFIG_DIR DASHBOARD_ADMIN_USER UNIT_WIZARD PANEL_PORT MANAGEMENT_PORT OPERATOR_PORT RADIO_SHARE_DIR SYSTEMD_UNIT_DIR UNIT_GOSPOT_WATCHDOG UNIT_GOSPOT_REMOTE"
+# Settings that name an existing account on this board: always kept.
+board_data="GOSPOT_LINUX_USER"
+
+say() { printf 'gospot-migrate: %s\n' "$*"; }
+val() { [ -f "$1" ] && awk -v k="$2" 'index($0, k "=") == 1 { print substr($0, length(k) + 2); exit }' "$1"; }
+newv() { val "$new_conf" "$1"; }
+# The pistar-dashboard value of a setting (its old name), from the old
+# conffile, else the old packaged default.
+oldv() {
+    v=$(val "$old_conf" "$1" || true)
+    [ -n "$v" ] || v=$(val "$old_default" "$1" || true)
+    printf '%s' "$v"
+}
+
+test -f "$new_conf"
+test -f "$new_default" && test -f "$old_default"
+state=$root$(newv DASHBOARD_STATE_DIR)
+marker=$state/.migrated-from-pistar-dashboard
+if [ -e "$marker" ]; then exit 0; fi
+
+# --- settings file -------------------------------------------------------------
+if [ -f "$old_conf" ]; then
+    tmp=$(mktemp "$new_conf.XXXXXX")
+    awk -v forced=" $build_time " -v keep=" $board_data " -v report="$tmp.report" '
+        FILENAME == ARGV[1] || FILENAME == ARGV[2] {
+            if ($0 !~ /^[A-Z][A-Z0-9_]*=/) next
+            k = substr($0, 1, index($0, "=") - 1); v = substr($0, index($0, "=") + 1)
+            if (FILENAME == ARGV[1]) od[k] = v; else oc[k] = v
+            next
+        }
+        function oldname(k,   o) {
+            if (k in oc) return k
+            o = k
+            if (sub(/^REFERENCE_BINARIES_/, "PISTAR_BINARIES_", o) || sub(/^GOSPOT_/, "PISTAR_", o) || sub(/_GOSPOT_/, "_PISTAR_", o)) return o
+            return k
+        }
+        $0 ~ /^[A-Z][A-Z0-9_]*=/ {
+            k = substr($0, 1, index($0, "=") - 1); v = substr($0, index($0, "=") + 1)
+            o = oldname(k)
+            if (o in oc) {
+                used[o] = 1; u = oc[o]
+                if (index(keep, " " k " ")) { print k "=" u; if (u != v) print "kept local " k >report; next }
+                if ((o in od) && u == od[o]) { print; next }
+                if (index(forced, " " k " ")) { print; if (u != v) print "ignored local " k " (build-time setting, packaged value used)" >report; next }
+                print k "=" u
+                if (u != v) print "kept local " k >report
+                next
+            }
+        }
+        { print }
+        END { for (o in oc) if (!(o in used)) print "dropped " o " (no longer used)" >report }
+    ' "$old_default" "$old_conf" "$new_default" >"$tmp"
+    if [ -f "$tmp.report" ]; then sort "$tmp.report" | while read -r line; do say "$line"; done; fi
+    rm -f "$tmp.report"
+    if cmp -s "$tmp" "$new_conf"; then
+        rm -f "$tmp"
+    else
+        chmod 644 "$tmp"
+        mv "$tmp" "$new_conf"
+        say "migrated ${old_conf#"$root"} -> ${new_conf#"$root"}"
+    fi
+fi
+
+# --- ownership -----------------------------------------------------------------
+# map_owner PATH: files under PATH owned by an old service account (or its
+# group) move to the matching new account.
+map_owner() {
+    for pair in $accounts; do
+        from=${pair%%:*} to=${pair#*:}
+        if getent passwd "$from" >/dev/null && getent passwd "$to" >/dev/null; then
+            find "$1" -user "$from" -exec chown -h "$to" {} +
+        fi
+        if getent group "$from" >/dev/null && getent group "$to" >/dev/null; then
+            find "$1" -group "$from" -exec chgrp -h "$to" {} +
+        fi
+    done
+}
+
+# copy_new SRC DST: copy one file unless DST exists.
+copy_new() {
+    if [ -e "$2" ]; then say "kept existing ${2#"$root"}"; return; fi
+    cp -p "$1" "$2"
+    map_owner "$2"
+    say "copied ${1#"$root"} -> ${2#"$root"}"
+}
+
+# --- wizard credentials ----------------------------------------------------------
+ow=$root$(oldv WIZARD_CONFIG_DIR) nw=$root$(newv WIZARD_CONFIG_DIR)
+if [ -d "$ow" ] && [ "$ow" != "$nw" ]; then
+    if [ ! -d "$nw" ]; then
+        install -d -m "$(stat -c %a "$ow")" "$nw"
+    fi
+    for f in "$ow"/* "$ow"/.[!.]*; do
+        [ -f "$f" ] || continue
+        case ${f##*/} in tls-key.pem|tls-cert.pem) continue ;; esac
+        copy_new "$f" "$nw/${f##*/}"
+    done
+    # The TLS key and certificate belong together: copy both or neither.
+    if [ -f "$ow/tls-key.pem" ] && [ -f "$ow/tls-cert.pem" ]; then
+        if [ ! -e "$nw/tls-key.pem" ] && [ ! -e "$nw/tls-cert.pem" ]; then
+            copy_new "$ow/tls-key.pem" "$nw/tls-key.pem"
+            copy_new "$ow/tls-cert.pem" "$nw/tls-cert.pem"
+        else
+            say "kept existing TLS key pair in ${nw#"$root"}"
+        fi
+    fi
+fi
+
+# --- state directories -----------------------------------------------------------
+copy_tree() {
+    o=$root$1 n=$root$2
+    [ -d "$o" ] && [ "$o" != "$n" ] || return 0
+    if [ -e "$n" ]; then
+        # Entries already present in the new directory win (no cp -n: its
+        # exit status differs between coreutils releases).
+        (cd "$o" && find . -mindepth 1 -print) | while IFS= read -r entry; do
+            if [ ! -e "$n/$entry" ] && [ ! -L "$n/$entry" ]; then cp -a "$o/$entry" "$n/$entry"; fi
+        done
+    else
+        install -d -m 755 "$(dirname "$n")"
+        cp -a "$o" "$n"
+    fi
+    map_owner "$n"
+    say "copied ${o#"$root"}/ -> ${n#"$root"}/"
+}
+copy_tree "$(oldv DASHBOARD_STATE_DIR)" "$(newv DASHBOARD_STATE_DIR)"
+copy_tree "$(oldv DASHBOARD_BM_STATE_DIR)" "$(newv DASHBOARD_BM_STATE_DIR)"
+
+# --- API key files (paths unchanged, owner was the old admin account) ------------
+for key in BM_API_KEY_FILE DAPNET_API_KEY_FILE TGIF_API_KEY_FILE; do
+    f=$root$(newv "$key")
+    if [ -f "$f" ]; then map_owner "$f"; fi
+done
+
+# --- Wi-Fi country file --------------------------------------------------------------
+o=$root$(oldv WIFI_REGDOM_CONF) n=$root$(newv WIFI_REGDOM_CONF)
+if [ -f "$o" ] && [ "$o" != "$n" ]; then
+    if [ -e "$n" ]; then
+        say "left ${o#"$root"} in place: ${n#"$root"} exists"
+    else
+        mv "$o" "$n"
+        say "renamed ${o#"$root"} -> ${n#"$root"}"
+    fi
+fi
+
+# --- old units -------------------------------------------------------------------------
+if [ -n "$systemctl" ]; then
+    for unit in $legacy_units; do
+        if [ "$($systemctl show -p LoadState --value "$unit" 2>/dev/null || true)" = loaded ]; then
+            $systemctl disable --now "$unit" >/dev/null 2>&1 || say "could not stop $unit"
+            say "stopped and disabled $unit"
+        fi
+    done
+fi
+
+install -d -m 755 "$state"
+: >"$marker"
+chmod 644 "$marker"

@@ -13,10 +13,10 @@ import (
 // Configuration page, spec part 05 (docs/configure-spec/05-firewall-wifi-password.md):
 // "Firewall Configuration" (configure.php l.5581-5664), "Wireless Configuration"
 // with the Auto AP PSK form (l.5667-5694) and "Remote Access Password"
-// (l.5696-5711). Every change goes through the pistar-configure system ops
+// (l.5696-5711). Every change goes through the gospot-configure system ops
 // upnp_ports, autoap, upnp, autoap_psk and password.
 
-// cfgSys holds the pistar.conf paths this file reads. applySettings installs
+// cfgSys holds the gospot.conf paths this file reads. applySettings installs
 // them through setCfgSystemPaths; while unset, the files count as missing
 // (firewall rows show the classic missing-file defaults, Auto AP is hidden).
 var cfgSys struct {
@@ -34,12 +34,12 @@ func setCfgSystemPaths(s settings) error {
 		}
 		return v
 	}
-	upnp, cron, off, hostapd := path("PISTAR_UPNP_SCRIPT"), path("CRONTAB_FILE"), path("HOSTAP_OFF_FLAG"), path("HOSTAPD_CONF")
+	upnp, cron, off, hostapd := path("GOSPOT_UPNP_SCRIPT"), path("CRONTAB_FILE"), path("HOSTAP_OFF_FLAG"), path("HOSTAPD_CONF")
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid settings: %s", strings.Join(errs, "; "))
 	}
 	cfgSys.upnpScript, cfgSys.crontab, cfgSys.hostapOff, cfgSys.hostapdConf = upnp, cron, off, hostapd
-	cfgSys.linuxUser = s["PISTAR_LINUX_USER"]
+	cfgSys.linuxUser = s["GOSPOT_LINUX_USER"]
 	return nil
 }
 
@@ -83,7 +83,7 @@ func sysFileExists(path string) bool {
 }
 
 // hostapdInstalled decides whether the Auto AP row is shown. Deviation: the
-// classic page tests /etc/default/hostapd (l.5637), which is not a pistar.conf
+// classic page tests /etc/default/hostapd (l.5637), which is not a gospot.conf
 // setting; HOSTAPD_CONF is the file pistar-ap.service actually needs. A
 // permission error still means the file is there.
 func hostapdInstalled() bool {
@@ -110,7 +110,7 @@ type fwState struct {
 	public map[string]bool // port -> Public
 	autoAP bool            // Auto AP visible
 	apOn   bool            // HOSTAP_OFF_FLAG absent
-	upnpOn bool            // pistar-upnp.service cron line not commented
+	upnpOn bool            // gospot-upnp.service cron line not commented
 }
 
 func readFwState() fwState {
@@ -120,7 +120,7 @@ func readFwState() fwState {
 	}
 	st.autoAP = hostapdInstalled()
 	st.apOn = !sysFileExists(cfgSys.hostapOff)
-	st.upnpOn = !sysFirstCharHash(cfgSys.crontab, "pistar-upnp.service")
+	st.upnpOn = !sysFirstCharHash(cfgSys.crontab, "gospot-upnp.service")
 	return st
 }
 
@@ -170,7 +170,7 @@ func buildFirewall(c *cfgContext) *cfgSection {
 
 // applyFirewall emits an op only for a value that differs from the files
 // (spec §1.3: equivalent to the classic re-apply, except that the classic
-// uPNP=ON also restarts pistar-upnp.service on every Apply). Unknown values
+// uPNP=ON also restarts gospot-upnp.service on every Apply). Unknown values
 // are refused; the classic page silently ignored them.
 func applyFirewall(c *cfgContext, form cfgForm, p *cfgPlan) error {
 	st := readFwState()
@@ -288,13 +288,13 @@ func applyWifi(c *cfgContext, form cfgForm, p *cfgPlan) error {
 }
 
 // Remote Access Password. The admin UI uses Basic auth with the fixed user
-// "pi-star" (no nginx/.htpasswd); the helper rewrites the dashboard
-// credential, sets PISTAR_LINUX_USER through chpasswd and restarts the HTTPS
+// wizardUser (no nginx/.htpasswd); the helper rewrites the dashboard
+// credential, sets GOSPOT_LINUX_USER through chpasswd and restarts the HTTPS
 // service 2 s later.
 func buildAdminPass(c *cfgContext) *cfgSection {
 	user := cfgSys.linuxUser
 	if user == "" {
-		user = "pi-star"
+		user = wizardUser
 	}
 	return &cfgSection{ID: "adminpass", Title: "Remote Access Password", Form: "adminPassForm", Rows: []cfgRow{
 		{Cells: []cfgCell{
@@ -302,7 +302,7 @@ func buildAdminPass(c *cfgContext) *cfgSection {
 			{Header: true, Colspan: 3, Label: "Password"},
 		}},
 		{ID: "adminPassword", Cells: []cfgCell{
-			{Align: "left", Style: "font-weight: bold;", Label: "pi-star"},
+			{Align: "left", Style: "font-weight: bold;", Label: wizardUser},
 			td(static("Password:"), cfgControl{Kind: "password", Name: "adminPassword", Attrs: map[string]string{"size": "20", "label": "Password"}},
 				static("Confirm Password:"), cfgControl{Kind: "password", Name: "adminPasswordConfirm", Attrs: map[string]string{"label": "Confirm Password"}}),
 			{Align: "right", Controls: []cfgControl{{Kind: "button", Text: "Set Password", Attrs: map[string]string{"action": "adminPassForm"}}}},

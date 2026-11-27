@@ -18,7 +18,7 @@ import (
 // dstarrepeater/gateway_software_config.php, active_reflector_links.php,
 // css_connections.php with active_starnet_groups.php, last_herd.php and
 // local_tx.php. ircDDBGateway writes Links.log, STARnet.log and Headers.log
-// into PISTAR_LOG_DIR (config/ircddblocal.php); each file is parsed again only
+// into GOSPOT_LOG_DIR (config/ircddblocal.php); each file is parsed again only
 // when its size or modification time changes, Headers.log incrementally.
 
 type dstarGateway struct {
@@ -472,7 +472,7 @@ func newestHeaders(m map[string]dstarHeader, limit int) []dstarHeardRow {
 	return out
 }
 
-func dstarLogPath(name string) string { return filepath.Join(pistarLogDir, name) }
+func dstarLogPath(name string) string { return filepath.Join(gospotLogDir, name) }
 
 // dstarDashboard returns the D-Star panels for the configured controller, or
 // nil when the classic page shows none.

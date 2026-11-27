@@ -1,0 +1,76 @@
+# GoSpot rename table: how gospot-radio rewrites the Pi-Star tools, service
+# handlers and default configurations it ships (radio/gospot-rebrand), at
+# package build time (Pi-Star_Binaries_sbin files) and at seed time
+# (config_clean.zip members). Explicit on purpose: anything this table does
+# not rename and does not allow fails the build.
+#
+# One rule per line, fields separated by a single TAB: KIND OLD NEW.
+# ${KEY} in NEW is the value of KEY in Pi-Star_dash_new/gospot.conf, resolved
+# when the package is built.
+#   tool           OLD, a file of Pi-Star_Binaries_sbin, is installed as NEW;
+#                  OLD is also replaced by NEW wherever it occurs.
+#   literal        OLD is replaced by NEW everywhere (rules apply in this order,
+#                  so longer paths come first).
+#   word           OLD is replaced by NEW outside comment lines (# or ;) where it
+#                  stands as a word: not followed by a letter, digit, "_", "-"
+#                  or "/", and not by " compatible".
+#   delete         the lines from one equal to OLD through the next one equal
+#                  to NEW are removed.
+#   allow          OLD is a regular expression for an occurrence that stays.
+#   allow-comment  OLD is a regular expression that stays on comment lines only
+#                  (the attribution banners of the Pi-Star scripts).
+
+# Pi-Star sbin tools shipped by gospot-radio (HostFilesUpdate.sh and the
+# *.service handlers keep their Pi-Star names: they carry no "pistar").
+tool	pistar-bmapi	gospot-bmapi
+tool	pistar-dapnetapi	gospot-dapnetapi
+tool	pistar-tgifapi	gospot-tgifapi
+tool	pistar-link	gospot-link
+tool	pistar-ysflink	gospot-ysflink
+tool	pistar-p25link	gospot-p25link
+tool	pistar-nxdnlink	gospot-nxdnlink
+tool	pistar-findmodem	gospot-findmodem
+tool	pistar-mmdvmcal	gospot-mmdvmcal
+tool	pistar-mmdvmhost-module	gospot-mmdvmhost-module
+tool	pistar-mmdvmremote	gospot-mmdvmremote
+tool	pistar-modemupgrade	gospot-modemupgrade
+tool	pistar-jittertest	gospot-jittertest
+tool	pistar-sendcw	gospot-sendcw
+tool	pistar-motdgen	gospot-motdgen
+tool	pistar-firewall	gospot-firewall
+tool	pistar-expand	gospot-expand
+
+# Layout: logs, release file, locks, generated MOTD.
+literal	/var/log/pi-star/pi-star_modemflash.log	${MODEM_FLASH_LOG}
+literal	/var/log/pi-star/pi-star_icmptest.log	${GOSPOT_JITTER_LOG}
+literal	/var/log/pi-star	${GOSPOT_LOG_DIR}
+literal	/etc/pistar-release	${GOSPOT_RELEASE_FILE}
+literal	/var/lock/pistar-jitter.lock	/var/lock/gospot-jitter.lock
+literal	/etc/update-motd.d/50-pistar-motd	/etc/update-motd.d/50-gospot-motd
+# Units and programs the scripts call; the display helpers are not shipped,
+# the handlers only call them when present.
+literal	pistar-watchdog	gospot-watchdog
+literal	pistar-nextiontext.py	gospot-nextiontext.py
+literal	pistar-oledtext.py	gospot-oledtext.py
+# config_clean.zip member of the keeper remote configuration (CONF_GOSPOT_REMOTE).
+literal	pistar-remote	gospot-remote
+# Shell variables.
+literal	pistarCurVersion	gospotVersion
+literal	pistarHardware	gospotHardware
+# Text shown to the operator.
+literal	Pi-Star built by Andy Taylor (MW0MWZ), pi-star tools all start "pistar-".	GoSpot is Pi-Star compatible; its tools start "gospot-".
+literal	Pi-Star built by Andy Taylor (MW0MWZ), pi-star tools all start \"pistar-\".	GoSpot is Pi-Star compatible; its tools start \"gospot-\".
+literal	Pi-Star Remote	GoSpot Remote
+literal	Pi-Star Keeper	GoSpot Keeper
+word	Pi-Star	GoSpot
+
+# platformDetect.sh (the dashboard runs it): a Pi-Star 3.x self-update
+# workaround that pulls the Pi-Star sbin git tree; it never applies here.
+delete	# workaround to check if user stuck on pistar-update v3.3 or v3.4, if yes then force update now	fi
+
+# Data sources and attributions that stay.
+allow	https?://(www\.|forum\.)?pistar\.uk[^\s"']*
+allow	"Pi-Star_\$\{gospotVersion\}"
+allow	https?://www\.mw0mwz\.co\.uk/pi-star/?
+allow	Pi-Star compatible
+allow-comment	Pi-Star(?![\w/-])

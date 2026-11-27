@@ -1,0 +1,24 @@
+[Unit]
+Description=GoSpot status panel
+After=network.target
+
+[Service]
+User=gospot-panel
+Group=gospot-panel
+SupplementaryGroups=systemd-journal
+ExecStart=@EXECSTART@
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

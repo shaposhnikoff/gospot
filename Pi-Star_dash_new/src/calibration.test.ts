@@ -16,7 +16,7 @@ test('scan reads MMDVMCal output like calibration.php', () => {
   assert.equal(scan('BER Test Mode (FEC) for NXDN\r\nBER Test Mode (FEC) for YSF\r\n').mode, 'NXDN');
   assert.equal(scan('TX frequency: 435000050\r\nNew frequency: 435000100 Hz\r\n').frequency, 435000100);
   assert.equal(scan('New frequency step: 50 Hz\r\nEnter frequency (current 435000000 Hz):').frequency, null);
-  assert.equal(scan('Starting Pi-Star Services...\r\nFinnished...\r\n').finished, true);
+  assert.equal(scan('Starting GoSpot Services...\r\nFinnished...\r\n').finished, true);
   const ber = scan('D-Star audio FEC BER % (errs): 2.083% (1/48)\r\nD-Star audio FEC BER % (errs): 0.000% (0/48)\r\nD-Star voice end received, total frames: 2');
   assert.deepEqual([ber.frames, ber.errors, ber.bits, ber.eot], [2, 1, 96, true]);
 });

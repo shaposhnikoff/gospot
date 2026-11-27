@@ -99,18 +99,18 @@
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>
 {/snippet}
 
-<svelte:head><title>Pi-Star · Пульт оператора</title><meta name="theme-color" content="#22202e" /></svelte:head>
+<svelte:head><title>GoSpot · Пульт оператора</title><meta name="theme-color" content="#22202e" /></svelte:head>
 
 <header class="masthead"><div class="mast-inner">
-  <div class="brand"><span class="brand-mark">{@render icon('radio', 23)}</span><strong>Pi-Star</strong><span class="brand-divider"></span><span class="brand-sub">Пульт оператора</span></div>
-  <span class="demo-badge"><i></i>{preview ? 'Тестовый стенд · без эфира' : installed ? 'Pi-Star' : runtime === 'pi' ? `В эфире · ${snapshot?.Node || 'Raspberry Pi'}` : runtime === 'demo' ? 'Локальный прототип' : 'Подключение'}</span>
+  <div class="brand"><span class="brand-mark">{@render icon('radio', 23)}</span><strong>GoSpot</strong><span class="brand-divider"></span><span class="brand-sub">Пульт оператора</span></div>
+  <span class="demo-badge"><i></i>{preview ? 'Тестовый стенд · без эфира' : installed ? 'GoSpot' : runtime === 'pi' ? `В эфире · ${snapshot?.Node || 'Raspberry Pi'}` : runtime === 'demo' ? 'Локальный прототип' : 'Подключение'}</span>
 </div></header>
 
 <main>
   <nav class="workspace-tabs" aria-label="Рабочая область">
     {#if installed}<a href="/">Статус узла</a>{:else}<a href="#overview" aria-current={view === 'overview' ? 'page' : undefined}>Обзор узла</a>{/if}
     {#if installed || management}<a href="/admin/configure.php" data-testid="open-radio-settings">Настроить MMDVMHost</a>{/if}
-    <a href="#console" aria-current={view === 'console' ? 'page' : undefined}>Все функции Pi-Star</a>
+    <a href="#console" aria-current={view === 'console' ? 'page' : undefined}>Все функции GoSpot</a>
     <a href="./hoseline.html">Слушать TG · Hoseline</a>
   </nav>
   {#if view === 'console'}
@@ -182,6 +182,6 @@
   {#if runtime === 'demo'}<section class="simulation" aria-label="Демонстрация"><div class="sim-info"><span class="tile-icon">{@render icon('flask', 19)}</span><div><strong>Симулятор узла</strong><p>Локальные демоданные · без подключения к эфиру</p></div></div>
     <label for="scenario">Сценарий</label><div class="select-wrap"><select id="scenario" data-testid="scenario" value={scenario} onchange={(e) => { scenario = e.currentTarget.value as Scenario; void refresh(); }}>{#each scenarios as item}<option value={item.id}>{item.label}</option>{/each}</select>{@render icon('chevron', 15)}</div>
   </section>{/if}
-  <footer><span>Pi-Star <b>/</b> Пульт оператора</span><span data-testid="last-success">{@render icon('clock', 13)}Последнее обновление: <time datetime={snapshot?.UpdatedAt} title={date(snapshot?.UpdatedAt)}>{time(snapshot?.UpdatedAt)}</time></span></footer>
+  <footer><span>GoSpot <b>/</b> Пульт оператора</span><span data-testid="last-success">{@render icon('clock', 13)}Последнее обновление: <time datetime={snapshot?.UpdatedAt} title={date(snapshot?.UpdatedAt)}>{time(snapshot?.UpdatedAt)}</time></span></footer>
   {/if}
 </main>

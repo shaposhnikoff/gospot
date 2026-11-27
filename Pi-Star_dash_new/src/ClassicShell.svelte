@@ -14,9 +14,9 @@
     group.routes.filter(route => route.path)) : []);
 </script>
 
-<nav lang="ru" aria-label="Панель оператора Pi-Star">
+<nav lang="ru" aria-label="Панель оператора GoSpot">
   <div class="bar">
-    <a class="brand" href="/operator/">Pi-Star <span>· Оператор</span></a>
+    <a class="brand" href="/operator/">GoSpot <span>· Оператор</span></a>
     <div class="links">
       {#each links as [path, label]}
         <a href={path} aria-current={pathname === path ? 'page' : undefined}>{label}</a>
@@ -25,7 +25,7 @@
     <details>
       <summary>Поиск функций</summary>
       <div class="panel">
-        <label for="search">Найти функцию Pi-Star</label>
+        <label for="search">Найти функцию GoSpot</label>
         <input id="search" type="search" bind:value={query} placeholder="Wi-Fi, DMR, журнал…" />
         {#if query.trim()}
           <small role="status">Найдено: {results.length}</small>

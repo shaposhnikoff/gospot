@@ -19,21 +19,21 @@ import (
 )
 
 // D-Star Link Manager of the classic admin page (dstarrepeater/link_manager.php)
-// and its PiStar-Keeper logbook. The classic page runs
+// and its GoSpot-Keeper logbook. The classic page runs
 //
 //	sudo remotecontrold "<module>" link never "<reflector>"
 //	sudo remotecontrold "<module>" unlink
 //
 // with the password in /root/.Remote Control. Here remotecontrold (in
-// PISTAR_BIN_DIR) runs without root and without a shell: its argv carries only
+// GOSPOT_BIN_DIR) runs without root and without a shell: its argv carries only
 // the module and reflector, and its HOME is a private temporary directory whose
 // ".Remote Control" holds the ircDDBGateway remote port and password from
 // /etc/ircddbgateway (remotePort, remotePassword). The password never reaches
 // the browser, the argv or a log. Dispatch only after wizardHandler's TLS and
 // Basic Auth checks.
 
-// Set from PISTAR_KEEPER_LOG by applySettings.
-var pistarKeeperLog string
+// Set from GOSPOT_KEEPER_LOG by applySettings.
+var gospotKeeperLog string
 
 type dstarManagerReply struct {
 	CSRF          string   `json:"csrf"`
@@ -43,7 +43,7 @@ type dstarManagerReply struct {
 	Reflectors    []string `json:"reflectors"`
 	DefaultName   string   `json:"defaultName"`
 	DefaultLetter string   `json:"defaultLetter"`
-	Keeper        []string `json:"keeper"` // nil when pistar-keeper is not running
+	Keeper        []string `json:"keeper"` // nil when gospot-keeper is not running
 }
 
 const dstarInputError = "Somthing wrong with your input, try again"
@@ -53,7 +53,7 @@ const dstarInputError = "Somthing wrong with your input, try again"
 // XRF lines of DExtra_Hosts.txt, each cut to 6 characters, as listed.
 func dstarReflectors() []string {
 	read := func(name string, marks ...string) []string {
-		list, _ := cachedHostFile("dstar-"+strings.Join(marks, ","), filepath.Join(pistarHostsDir, name), func(r io.Reader) []string {
+		list, _ := cachedHostFile("dstar-"+strings.Join(marks, ","), filepath.Join(gospotHostsDir, name), func(r io.Reader) []string {
 			var out []string
 			data, _ := io.ReadAll(r)
 			for _, line := range strings.Split(string(data), "\n") {
@@ -104,9 +104,9 @@ func dstarRemoteSettings(cfg iniData) (dstarRemote, bool) {
 	return r, ircddbValue(cfg, "remoteEnabled") == "1" && err == nil && port > 0 && port < 65536 && dstarRemotePassword.MatchString(r.password)
 }
 
-// readKeeperTail is `tail -n 5` of the PiStar-Keeper log.
+// readKeeperTail is `tail -n 5` of the GoSpot-Keeper log.
 func readKeeperTail() []string {
-	f, err := os.Open(pistarKeeperLog)
+	f, err := os.Open(gospotKeeperLog)
 	if err != nil {
 		return []string{}
 	}
@@ -128,7 +128,7 @@ func readKeeperTail() []string {
 	return out
 }
 
-var keeperRunning = func() bool { return runningProcesses()["pistar-keeper"] }
+var keeperRunning = func() bool { return runningProcesses()["gospot-keeper"] }
 
 type remoteControlRunner func(ctx context.Context, remote dstarRemote, args ...string) (string, error)
 
@@ -153,16 +153,16 @@ func lastLine(b []byte) string {
 
 var remoteControlMu sync.Mutex
 
-// runRemoteControl runs PISTAR_BIN_DIR/remotecontrold with a private HOME and
+// runRemoteControl runs GOSPOT_BIN_DIR/remotecontrold with a private HOME and
 // returns the last line it printed (stdout, else stderr), as exec() did.
 func runRemoteControl(ctx context.Context, remote dstarRemote, args ...string) (string, error) {
 	remoteControlMu.Lock()
 	defer remoteControlMu.Unlock()
-	bin := filepath.Join(pistarBinDir, "remotecontrold")
+	bin := filepath.Join(gospotBinDir, "remotecontrold")
 	if st, err := os.Stat(bin); err != nil || !st.Mode().IsRegular() {
 		return "", errRemoteControlMissing
 	}
-	home, err := os.MkdirTemp("", "pistar-remotecontrol-")
+	home, err := os.MkdirTemp("", "gospot-remotecontrol-")
 	if err != nil {
 		return "", err
 	}
@@ -205,14 +205,14 @@ func serveDStarLinks(w http.ResponseWriter, r *http.Request, run remoteControlRu
 	path := r.URL.EscapedPath()
 	switch {
 	case path == "/manage/api/links/dstar/keeper" && r.Method == http.MethodGet:
-		f, err := os.Open(pistarKeeperLog)
+		f, err := os.Open(gospotKeeperLog)
 		if err != nil {
 			http.Error(w, "Logbook not found", 404)
 			return
 		}
 		defer f.Close()
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(pistarKeeperLog)))
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(gospotKeeperLog)))
 		_, _ = io.Copy(w, f)
 	case path == "/manage/api/links/dstar" && r.Method == http.MethodGet:
 		csrf := editorToken(w, r)

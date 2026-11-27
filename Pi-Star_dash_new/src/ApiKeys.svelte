@@ -19,7 +19,7 @@
   async function save(t: Target, e: SubmitEvent) {
     e.preventDefault(); saved = ''; failed = '';
     const r = await fetch('/manage/api/expert/keys', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf },
       body: JSON.stringify({ target: t.id, values: values[t.id] }),
     }).catch(() => null);
     if (r?.ok) { saved = t.title; await load(); return; }

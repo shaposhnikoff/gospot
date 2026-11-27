@@ -72,7 +72,7 @@ export async function fetchSnapshot(scenario: Scenario): Promise<Snapshot> {
   if (scenario === 'api-offline') throw new Error('Не удалось получить снимок: API недоступен.');
 
   const snapshot: Snapshot = {
-    Node: 'pistar-demo',
+    Node: 'gospot-demo',
     Radio: {
       Callsign: 'DEMO-NODE', ID: '0000001', RX: '438.500', TX: '430.900',
       Operation: 'Duplex', CC: '1', Slots: 'TS1 / TS2', Modes: ['DMR'],

@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// Configuration page backend: the root helper pistar-configure reads every
+// Configuration page backend: the root helper gospot-configure reads every
 // configured radio file and applies validated per-key changes atomically.
 
 var configureHelper string
@@ -58,7 +58,7 @@ var configReadCache struct {
 }
 
 // configWatch lists the files behind "read" (CONF_*, MARKER_*, FLAG_*,
-// HOSTNAME_FILE from pistar.conf) plus the system time zone link.
+// HOSTNAME_FILE from gospot.conf) plus the system time zone link.
 var configWatch []string
 
 var configureSudo = "/usr/bin/sudo" // replaced in tests
@@ -156,7 +156,7 @@ func readConfigState(ctx context.Context, run configHelperFunc) (configState, er
 }
 
 func setConfigHelper(lib string, s settings) {
-	configureHelper = filepath.Join(lib, "pistar-configure")
+	configureHelper = filepath.Join(lib, "gospot-configure")
 	var watch []string
 	for k := range s {
 		if strings.HasPrefix(k, "CONF_") || strings.HasPrefix(k, "MARKER_") || strings.HasPrefix(k, "FLAG_") || k == "HOSTNAME_FILE" {
@@ -194,9 +194,9 @@ func serveClassicBackup(w http.ResponseWriter, r *http.Request, run configHelper
 		}
 		host, _ := os.ReadFile(hostnameFile)
 		stamp := now.Local().Format("2006-Jan-02") // PHP Y-M-d
-		name := "Pi-Star_Config_" + stamp + ".zip"
-		if h := strings.TrimSpace(string(host)); h != "" && h != "pi-star" && !strings.ContainsAny(h, "\"/\\\r\n") {
-			name = "Pi-Star_Config_" + h + "_" + stamp + ".zip"
+		name := "GoSpot_Config_" + stamp + ".zip"
+		if h := strings.TrimSpace(string(host)); h != "" && h != "gospot" && !strings.ContainsAny(h, "\"/\\\r\n") {
+			name = "GoSpot_Config_" + h + "_" + stamp + ".zip"
 		}
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))

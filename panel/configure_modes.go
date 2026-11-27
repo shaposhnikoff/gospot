@@ -156,7 +156,7 @@ func modesDedupe(opts []linkOption) []linkOption {
 	return out
 }
 
-// modesHostOptions lists "{col0} - {col1}" options of host files in PISTAR_HOSTS_DIR.
+// modesHostOptions lists "{col0} - {col1}" options of host files in GOSPOT_HOSTS_DIR.
 func modesHostOptions(opts []linkOption, names ...string) []linkOption {
 	for _, name := range names {
 		for _, f := range hostsFile(name, "") {
@@ -374,7 +374,7 @@ var modesNXDNSection = cfgSectionImpl{ID: "nxdn", Order: 90,
 		// ModeHang to the end of their sections is cosmetic and not copied.
 		if modesPresent(p, gw, "Network", "HostsFile") {
 			p.set(gw, "Network", "HostsFile1", p.value(gw, "Network", "HostsFile"))
-			p.set(gw, "Network", "HostsFile2", filepath.Join(pistarHostsDir, "NXDNHostsLocal.txt"))
+			p.set(gw, "Network", "HostsFile2", filepath.Join(gospotHostsDir, "NXDNHostsLocal.txt"))
 			p.del(gw, "Network", "HostsFile")
 		}
 		modesForce(p, "mmdvmhost", "NXDN Network", "LocalAddress", "127.0.0.1")
@@ -446,7 +446,7 @@ func modesM17Startup(c *cfgContext) (host string, hosts []linkOption, room strin
 		}
 	}
 	// M17Hosts.txt; the reference also read /root/M17Hosts.txt, which has no
-	// pistar.conf setting yet.
+	// gospot.conf setting yet.
 	hosts = []linkOption{{Value: "none", Label: "None"}}
 	for _, f := range hostsFile("M17Hosts.txt", "") {
 		hosts = append(hosts, linkOption{Value: f[0], Label: f[0]})
@@ -655,7 +655,7 @@ var modesPOCSAGSection = cfgSectionImpl{ID: "pocsag", Order: 110,
 		for _, d := range [][3]string{
 			{"General", "Callsign", "M1ABC"}, {"General", "RptAddress", "127.0.0.1"}, {"General", "RptPort", "3800"},
 			{"General", "LocalAddress", "127.0.0.1"}, {"General", "LocalPort", "4800"}, {"General", "Daemon", "0"},
-			{"Log", "DisplayLevel", "0"}, {"Log", "FileLevel", "2"}, {"Log", "FilePath", pistarLogDir},
+			{"Log", "DisplayLevel", "0"}, {"Log", "FileLevel", "2"}, {"Log", "FilePath", gospotLogDir},
 			{"Log", "FileRoot", "DAPNETGateway"},
 			{"DAPNET", "Address", "dapnet.afu.rwth-aachen.de"}, {"DAPNET", "Port", "43434"}, {"DAPNET", "AuthKey", "TOPSECRET"},
 			{"DAPNET", "SuppressTimeWhenBusy", "1"}, {"DAPNET", "Debug", "0"},
@@ -795,7 +795,7 @@ var modesGPSSection = cfgSectionImpl{ID: "mobilegps", Order: 120,
 				modesDefault(p, "ysfgateway", "Mobile GPS", "Address", "127.0.0.1")
 				modesDefault(p, "ysfgateway", "Mobile GPS", "Port", "7834")
 			}
-			for _, kv := range [][2]string{{"Daemon", "0"}, {"Debug", "0"}, {"DisplayLevel", "0"}, {"FileLevel", "1"}, {"FilePath", pistarLogDir}} {
+			for _, kv := range [][2]string{{"Daemon", "0"}, {"Debug", "0"}, {"DisplayLevel", "0"}, {"FileLevel", "1"}, {"FilePath", gospotLogDir}} {
 				modesFlatSet(p, "mobilegps", kv[0], kv[1])
 			}
 			p.set("mmdvmhost", "Mobile GPS", "Enable", on)

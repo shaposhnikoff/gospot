@@ -161,7 +161,7 @@ func serveRadioLogWith(w http.ResponseWriter, r *http.Request, run diagRun) {
 	rows := radioLogRows(out)
 	if path == radioLogDownload {
 		h.Set("Content-Type", "text/plain; charset=utf-8")
-		h.Set("Content-Disposition", `attachment; filename="pi-star-radio-log.txt"`)
+		h.Set("Content-Disposition", `attachment; filename="gospot-radio-log.txt"`)
 		for _, row := range rows {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", row.At.Format(time.RFC3339Nano), row.Source, row.Level, row.Message)
 		}

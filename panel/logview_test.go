@@ -91,7 +91,7 @@ func TestRadioLogResponse(t *testing.T) {
 			t.Fatal(w.Code)
 		}
 		if path == radioLogDownload {
-			if w.Header().Get("Content-Disposition") != `attachment; filename="pi-star-radio-log.txt"` ||
+			if w.Header().Get("Content-Disposition") != `attachment; filename="gospot-radio-log.txt"` ||
 				w.Header().Get("Content-Type") != "text/plain; charset=utf-8" ||
 				w.Body.String() != "2023-11-14T22:13:20.123456Z\tDMRGateway\twarning\tLogin to the master has failed, retrying login ...\n" {
 				t.Fatal("unexpected download:", w.Body.String())

@@ -1,8 +1,15 @@
-# Задача: полностью повторить старую админку Pi-Star
+# Задача: GoSpot — полностью повторить старую админку Pi-Star
 
 Это единственный основной файл проектных инструкций. Новые требования, ограничения и уточнения пользователя записывать сюда, не дублировать в родительском `AGENTS.md`.
 
 Инструкции действуют для `/home/max/pi-star-new/Pi-Star_dash_new` и его подкаталогов. Через указатель в родительском `AGENTS.md` они также применяются к связанному Go-бэкенду `/home/max/pi-star-new/panel` и остальным компонентам этого проекта.
+
+## Название продукта: GoSpot
+
+- Решения пользователя от 2026-11-27: продукт называется **GoSpot**; репозиторий — `shaposhnikoff/gospot`. Заголовок главной страницы «GoSpot Digital Voice Dashboard for <позывной>», страниц админки — «GoSpot Digital Voice - <страница>», заголовки окна «GoSpot - Digital Voice Dashboard - <страница>», подвал «GoSpot — Pi-Star compatible» (без строки копирайта Andy Taylor), строка версии «GoSpot: <версия>». Классическая разметка, цвета и поведение Pi-Star остаются прежними.
+- Уточнение пользователя от 2026-11-27: **«no pistar anywhere»** — переименовать не только собственные имена продукта, но и раскладку: пакеты `gospot` и `gospot-radio` (заменяют `pistar-dashboard`/`pistar-radio` через `Conflicts`/`Replaces`/`Provides`), настройки `/etc/gospot/gospot.conf` (`GOSPOT_SETTINGS`, ключи `GOSPOT_*`), юниты и учётные записи `gospot-panel`/`gospot-wizard`/`gospot-stage`, `/etc/gospot/wizard`, `/var/lib/gospot`, `/var/log/gospot`, `/etc/gospot-release`, `/etc/gospot-css.ini`, `/etc/gospot-remote`, помощники и инструменты `gospot-*`.
+- Остаются намеренно: эталонные репозитории и каталоги (`Pi-Star_DV_Dash`, `Pi-Star_Binaries_sbin`, `Pi-Star_v4_Binaries_Bin`, каталог `Pi-Star_dash_new`), адреса `pistar.uk` и User-Agent запросов к ним, имена членов классического архива Pi-Star в восстановлении резервной копии, комментарии со ссылкой на эталон, метка `_PS4` внутри сторонних бинарников, имена плат `pistar1..3`, миграционный код и тестовые данные со старыми именами.
+- Переход платы со старых пакетов выполняют `postinst` пакетов (`gospot-migrate`, миграция `gospot-radio`): старые значения настроек, пароль и TLS-ключ мастера, состояние, журналы и конфиги переносятся без потерь; старые копии не удаляются автоматически.
 
 ## Архитектурное решение: без PHP
 
@@ -27,36 +34,41 @@
 - Главная страница, админка и все разделы повторяют разметку, порядок блоков, подписи, цвета и правила раскраски эталона (`index.php`, `mmdvmhost/*.php`, `css/pistar-css*.php`). Отклонения — только для безопасности или работоспособности (например, прокрутка широких таблиц на телефоне).
 - Быстродействие: страница опрашивает один JSON-эндпоинт; журналы читаются потоково одним `journalctl -f`, INI перечитываются только при изменении; никаких запусков `grep`/`tail` на каждый запрос.
 
-## Правило: все пути — только в `pistar.conf`
+## Правило: все пути — только в `gospot.conf`
 
-- Требование пользователя от 2026-11-27: пути и параметры, от которых зависят действия с конфигурацией системы, хранятся **только** в файле [`pistar.conf`](pistar.conf) в корне `Pi-Star_dash_new/`. Это пути к бинарникам и скриптам Pi-Star, конфигам радиослужб, справочникам, журналам, маркерам контроллера, имена systemd-юнитов радиослужб, каталоги установки дашборда, порты, целевая плата для деплоя и пути к соседним репозиториям.
-- Go-бэкенд (`panel/config.go`, флаг `-config`), Python-помощники (`load_settings()`), `postinst`, `scripts/build-deb`, `scripts/install-release` и тестовые стенды читают значения из этого файла. Зашивать такие пути и адреса в код, скрипты, юниты, `sudoers` или тесты **запрещено**; `sudoers` и drop-in юниты генерируются при сборке. Исключения: сам путь установленного файла `/etc/pistar-dashboard/pistar.conf` и стандартные утилиты ОС (`/usr/bin/sudo`, `systemctl`, `journalctl`).
-- Новый путь или параметр сначала добавить в `pistar.conf` с комментарием, затем читать из кода; проверка `panel/config_test.go` загружает репозиторную копию, а `scripts/test-native-runtime.mjs` сверяет её с упакованной.
-- Формат: `KEY=value` по строке, `#` — комментарий; без кавычек, пробелов и подстановок, чтобы Bash, Go и Python читали одинаково. На плате файл — conffile пакета (`/etc/pistar-dashboard/pistar.conf`): правки переживают обновление; после правки перезапустить `pistar-panel`, `pistar-wizard`, `psdash-stage`. Root-помощники доверяют файлу, только если его не может изменить никто, кроме владельца-root.
+- Требование пользователя от 2026-11-27: пути и параметры, от которых зависят действия с конфигурацией системы, хранятся **только** в файле [`gospot.conf`](gospot.conf) в корне `Pi-Star_dash_new/`. Это пути к бинарникам и скриптам Pi-Star, конфигам радиослужб, справочникам, журналам, маркерам контроллера, имена systemd-юнитов радиослужб, каталоги установки дашборда, порты, целевая плата для деплоя и пути к соседним репозиториям.
+- Go-бэкенд (`panel/config.go`, флаг `-config`), Python-помощники (`load_settings()`), `postinst`, `scripts/build-deb`, `scripts/install-release` и тестовые стенды читают значения из этого файла. Зашивать такие пути и адреса в код, скрипты, юниты, `sudoers` или тесты **запрещено**; `sudoers` и drop-in юниты генерируются при сборке. Исключения: сам путь установленного файла `/etc/gospot/gospot.conf` и стандартные утилиты ОС (`/usr/bin/sudo`, `systemctl`, `journalctl`).
+- Новый путь или параметр сначала добавить в `gospot.conf` с комментарием, затем читать из кода; проверка `panel/config_test.go` загружает репозиторную копию, а `scripts/test-native-runtime.mjs` сверяет её с упакованной.
+- Формат: `KEY=value` по строке, `#` — комментарий; без кавычек, пробелов и подстановок, чтобы Bash, Go и Python читали одинаково. На плате файл — conffile пакета (`/etc/gospot/gospot.conf`): правки переживают обновление; после правки перезапустить `gospot-panel`, `gospot-wizard`, `gospot-stage`. Root-помощники доверяют файлу, только если его не может изменить никто, кроме владельца-root.
 
 ## Раскладка системы и радиослужбы
 
-- Решение пользователя от 2026-11-27: основная раскладка — **как в Pi-Star**: `/etc/mmdvmhost`, `/etc/dmrgateway` и остальные конфиги без `.ini`, бинарники в `/usr/local/bin`, скрипты в `/usr/local/sbin`, справочники в `/usr/local/etc`, файловые журналы в `/var/log/pi-star`, маркеры `/etc/dstar-radio.*`, `/etc/pistar-release`. Дашборд читает и пишет те же файлы, что и оригинал. `pistar3` переводится на эту раскладку; `pistar1`/`pistar2` не трогать.
+- Решение пользователя от 2026-11-27: основная раскладка — **как в Pi-Star** (имена с `pistar`/`pi-star` заменены на `gospot`, см. «Название продукта»): `/etc/mmdvmhost`, `/etc/dmrgateway` и остальные конфиги без `.ini`, бинарники в `/usr/local/bin`, скрипты в `/usr/local/sbin`, справочники в `/usr/local/etc`, файловые журналы в `/var/log/gospot`, маркеры `/etc/dstar-radio.*`, `/etc/gospot-release`. Дашборд читает и пишет те же файлы, что и оригинал. `pistar3` переводится на эту раскладку; `pistar1`/`pistar2` не трогать.
 - Радиослужбы для armhf — готовые сборки Pi-Star из `../Pi-Star_v4_Binaries_Bin` (метка `_PS4`, ARMv6). Им нужны `libwiringPi` и `libArduiPi_OLED`, которых нет в Debian, — поставлять вместе с пакетом. D-Star-часть (`ircddbgatewayd`, `dstarrepeaterd`, `timeserverd`, `starnetserverd`, `remotecontrold`, `timercontrold`) собрана под wxWidgets 3.0 и на Trixie пересобирается из исходников; arm64 — тоже из исходников.
-- Скрипты из `../Pi-Star_Binaries_sbin` использовать как есть, если они не трогают PHP и старый дашборд (`HostFilesUpdate.sh`, `pistar-*link`, `pistar-bmapi`/`dapnetapi`/`tgifapi`, `pistar-findmodem`, `pistar-mmdvmcal`, `pistar-modemupgrade`, `pistar-jittertest`, `pistar-factory-reset`, `pistar-firewall`, `pistar-watchdog`, `pistar-remote`, `pistar-keeper`, обработчики `*.service`). `pistar-update`, `pistar-upgrade`, `pistar-daily.cron` и другие скрипты с обращениями к `/var/www/dashboard`, PHP, nginx и `.htpasswd` не ставить; их функции переписать в Go или в собственные скрипты без PHP.
-- `pistar-watchdog` и `pistar-remote` из `Pi-Star_Binaries_sbin` написаны на Python 2 и не работают на Bookworm/Trixie; в пакет `pistar-radio` идут их порты на Python 3 из `radio/sbin` (без nginx, `iwconfig` и shell), с собственными обработчиками. Юниты выключены при установке, как и остальные радиослужбы.
+- Скрипты из `../Pi-Star_Binaries_sbin` ставить, если они не трогают PHP и старый дашборд (`HostFilesUpdate.sh`, `pistar-*link`, `pistar-bmapi`/`dapnetapi`/`tgifapi`, `pistar-findmodem`, `pistar-mmdvmcal`, `pistar-modemupgrade`, `pistar-jittertest`, `pistar-firewall`, обработчики `*.service` и др.), под именами `gospot-*` (`HostFilesUpdate.sh` и обработчики `*.service` сохраняют имена); их внутренние пути и имена правятся при сборке пакета явной проверенной таблицей замен (`radio/`), сборка падает на неизвестном вхождении `pistar`/`pi-star`. `pistar-update`, `pistar-upgrade`, `pistar-daily.cron`, `pistar-factory-reset` и другие скрипты с обращениями к `/var/www/dashboard`, PHP, nginx и `.htpasswd` не ставить; их функции переписать в Go или в собственные скрипты без PHP.
+- `pistar-watchdog` и `pistar-remote` из `Pi-Star_Binaries_sbin` написаны на Python 2 и не работают на Bookworm/Trixie; в пакет `gospot-radio` идут их порты на Python 3 из `radio/sbin` (`gospot-watchdog`, `gospot-remote`) (без nginx, `iwconfig` и shell), с собственными обработчиками. Юниты выключены при установке, как и остальные радиослужбы.
 - Пользователь оставляет за собой право переделать любое решение; работать без лишних вопросов и показывать результат на `pistar3`.
 
 ## Wi-Fi: два бэкенда
 
-- Решение от 2026-11-27: на `pistar3` (Bookworm) и в целевом образе Trixie сетью управляет NetworkManager, классический `wpa_supplicant.conf` там не действует. Страница Wi-Fi повторяет `wifi.php`, а запись идёт через бэкенд из `pistar.conf`: `WIFI_BACKEND=networkmanager` (профили `nmcli`, PSK передаётся только WPA-хешем) или `wpa_supplicant` (правка блоков файла, root:root 0600). Стенд `qa/real-write --wifi` проверяет бэкенд `wpa_supplicant`.
+- Решение от 2026-11-27: на `pistar3` (Bookworm) и в целевом образе Trixie сетью управляет NetworkManager, классический `wpa_supplicant.conf` там не действует. Страница Wi-Fi повторяет `wifi.php`, а запись идёт через бэкенд из `gospot.conf`: `WIFI_BACKEND=networkmanager` (профили `nmcli`, PSK передаётся только WPA-хешем) или `wpa_supplicant` (правка блоков файла, root:root 0600). Стенд `qa/real-write --wifi` проверяет бэкенд `wpa_supplicant`.
 
 ## Плеер BrandMeister Hoseline
 
-- Требование пользователя от 2026-11-27: встроить его плеер (`shaposhnikoff/hoseline-bm-console-player`) в главную страницу **под Local RF Activity**, только прослушивание одной группы: селектор TG, кнопки Play и Stop. Звук идёт через плату (Hoseline проверяет Origin), URL, список TG и лимит слушателей — в `pistar.conf` (`HOSELINE_*`).
+- Требование пользователя от 2026-11-27: встроить его плеер (`shaposhnikoff/hoseline-bm-console-player`) в главную страницу **под Local RF Activity**, только прослушивание одной группы: селектор TG, кнопки Play и Stop. Звук идёт через плату (Hoseline проверяет Origin), URL, список TG и лимит слушателей — в `gospot.conf` (`HOSELINE_*`).
 
-## Обновление `pistar.conf` на плате
+## Экран входящих вызовов (`/kiosk`)
 
-- `pistar.conf` — conffile. Новые ключи из пакета `postinst` дописывает в изменённую вручную копию (`pistar-conf-merge`), существующие строки не трогает; иначе службы не стартуют на неизвестной им конфигурации.
+- Задача от 2026-11-27: полноэкранная страница `/kiosk` на операторском порту для ТВ/монитора у хотспота (1920×1080, 1280×720, портрет 1080×1920): карточка «в эфире» (позывной, имя, цель с названием TG, режим, слот, RF/сеть, счётчик длительности; BER/сигнал для RF после конца передачи), иначе «Listening — last call N min ago»; ниже последние ~10 вызовов. Палитра CSS Tool как акценты, без внешних шрифтов/CDN, без прокрутки и подсказок по наведению; опрос `/api/dashboard` раз в секунду, остановка на скрытой вкладке, явное состояние «Connection lost» и восстановление.
+- Имена: `DMRIds.dat` (формат MMDVMHost CUserDB) и `TGList_BM/P25/NXDN.txt` из `GOSPOT_HOSTS_DIR`, разбор один раз на версию файла; `DMRIds.dat` разбирается в фоне, чтобы не задерживать `/api/dashboard`. Поля строк `name` и `targetName` добавлены, прежние поля не менять.
+
+## Обновление `gospot.conf` на плате
+
+- `gospot.conf` — conffile. Новые ключи из пакета `postinst` дописывает в изменённую вручную копию (`gospot-conf-merge`), существующие строки не трогает; иначе службы не стартуют на неизвестной им конфигурации.
 
 ## Бэклог проекта
 
-- Основной бэклог — [GitHub Issues](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues). Когда пользователь просит добавить задачу в бэклог, сначала найти существующую issue; дополнить её или создать новую с ожидаемым результатом и критериями приёмки. Пользователю вернуть ссылку на issue.
+- Основной бэклог — [GitHub Issues](https://github.com/shaposhnikoff/gospot/issues). Когда пользователь просит добавить задачу в бэклог, сначала найти существующую issue; дополнить её или создать новую с ожидаемым результатом и критериями приёмки. Пользователю вернуть ссылку на issue.
 - Статус и результат проверки фиксировать в самой issue. В `BACKLOG.md` можно оставить ссылки, но не вести второй список статусов. Если запись в GitHub недоступна, сохранить черновик и явно сообщить, что issue ещё не создана.
 
 ## Что должно получиться
@@ -75,11 +87,14 @@
 
 ## Образ ОС
 
-- Решения пользователя от 2026-11-27: нужна полная система сборки образа на **Raspberry Pi OS Trixie (Debian 13)**, которая ставит пакет `pistar-dashboard` штатно через `.deb`, а не копированием бинарника.
+- Решения пользователя от 2026-11-27: нужна полная система сборки образа на **Raspberry Pi OS Trixie (Debian 13)**, которая ставит пакет `gospot` штатно через `.deb`, а не копированием бинарника.
 - Архитектуры: сначала **armhf** (ARMv7+), это основная цель. Все три платы — Raspberry Pi 2 Model B; Rev 1.1 (`pistar1`, `pistar3`, BCM2836 Cortex-A7) только 32-битные и arm64 не запускают. **arm64** (Pi 3/4/5/Zero 2W) — второй этап, после рабочего armhf-образа. Пакеты строить так, чтобы архитектура была параметром сборки.
 - В образе — **полный набор радиосервисов Pi-Star** (MMDVMHost, DMRGateway, YSF/P25/NXDN/DAPNET Gateway, ircDDBGateway, D-StarRepeater и др.), каждый отдельным `.deb` из закреплённых ревизий исходников.
 - Сборка образа **пока только локально** (Docker + pi-gen). В GitHub Actions образ не собирать; CI продолжает собирать только `.deb`.
 - Запрет «не собирать образ ОС для проверки дашборда» остаётся: образ — отдельный продукт, проверки дашборда выполняются на фикстурах.
+- Решения пользователя от 2026-11-27 по конвейеру (`image/README.md`): pi-gen закреплён коммитом (`IMAGE_PIGEN_REV_<ARCH>` в `pistar.conf`), стадии `stage0..stage2` и `stage-local`, которая ставит `pistar-radio` и `pistar-dashboard` через `apt-get install ./…deb` внутри образа. Хост `pi-star`, первый пользователь `pi-star` с паролем Pi-Star `raspberry`, `DISABLE_FIRST_BOOT_USER_RENAME=1`, SSH включён. Сборки — только вне репозитория (`IMAGE_BUILD_PARENT`, по умолчанию `/var/tmp`).
+- Секреты не должны совпадать между платами: созданные при сборке TLS-ключ, сертификат и пароль управления удаляются из образа и создаются заново при первой загрузке тем же помощником, что и в `postinst` пакета (`pistar-wizard-secrets`). Вход в веб-админку после прошивки — `pi-star` / `raspberry`, как в классическом Pi-Star; смена — Configuration > Remote Access Password. SSH host keys генерируются на каждой плате. Радиоюниты в образе выключены, их включает оператор.
+- Образ закрывается только зелёными проверками: `image/stage-local/01-firstboot/tests/test_firstboot.sh`, `image/verify-artifact.sh` (офлайн-проверка rootfs) и `image/qemu-boot.sh` (загрузка в QEMU `raspi2b`, проверка `:8789` и `:8788/manage/`); протоколы — `qa/evidence/image-*.txt`.
 
 ## Как проверять
 

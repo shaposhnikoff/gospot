@@ -3,7 +3,7 @@
 
 Listens on the hosts and ports of TGIF_API_URL (HTTPS, the Static/Dynamic TG
 API) and TGIF_SESSION_URL (legacy sessions/update) from the stand's copy of
-pistar.conf, keeps a little TG state and appends every request it receives to
+gospot.conf, keeps a little TG state and appends every request it receives to
 a JSON-lines log. Authorization is logged only as "token" (the Bearer token
 stored in TGIF_API_KEY_FILE), "" (absent) or "other", never as its value.
 """

@@ -34,7 +34,7 @@ func TestNativeSystemSnapshot(t *testing.T) {
 		if d, ok := ctx.Deadline(); cmd != "systemctl" || args[0] != "show" || !ok || time.Until(d) > 2*time.Second {
 			t.Fatalf("expected bounded systemctl show")
 		}
-		return []byte("Id=dmrgateway.service\nActiveState=inactive\nLoadState=not-found\n\nId=mmdvmhost.service\nLoadState=loaded\nActiveState=active\n\nId=pistar-panel.service\nLoadState=loaded\nActiveState=unexpected-detail\n"), errors.New("missing unit")
+		return []byte("Id=dmrgateway.service\nActiveState=inactive\nLoadState=not-found\n\nId=mmdvmhost.service\nLoadState=loaded\nActiveState=active\n\nId=gospot-panel.service\nLoadState=loaded\nActiveState=unexpected-detail\n"), errors.New("missing unit")
 	}
 	s := readSystem(context.Background(), root, disk, run)
 	if s.Hostname != "pi-star" || s.Model != "Raspberry Pi 4 Model B" || s.Kernel != "6.12.47+rpt-rpi-v8" ||
@@ -49,7 +49,7 @@ func TestNativeSystemSnapshot(t *testing.T) {
 	for _, service := range s.Services {
 		states[service.Name] = service.State
 	}
-	if states["MMDVMHost"] != "active" || states["DMRGateway"] != "not-found" || states["Pi-Star Panel"] != "unknown" {
+	if states["MMDVMHost"] != "active" || states["DMRGateway"] != "not-found" || states["GoSpot Panel"] != "unknown" {
 		t.Fatalf("unexpected service states: %v", states)
 	}
 }
@@ -124,9 +124,9 @@ func TestNativeSystemPartialSnapshotOnProbeTimeout(t *testing.T) {
 
 func TestClassicServices(t *testing.T) {
 	got := classicServices(map[string]bool{"MMDVM-Host": true, "timeserverd": true},
-		[]string{"python3 " + pistarSbinDir + "/pistar-watchdog", "bash -c true"})
+		[]string{"python3 " + gospotSbinDir + "/gospot-watchdog", "bash -c true"})
 	want := []systemService{{"MMDVMHost", "running"}, {"DStarRepeater", "stopped"}, {"ircDDBGateway", "stopped"},
-		{"TimeServer", "running"}, {"PiStar-Watchdog", "running"}, {"PiStar-Remote", "stopped"}}
+		{"TimeServer", "running"}, {"GoSpot-Watchdog", "running"}, {"GoSpot-Remote", "stopped"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%+v", got)
 	}

@@ -16,7 +16,9 @@
   type Draft = Record<Key, string>;
   const keys = fields.map(f => f.key);
   const limits = { radio_id: [1, 16777215], frequency: [1000000, 1300000000], claim: [1, 4294967295], port: [1, 65535] } as const;
-  const scope = 'pi-star.station-settings';
+  const scope = 'gospot.station-settings';
+  // Copies saved before the GoSpot rename carry the previous scope.
+  const legacyScope = 'pi-star.station-settings';
   function object(v: unknown): v is Record<string, unknown> {
     return typeof v === 'object' && v !== null && !Array.isArray(v);
   }
@@ -52,8 +54,8 @@
   function decodeBackup(text: string) {
     let v: unknown;
     try { v = JSON.parse(text); } catch { throw new Error('Не удалось прочитать JSON. Проверьте формат файла.'); }
-    if (!object(v) || !exact(v, ['scope', 'version', 'config']) || v.scope !== scope || v.version !== 1)
-      throw new Error('Нужна копия параметров станции Pi-Star версии 1.');
+    if (!object(v) || !exact(v, ['scope', 'version', 'config']) || (v.scope !== scope && v.scope !== legacyScope) || v.version !== 1)
+      throw new Error('Нужна копия параметров станции GoSpot версии 1.');
     return checked(v.config);
   }
 
@@ -160,7 +162,7 @@
     const blob = new Blob([JSON.stringify({ scope, version: 1, config }, null, 2) + '\n'], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `pi-star-${saved.callsign}.json`; a.click();
+    a.href = url; a.download = `gospot-${saved.callsign}.json`; a.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async function importBackup(input: HTMLInputElement) {
@@ -185,7 +187,7 @@
 </script>
 
 <section class="settings" data-testid="station-settings" aria-labelledby="station-title">
-  <header><p class="kicker">КОНФИГУРАЦИЯ PI-STAR</p><h1 id="station-title">Настройки станции</h1>
+  <header><p class="kicker">КОНФИГУРАЦИЯ GOSPOT</p><h1 id="station-title">Настройки станции</h1>
     <p>Параметры радиомодема и подключения к сети DMR.</p></header>
   <div class="messages">
     <p role="status" data-testid="settings-status">{notice}</p>

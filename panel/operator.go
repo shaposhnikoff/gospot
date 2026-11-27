@@ -48,10 +48,10 @@ func operatorHandler(assetDir, upstream string, managementPort int) http.Handler
 			operatorReply(writer, request, 200, "text/plain", []byte("ok\n"))
 			return
 		case "/metrics":
-			operatorReply(writer, request, 200, "text/plain; version=0.0.4", []byte(fmt.Sprintf("# TYPE pistar_operator_requests_total counter\npistar_operator_requests_total %d\n", requests.Load())))
+			operatorReply(writer, request, 200, "text/plain; version=0.0.4", []byte(fmt.Sprintf("# TYPE gospot_operator_requests_total counter\ngospot_operator_requests_total %d\n", requests.Load())))
 			return
 		case "/runtime.json":
-			operatorReply(writer, request, 200, "application/json", []byte(fmt.Sprintf(`{"backend":"pistar-go","wizardPort":%d}`, managementPort)))
+			operatorReply(writer, request, 200, "application/json", []byte(fmt.Sprintf(`{"backend":"gospot-go","wizardPort":%d}`, managementPort)))
 			return
 		case "/api/status", "/api/dashboard":
 			operatorProxy(writer, request, client, upstream, target, true)
@@ -111,7 +111,9 @@ func operatorProxy(writer http.ResponseWriter, request *http.Request, client *ht
 }
 
 func operatorRedirect(request *http.Request, managementPort int) string {
-	public := map[string]string{"/index.php": "/", "/mmdvmhost/lh.php": "/", "/mmdvmhost/localtx.php": "/", "/mmdvmhost/repeaterinfo.php": "/"}
+	// The app's assets are relative to the page: /kiosk/ would resolve them
+	// under /kiosk/assets/.
+	public := map[string]string{"/index.php": "/", "/mmdvmhost/lh.php": "/", "/mmdvmhost/localtx.php": "/", "/mmdvmhost/repeaterinfo.php": "/", "/kiosk/": "/kiosk"}
 	if location := public[request.URL.RequestURI()]; location != "" {
 		return location
 	}
@@ -132,7 +134,8 @@ func operatorRedirect(request *http.Request, managementPort int) string {
 
 func operatorStatic(writer http.ResponseWriter, request *http.Request, assetDir string) {
 	path := request.URL.EscapedPath()
-	if path == "/" {
+	// /kiosk is the wall-screen view of the same single-page app.
+	if path == "/" || path == "/kiosk" {
 		path = "/index.html"
 	}
 	types := map[string]string{".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2", ".webp": "image/webp"}

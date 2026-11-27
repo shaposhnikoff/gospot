@@ -35,7 +35,7 @@ export const groups: RouteGroup[] = [
     page('hardware', 'Состояние оборудования', 'Имя и IP-адрес, ядро, платформа, время работы, загрузка и температура CPU, состояние служб.', '/admin/#sysInfo'),
     page('sysinfo', 'Сведения о системе', 'Использование памяти RAM и дисковых разделов, версии установленного ПО и шлюзов.', '/admin/sysinfo.php'),
     page('log', 'Живой журнал модема', 'Просмотр новых строк Live Logs и скачивание полного журнала за сегодня.', '/admin/live_modem_log.php'),
-    page('services', 'Службы и журнал PiStar-Keeper', 'Статус шести служб, управление рефлектором и скачивание журнала при работающем Keeper.', '/admin/admin.php'),
+    page('services', 'Службы и журнал GoSpot-Keeper', 'Статус шести служб, управление рефлектором и скачивание журнала при работающем Keeper.', '/admin/admin.php'),
   ] },
   { id: 'networks', title: 'Управление сетями', routes: [
     page('dstar', 'Рефлекторы D-Star', 'Активные линки и выбор модуля, рефлектора, подключения или отключения в панели Admin.', '/admin/#refLinks'),
@@ -57,7 +57,7 @@ export const groups: RouteGroup[] = [
     page('paging-config', 'Параметры POCSAG', 'Сервер DAPNET, позывной, частота, ключ авторизации и списки разрешённых или запрещённых RIC.', `${config}#pocsagFrequency`),
     page('location', 'Координаты, APRS и MobileGPS', 'Местоположение узла, передача координат в APRS, порт и скорость приёмника GPS.', `${config}#confLatitude`),
     page('access', 'Доступ и межсетевой экран', 'Публичный или частный узел, список DMR ID, доступ к панели, ircDDB и SSH, правила UPnP.', config),
-    page('password', 'Пароль администратора', 'Смена пароля веб-панели и системной учётной записи pi-star. При обязательной смене заводского пароля узел сам откроет нужную форму.', `${config}#adminPassForm`),
+    page('password', 'Пароль администратора', 'Смена пароля веб-панели и системной учётной записи gospot. При обязательной смене заводского пароля узел сам откроет нужную форму.', `${config}#adminPassForm`),
   ] },
   { id: 'wifi', title: 'Беспроводная сеть', routes: [
     page('wifi-info', 'Состояние Wi-Fi', 'Интерфейс wlan0: IP, SSID, канал, сигнал, счётчики трафика и форма перезапуска адаптера.', '/admin/wifi.php?page=wlan0_info'),
@@ -69,8 +69,8 @@ export const groups: RouteGroup[] = [
     page('power', 'Питание узла', 'Перезагрузка и выключение через форму Power.', '/admin/power.php'),
     // Installed clone requires confirmation. On an unknown external release,
     // go through its menu: older update/upgrade pages can start work on GET.
-    page('update', 'Обновление компонентов', 'Пункт Update в меню Admin: обновление компонентов и справочников Pi-Star.', '/admin/update.php', admin),
-    page('upgrade', 'Обновление версии Pi-Star', 'Пункт Upgrade в разделе Expert: переход на новую версию системы.', `${expert}upgrade.php`, expert),
+    page('update', 'Обновление компонентов', 'Пункт Update в меню Admin: обновление компонентов и справочников GoSpot.', '/admin/update.php', admin),
+    page('upgrade', 'Обновление версии GoSpot', 'Пункт Upgrade в разделе Expert: переход на новую версию системы.', `${expert}upgrade.php`, expert),
     page('calibration', 'Калибровка модема', 'MMDVMCal: частота приёма, смещение RX Offset, график и статистика ошибок BER.', '/admin/calibration.php'),
     page('firmware', 'Прошивка модема', 'В меню Expert выберите Tools → FW и модель модема. При входе в FW узел очищает предыдущий журнал прошивки.', expert),
     page('jitter', 'Проверка джиттера сети', 'Штатный jitter_test.php начинает измерение задержек при открытии. Запуск из каталога недоступен. Поддерживаются BrandMeister, DMR+ и HBLink.'),
@@ -92,7 +92,7 @@ export const groups: RouteGroup[] = [
   ] },
   { id: 'files', title: 'Файлы и ключи', routes: [
     full('dmrgateway', 'Файл DMRGateway', 'Полная текстовая конфигурация DMR-шлюза, сетей и правил перезаписи.'),
-    full('pistar-remote', 'Удалённое управление PiStar-Remote', 'Конфигурация команд дистанционного управления узлом.'),
+    full('gospot-remote', 'Удалённое управление GoSpot-Remote', 'Конфигурация команд дистанционного управления узлом.'),
     full('wpaconfig', 'Файл Wi-Fi', 'Текстовый редактор wpa_supplicant.conf.'),
     full('apikeys', 'Ключи внешних сетей', 'Единая страница API Keys для BrandMeister, DAPNET и TGIF.'),
     full('bmapikey', 'Ключ BrandMeister', 'Токен API для управления разговорными группами BM.'),

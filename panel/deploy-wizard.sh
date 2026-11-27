@@ -8,26 +8,26 @@ fi
 cd -- "$(dirname -- "$0")"
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
-install -m 0755 helper/pistar-config "$tmp/pistar-config"
+install -m 0755 helper/gospot-config "$tmp/gospot-config"
 go run . -h >"$tmp/flags" 2>&1
 for flag in admin-listen tls-cert tls-key; do
   grep -q "^  -$flag " "$tmp/flags" || { echo "Missing flag: -$flag" >&2; exit 1; }
 done
-CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -o "$tmp/pistar-wizard" .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -o "$tmp/gospot-wizard" .
 
-cat >"$tmp/pistar-wizard.service" <<'UNIT'
+cat >"$tmp/gospot-wizard.service" <<'UNIT'
 [Unit]
-Description=Pi-Star configuration wizard
+Description=GoSpot configuration wizard
 After=network.target
 
 [Service]
-User=pistar-wizard
-Group=pistar-wizard
+User=gospot-wizard
+Group=gospot-wizard
 SupplementaryGroups=systemd-journal
 UMask=0077
-LoadCredential=admin-password:/etc/pistar-wizard/admin-password
-LoadCredential=tls-key:/etc/pistar-wizard/tls-key.pem
-ExecStart=/usr/local/bin/pistar-wizard -admin-listen :8788 -tls-cert /etc/pistar-wizard/tls-cert.pem -tls-key %d/tls-key
+LoadCredential=admin-password:/etc/gospot/wizard/admin-password
+LoadCredential=tls-key:/etc/gospot/wizard/tls-key.pem
+ExecStart=/usr/local/bin/gospot-wizard -admin-listen :8788 -tls-cert /etc/gospot/wizard/tls-cert.pem -tls-key %d/tls-key
 Restart=on-failure
 RestartSec=5
 
@@ -35,8 +35,8 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 cat >"$tmp/sudoers" <<'RULE'
-pistar-wizard ALL=(root) NOPASSWD: /usr/local/libexec/pistar-config read, /usr/local/libexec/pistar-config apply, /usr/local/libexec/pistar-config rollback
-pistar-wizard ALL=(root) NOPASSWD: /usr/local/libexec/pistar-config services-read, /usr/local/libexec/pistar-config services-apply
+gospot-wizard ALL=(root) NOPASSWD: /usr/local/libexec/gospot-config read, /usr/local/libexec/gospot-config apply, /usr/local/libexec/gospot-config rollback
+gospot-wizard ALL=(root) NOPASSWD: /usr/local/libexec/gospot-config services-read, /usr/local/libexec/gospot-config services-apply
 RULE
 
 cat >"$tmp/install.sh" <<'INSTALL'
@@ -50,15 +50,15 @@ version=$(systemctl --version | awk 'NR==1 {print $2}')
 (( version >= 247 )) || { echo "LoadCredential requires systemd >= 247" >&2; exit 1; }
 # Validate before changing the node, including on first install.
 mkdir check
-sed "s|ExecStart=/usr/local/bin/|ExecStart=$PWD/|" pistar-wizard.service >check/pistar-wizard.service
-systemd-analyze verify "$PWD/check/pistar-wizard.service"
-if ! getent passwd pistar-wizard >/dev/null; then
-  useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin pistar-wizard
+sed "s|ExecStart=/usr/local/bin/|ExecStart=$PWD/|" gospot-wizard.service >check/gospot-wizard.service
+systemd-analyze verify "$PWD/check/gospot-wizard.service"
+if ! getent passwd gospot-wizard >/dev/null; then
+  useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin gospot-wizard
 fi
-test "$(getent passwd pistar-wizard | cut -d: -f7)" = /usr/sbin/nologin
-test "$(id -Gn pistar-wizard)" = pistar-wizard
-test "$(id -u pistar-wizard)" != 0
-cfg=/etc/pistar-wizard
+test "$(getent passwd gospot-wizard | cut -d: -f7)" = /usr/sbin/nologin
+test "$(id -Gn gospot-wizard)" = gospot-wizard
+test "$(id -u gospot-wizard)" != 0
+cfg=/etc/gospot/wizard
 install -d -m 0755 -o root -g root "$cfg"
 if [[ ! -d /usr/local/libexec ]]; then install -d -m 0755 /usr/local/libexec; fi
 # Generate on this node only. Keep credentials and trust stable on upgrades.
@@ -88,17 +88,17 @@ replace() {
   install -o root -g root -m "$1" "$2" "$stage"
   mv -fT "$stage" "$3"
 }
-replace 0755 pistar-config /usr/local/libexec/pistar-config
-replace 0755 pistar-wizard /usr/local/bin/pistar-wizard
-replace 0440 sudoers /etc/sudoers.d/pistar-wizard
-replace 0644 pistar-wizard.service /etc/systemd/system/pistar-wizard.service
+replace 0755 gospot-config /usr/local/libexec/gospot-config
+replace 0755 gospot-wizard /usr/local/bin/gospot-wizard
+replace 0440 sudoers /etc/sudoers.d/gospot-wizard
+replace 0644 gospot-wizard.service /etc/systemd/system/gospot-wizard.service
 systemctl daemon-reload
-systemctl enable pistar-wizard.service
-systemctl restart pistar-wizard.service
-systemctl is-active pistar-wizard.service
+systemctl enable gospot-wizard.service
+systemctl restart gospot-wizard.service
+systemctl is-active gospot-wizard.service
 INSTALL
 
-tar -C "$tmp" -cf - pistar-wizard pistar-config pistar-wizard.service sudoers install.sh |
+tar -C "$tmp" -cf - gospot-wizard gospot-config gospot-wizard.service sudoers install.sh |
   ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes pistar3 "sudo -n sh -ec '
     test \"\$(hostname -s)\" = pistar3
     umask 077

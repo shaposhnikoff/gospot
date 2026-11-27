@@ -51,12 +51,12 @@ func init() {
 var (
 	ctlSysRoot fs.FS = os.DirFS("/")
 	// Device nodes are a kernel interface, not a Pi-Star path.
-	ctlDevDir        = "/dev"
-	ctlPlatform      = func() string { return systemPlatform(context.Background()) }
-	ctlAddresses     = systemAddresses
-	ctlTimezones     = ctlListTimezones
-	ctlPistarVersion = func() string { return releaseINI().get("Pi-Star", "Version") }
-	ctlAPRSHostsFile = func() string { return filepath.Join(pistarHostsDir, "APRSHosts.txt") }
+	ctlDevDir         = "/dev"
+	ctlPlatform       = func() string { return systemPlatform(context.Background()) }
+	ctlAddresses      = systemAddresses
+	ctlTimezones      = ctlListTimezones
+	ctlReleaseVersion = func() string { return releaseVersion(releaseINI()) }
+	ctlAPRSHostsFile  = func() string { return filepath.Join(gospotHostsDir, "APRSHosts.txt") }
 )
 
 const (
@@ -194,7 +194,7 @@ func buildCtlHardwareInfo(c *cfgContext) *cfgSection {
 		ID: "hardware-info", Title: "Gateway Hardware Information",
 		Rows: []cfgRow{
 			{Cells: []cfgCell{
-				th("Hostname", tip("Hostname", "The name of host\nrunning the Pi-Star Software.")),
+				th("Hostname", tip("Hostname", "The name of host\nrunning the GoSpot Software.")),
 				th("Kernel", tip("Release", "This is the version\nnumber of the Linux Kernel running\non this Raspberry Pi.")),
 				{Header: true, Colspan: 2, Label: "Platform", Tooltip: tip("Uptime:", strings.ReplaceAll(ctlUptime(systemText(root, "proc/uptime")), ",", ",\n"))},
 				th("CPU Load", tip("CPU Load", "This is the standard Linux\nsystem load indicator.")),
@@ -759,7 +759,7 @@ func buildCtlGeneral(c *cfgContext) *cfgSection {
 	}
 	if !ctlDuplex(c) {
 		rows = append(rows, cfgRow{ID: "confFREQ", Cells: []cfgCell{
-			ctlLabel("Radio Frequency:", "Radio Frequency", "This is the Frequency your\nPi-Star is on"),
+			ctlLabel("Radio Frequency:", "Radio Frequency", "This is the Frequency your\nGoSpot is on"),
 			ctlSpan(td(freq("confFREQ", c.get(ctlMM, "Info", "RXFrequency")), static("MHz"))),
 		}})
 	} else {
@@ -1212,7 +1212,7 @@ func ctlApplyAPRSHost(w ctlWriter, f cfgForm) error {
 	for _, file := range []string{"ysf2dmr", "ysf2nxdn", "ysf2p25"} {
 		w.set(file, "aprs.fi", "Enable", "0")
 	}
-	if ctlVersionAtLeast(ctlPistarVersion(), "4.1.4") {
+	if ctlVersionAtLeast(ctlReleaseVersion(), "4.1.4") {
 		w.flat("aprsgateway", "Server", host)
 	}
 	return nil
@@ -1324,7 +1324,7 @@ func ctlApplyCallsign(w ctlWriter, f cfgForm) error {
 		return ctlErr("Node Callsign: use up to 7 letters and digits")
 	}
 	u := strings.ToUpper(raw)
-	pass, desc := ctlAPRSPass(u), u+"_Pi-Star"
+	pass, desc := ctlAPRSPass(u), u+"_GoSpot"
 	w.flat(ctlIRC, "gatewayCallsign", u)
 	w.flat(ctlIRC, "dplusLogin", ctlPad(u, 8))
 	// config/ircddblocal.php ($callsign) does not exist in the native dashboard.
@@ -1355,7 +1355,7 @@ func ctlApplyCallsign(w ctlWriter, f cfgForm) error {
 	}
 	w.set("dgidgateway", "General", "Callsign", u)
 	w.set("dgidgateway", "Info", "Description", desc)
-	if ctlVersionAtLeast(ctlPistarVersion(), "4.1.4") {
+	if ctlVersionAtLeast(ctlReleaseVersion(), "4.1.4") {
 		w.flat("aprsgateway", "Callsign", u)
 		w.flat("aprsgateway", "Password", pass)
 		w.flat(ctlIRC, "aprsPort", "8673")

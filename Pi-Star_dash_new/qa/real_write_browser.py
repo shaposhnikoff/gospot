@@ -26,9 +26,9 @@ INITIAL = {"callsign": "DEMO1", "master": "192.0.2.11"}
 CHANGED = {"callsign": "DEMO2", "master": "192.0.2.12"}
 RESTARTS = ["dmrgateway.service ok", "mmdvmhost.service ok"]
 FAILED_AND_RECOVERED = ["dmrgateway.service ok", "mmdvmhost.service fail", *RESTARTS]
-EVENTS = "/run/pistar-qa/events"
-FAULT = "/run/pistar-qa/fail-next-mmdvmhost"
-STATE = "/var/lib/pistar-panel-config/"
+EVENTS = "/run/gospot-qa/events"
+FAULT = "/run/gospot-qa/fail-next-mmdvmhost"
+STATE = "/var/lib/gospot/"
 
 
 def loopback_origin(value):
@@ -169,7 +169,7 @@ def exercise_services(v, stand, original):
     old = request("fetch(arguments[0]).then(r=>r.json()).then(arguments[arguments.length-1])",api)
     def post(body, token):
         return request("""const [url,body,csrf,done]=arguments;
-          fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf},
+          fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-GoSpot-CSRF':csrf},
           body:JSON.stringify(body)}).then(r=>done(r.status))""",api,body,token)
     history = stand.restarts()
     equal("missing CSRF",post(old['config'],''),403)
@@ -213,7 +213,7 @@ def exercise_expert(v, stand, origin, original):
 
     def post(api, body, csrf):
         return v.command('/execute/async', {'script': """const [url,body,csrf,done]=arguments;
-          fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf},
+          fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-GoSpot-CSRF':csrf},
           body:JSON.stringify(body)}).then(r=>done(r.status))""", 'args': [api, body, csrf]})
 
     cc = 'input[aria-label="DMR ColorCode"]'
@@ -276,7 +276,7 @@ def exercise_expert(v, stand, origin, original):
     v.js("document.querySelector('[aria-label=\"BrandMeister API Key apikey\"]').closest('form').querySelector('input[type=submit]').click()")
     wait("API key save not acknowledged", lambda: v.js("return document.body.innerText.includes('BrandMeister API Key saved.')"))
     equal("BM API key file", stand.read("/etc/bmapi.key").decode(), "[key]\napikey=" + jwt + "\n\n")
-    equal("BM API key owner and mode", stand.exec("stat", "-c", "%U %a", "/etc/bmapi.key").stdout.decode().strip(), "pistar-wizard 600")
+    equal("BM API key owner and mode", stand.exec("stat", "-c", "%U %a", "/etc/bmapi.key").stdout.decode().strip(), "gospot-wizard 600")
     equal("API key restarts", stand.restarts(), history)
     stand.exec("rm", "-f", "/etc/bmapi.key")
     print("PASS Chromium Expert: Quick Edit ColorCode 1 -> 5 with exact file comparison and one MMDVMHost restart, "
@@ -289,8 +289,8 @@ def exercise_configure(v, stand, origin, original):
     """Configuration page (admin/configure.php) through Chromium against the real helper."""
     host, gw = original
     marker = "/etc/dstar-radio.mmdvmhost"
-    stand.exec("sh", "-c", f"printf '[Modem]\\nHardware=zumspotgpio\\n' > {marker}; mkdir -p /etc/pistar-wizard; "
-               "printf '#!/bin/sh\\necho \"$*\" >> /run/pistar-qa/systemd-run\\n' > /usr/bin/systemd-run; chmod 755 /usr/bin/systemd-run")
+    stand.exec("sh", "-c", f"printf '[Modem]\\nHardware=zumspotgpio\\n' > {marker}; mkdir -p /etc/gospot/wizard; "
+               "printf '#!/bin/sh\\necho \"$*\" >> /run/gospot-qa/systemd-run\\n' > /usr/bin/systemd-run; chmod 755 /usr/bin/systemd-run")
     marker_text = stand.read(marker)
 
     def load():
@@ -299,7 +299,14 @@ def exercise_configure(v, stand, origin, original):
         wait("configuration did not load", lambda: v.js("return document.querySelectorAll('.section h2').length > 3"))
 
     def apply_first():
-        v.js("document.querySelector('.section input[value=\"Apply Changes\"]').click()")
+        v.js("window.qaBeforeApply = 1; document.querySelector('.section input[value=\"Apply Changes\"]').click()")
+
+    def applied():
+        # A successful Apply reloads the whole page (like configure.php) and
+        # shows the result again; wait for the reloaded document.
+        wait("page reloaded after Apply", lambda: v.js(
+            "return !window.qaBeforeApply && document.body.innerText.includes('Your configuration has been applied.')"
+            " && !document.body.innerText.includes('Reloading') && document.querySelectorAll('.section h2').length > 3"), timeout=20)
 
     def message(fragment):
         wait("expected: " + fragment, lambda: fragment in v.js("return document.body.innerText"))
@@ -307,7 +314,7 @@ def exercise_configure(v, stand, origin, original):
     def post(body):
         return v.command('/execute/async', {'script': """const [body,done]=arguments;
           fetch('/manage/api/configure').then(r=>r.json()).then(s=>fetch('/manage/api/configure',{method:'POST',
-          headers:{'Content-Type':'application/json','X-PiStar-CSRF':s.csrf},body:JSON.stringify({revision:s.revision,form:body})}))
+          headers:{'Content-Type':'application/json','X-GoSpot-CSRF':s.csrf},body:JSON.stringify({revision:s.revision,form:body})}))
           .then(async r=>done([r.status, await r.text()]))""", 'args': [body]})
 
     load()
@@ -319,7 +326,7 @@ def exercise_configure(v, stand, origin, original):
     # 1. an untouched form writes nothing and restarts nothing
     print("configure step: 1. an untouched form writes nothing and restarts nothing", flush=True)
     apply_first()
-    message("Your configuration has been applied.")
+    applied()
     same_pair("untouched Configuration", stand.pair(), original)
     equal("untouched Configuration restarts", stand.restarts(), history)
     equal("untouched Configuration marker", stand.read(marker), marker_text)
@@ -328,7 +335,7 @@ def exercise_configure(v, stand, origin, original):
     load()
     v.js("const s=document.querySelector('select[aria-label=\"dmrColorCode\"]'); s.value='7'; s.dispatchEvent(new Event('change',{bubbles:true}))")
     apply_first()
-    message("Your configuration has been applied.")
+    applied()
     host7 = host.replace(b"ColorCode=1\n", b"ColorCode=7\n")
     assert host7 != host
     same_pair("Configuration Colour Code 1 -> 7", stand.pair(), (host7, gw))
@@ -359,26 +366,26 @@ def exercise_configure(v, stand, origin, original):
     v.type_into('input[aria-label="Confirm Password"]', "qa-Secret-2")
     v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Set Password').click()")
     message("entries do not match")
-    equal("mismatched password not written", stand.exists("/etc/pistar-wizard/admin-password"), False)
+    equal("mismatched password not written", stand.exists("/etc/gospot/wizard/admin-password"), False)
     v.type_into('input[aria-label="Confirm Password"]', "qa-Secret-1")
-    v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Set Password').click()")
-    message("Your configuration has been applied.")
-    equal("password file", stand.read("/etc/pistar-wizard/admin-password"), b"qa-Secret-1\n")
-    equal("password file mode", stand.exec("stat", "-c", "%a", "/etc/pistar-wizard/admin-password").stdout.decode().strip(), "600")
+    v.js("window.qaBeforeApply = 1; [...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Set Password').click()")
+    applied()
+    equal("password file", stand.read("/etc/gospot/wizard/admin-password"), b"qa-Secret-1\n")
+    equal("password file mode", stand.exec("stat", "-c", "%a", "/etc/gospot/wizard/admin-password").stdout.decode().strip(), "600")
     same_pair("password form leaves radio files", stand.pair(), (hostb, gw))
     equal("password form restarts", stand.restarts(), history)
-    equal("HTTPS service restart scheduled", stand.read("/run/pistar-qa/systemd-run"),
-          b"--quiet --collect --on-active=2 /usr/bin/systemctl restart pistar-wizard.service\n")
-    stand.exec("rm", "-f", marker, "/etc/pistar-wizard/admin-password", "/usr/bin/systemd-run", "/run/pistar-qa/systemd-run")
+    equal("HTTPS service restart scheduled", stand.read("/run/gospot-qa/systemd-run"),
+          b"--quiet --collect --on-active=2 /usr/bin/systemctl restart gospot-wizard.service\n")
+    stand.exec("rm", "-f", marker, "/etc/gospot/wizard/admin-password", "/usr/bin/systemd-run", "/run/gospot-qa/systemd-run")
     print("PASS Chromium Configuration: sections " + ", ".join(titles) + "; untouched Apply writes and restarts nothing; "
-          "Colour Code 1 -> 7 changes exactly that line and restarts DMRGateway then MMDVMHost, reread shows 7; "
+          "Colour Code 1 -> 7 changes exactly that line and restarts DMRGateway then MMDVMHost, the page reloads and shows 7; "
           "invalid value 422 and stale page 409 write nothing; Remote Access Password mismatch refused, "
           "then written 0600 without radio restarts", flush=True)
 
 
 def exercise_css(v, stand, origin, original):
     """Expert > CSS Tool and the theme it applies, through Chromium against the real helper."""
-    css = "/etc/pistar-css.ini"
+    css = "/etc/gospot-css.ini"
     stand.exec("rm", "-f", css)
 
     def go(fragment, ready):
@@ -455,8 +462,8 @@ def exercise_css(v, stand, origin, original):
 def exercise_factory(v, stand, origin, original):
     """Configuration > Factory Reset through Chromium against the real helper and config_clean.zip."""
     import io
-    marker, css = "/etc/dstar-radio.mmdvmhost", "/etc/pistar-css.ini"
-    share = stand.exec("sh", "-c", "ls /usr/share/pistar-radio/config_clean.zip").stdout.decode().strip()
+    marker, css = "/etc/dstar-radio.mmdvmhost", "/etc/gospot-css.ini"
+    share = stand.exec("sh", "-c", "ls /usr/share/gospot-radio/config_clean.zip").stdout.decode().strip()
     zipped = ZipFile(io.BytesIO(stand.read(share)))
     stand.exec("sh", "-c", f"printf '[Modem]\\nHardware=zumspotgpio\\n' > {marker}; printf '[Background]\\nPage=000000\\n' > {css}; rm -f /etc/ysfgateway")
     modes = lambda: stand.exec("stat", "-c", "%U:%G %a", "/etc/MMDVM-Host.ini", "/etc/DMRGateway.ini").stdout.decode().split("\n")[:2]
@@ -497,7 +504,7 @@ def wpa_psk(ssid, passphrase):
 def exercise_wifi(v, stand, origin, original):
     """Wi-Fi page (admin/wifi.php) with the wpa_supplicant backend, through Chromium against the real helper.
 
-    run.sh --wifi sets WIFI_BACKEND=wpa_supplicant in the stand's pistar.conf. The container has no
+    run.sh --wifi sets WIFI_BACKEND=wpa_supplicant in the stand's gospot.conf. The container has no
     wlan0: saves report it, and Reset / Scan must say so cleanly. Test-only passphrases are never printed."""
     old_first, old_second, new_second = "qa-first-old-pass", "qa-second-old-pass", "qa-second-new-pass"
     header = "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\nupdate_config=1\nap_scan=1\nfast_reauth=1\ncountry=GB\n\n"
@@ -539,7 +546,7 @@ def exercise_wifi(v, stand, origin, original):
     def post(body, with_csrf=True):
         return api("""const [body,csrf,done]=arguments;
           fetch('/manage/api/wifi').then(r=>r.json()).then(s=>fetch('/manage/api/wifi',{method:'POST',
-          headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf?s.csrf:''},body:JSON.stringify(Object.assign({revision:s.revision},body))}))
+          headers:{'Content-Type':'application/json','X-GoSpot-CSRF':csrf?s.csrf:''},body:JSON.stringify(Object.assign({revision:s.revision},body))}))
           .then(async r=>done([r.status, await r.text()]))""", body, with_csrf)
 
     def wifi_posts():
@@ -639,12 +646,12 @@ FAKES = Path(__file__).resolve().parent / "fixtures"
 
 
 def stand_settings(stand):
-    lines = stand.read("/etc/pistar-dashboard/pistar.conf").decode().splitlines()
+    lines = stand.read("/etc/gospot/gospot.conf").decode().splitlines()
     return dict(line.split("=", 1) for line in lines if line and not line.startswith("#"))
 
 
 def install_fake(stand, fake, path, text=None):
-    """Put a test double where pistar.conf says the real tool lives."""
+    """Put a test double where gospot.conf says the real tool lives."""
     body = fake.read_text() if text is None else text
     stand.exec("sh", "-c", 'mkdir -p "$(dirname "$1")" && printf "%s" "$2" >"$1" && chown root:root "$1" && chmod 755 "$1"',
                "sh", path, body)
@@ -657,19 +664,19 @@ def edit_ini(stand, path, sed):
 
 def exercise_calibration(v, stand, origin, original):
     """Calibration (calibration.php) through Chromium: the real Go session and
-    pistar-calibrate with a fake MMDVMCal at PISTAR_BIN_DIR (no modem)."""
+    gospot-calibrate with a fake MMDVMCal at GOSPOT_BIN_DIR (no modem)."""
     conf = stand_settings(stand)
     ini = conf["CONF_MMDVMHOST"]
     unit = conf["UNIT_MMDVMHOST"]
-    inputs = "/run/pistar-qa/mmdvmcal-input"
-    install_fake(stand, FAKES / "fake-mmdvmcal", conf["PISTAR_BIN_DIR"] + "/MMDVMCal")
+    inputs = "/run/gospot-qa/mmdvmcal-input"
+    install_fake(stand, FAKES / "fake-mmdvmcal", conf["GOSPOT_BIN_DIR"] + "/MMDVMCal")
     stand.exec("rm", "-f", inputs, inputs + ".args")
     edit_ini(stand, ini, "/^UARTSpeed=/a RXOffset=100")
     host, gw = stand.pair()
     equal("seeded RXOffset", host.splitlines().count(b"RXOffset=100"), 1)
 
-    # pistar-calibrate first runs MMDVMCal for CALIBRATION_WARMUP seconds and
-    # tells it to quit, as pistar-mmdvmcal does; that run's q comes first.
+    # gospot-calibrate first runs MMDVMCal for CALIBRATION_WARMUP seconds and
+    # tells it to quit, as gospot-mmdvmcal does; that run's q comes first.
     warm = "q" if int(conf["CALIBRATION_WARMUP"]) else ""
 
     def keys():
@@ -689,7 +696,7 @@ def exercise_calibration(v, stand, origin, original):
     def start_again():
         return v.command('/execute/async', {'script': """const done=arguments[arguments.length-1];
           fetch('/manage/api/calibration',{cache:'no-store'}).then(r=>r.json()).then(d=>fetch('/manage/api/calibration',
-          {method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':d.csrf},body:JSON.stringify({action:'start'})}))
+          {method:'POST',headers:{'Content-Type':'application/json','X-GoSpot-CSRF':d.csrf},body:JSON.stringify({action:'start'})}))
           .then(r=>done(r.status))""", 'args': []})
 
     go("calibration-debug")
@@ -750,12 +757,12 @@ def exercise_calibration(v, stand, origin, original):
 
 
 def exercise_jitter(v, stand, origin, original):
-    """Expert Jitter Test (jitter_test.php) through Chromium with a fake pistar-jittertest at PISTAR_SBIN_DIR."""
+    """Expert Jitter Test (jitter_test.php) through Chromium with a fake gospot-jittertest at GOSPOT_SBIN_DIR."""
     conf = stand_settings(stand)
-    log = conf["PISTAR_JITTER_LOG"]
+    log = conf["GOSPOT_JITTER_LOG"]
     # The fake answers at once, then stays running for a few seconds.
     fake = (FAKES / "fake-jittertest").read_text().replace('sleep "${FAKE_JITTER_SLEEP:-0}"', "sleep 4")
-    install_fake(stand, FAKES / "fake-jittertest", conf["PISTAR_SBIN_DIR"] + "/pistar-jittertest", fake)
+    install_fake(stand, FAKES / "fake-jittertest", conf["GOSPOT_SBIN_DIR"] + "/gospot-jittertest", fake)
     stand.exec("sh", "-c", 'mkdir -p "$(dirname "$1")" && printf "old run\\n" >"$1"', "sh", log)
     history = stand.restarts()
 
@@ -769,11 +776,14 @@ def exercise_jitter(v, stand, origin, original):
     def start_again(group):
         return v.command('/execute/async', {'script': """const [group,done]=arguments;
           fetch('/manage/api/expert/jitter',{cache:'no-store'}).then(r=>r.json()).then(d=>fetch('/manage/api/expert/jitter',
-          {method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':d.csrf},body:JSON.stringify({group})}))
+          {method:'POST',headers:{'Content-Type':'application/json','X-GoSpot-CSRF':d.csrf},body:JSON.stringify({group})}))
           .then(r=>done(r.status))""", 'args': [group]})
 
     expected = lambda group: "".join(f"{group}_Host_{n}\t\t\tAvg RTT: 2{n}.00ms\tPeak Deviation: 0.{n}0ms\n" for n in (1, 2, 3))
+    # Let the authenticated admin page finish loading before the hash route
+    # (an immediate navigation occasionally raced the Basic auth and got 401).
     v.command("/url", {"url": origin + "/manage/#power"})
+    wait("admin page did not load", lambda: v.js("return !!document.querySelector('.container')"), timeout=15)
     v.command("/url", {"url": origin + "/manage/#expert-tool-jitter-brandmeister"})
     wait("BrandMeister results on the page", lambda: tail() == "Starting test, please wait...\n" + expected("BM"), timeout=15)
     equal("log replaced by the BM run", stand.read(log).decode(), expected("BM"))
@@ -791,13 +801,13 @@ def exercise_jitter(v, stand, origin, original):
     wait("second run finished", lambda: running() is False, timeout=20)
     equal("jitter restarts", stand.restarts(), history)
     same_pair("jitter leaves the radio files", stand.pair(), original)
-    print("PASS Chromium Jitter Test: #expert-tool-jitter-brandmeister runs pistar-jittertest BM into a cleared log "
+    print("PASS Chromium Jitter Test: #expert-tool-jitter-brandmeister runs gospot-jittertest BM into a cleared log "
           "(root:root 644) and shows it; a second run 409 while one runs; unknown group 400; no group runs DMR+; no restarts",
           flush=True)
 
 
 TGIF_ID = "234123401"
-TGIF_LOG = "/run/pistar-qa/tgif-requests"
+TGIF_LOG = "/run/gospot-qa/tgif-requests"
 # Matches the TGIFSTG1 format of tgif_static_common.php; a stand-only value.
 TGIF_TOKEN = "TGIFSTG1.00112233445566aa.bbccddeeff001122." + "QaStandOnlyToken_" + "x" * 30
 
@@ -850,7 +860,7 @@ def exercise_tgif(v, stand, origin, original):
         submit(button)
 
     def write_token(value):
-        stand.exec("sh", "-c", 'umask 077; printf "[key]\\napikey=%s\\n" "$1" >"$2"; chown pistar-wizard:pistar-wizard "$2"',
+        stand.exec("sh", "-c", 'umask 077; printf "[key]\\napikey=%s\\n" "$1" >"$2"; chown gospot-wizard:gospot-wizard "$2"',
                    "sh", value, "/etc/tgifapi.key")
 
     stand.exec("rm", "-f", TGIF_LOG)
@@ -916,7 +926,7 @@ def exercise_tgif(v, stand, origin, original):
     equal("legacy request", new_requests(before),
           [{"scheme": "http", "method": "GET", "path": f"/api/sessions/update/{TGIF_ID}/1/91", "body": "", "auth": ""}])
     no_token("legacy manager")
-    wizard_log = stand.read("/tmp/pistar-wizard.log").decode(errors="replace")
+    wizard_log = stand.read("/tmp/gospot-wizard.log").decode(errors="replace")
     if TGIF_TOKEN in wizard_log:
         raise AssertionError("TGIF token in the wizard log")
     same_pair("TGIF leaves radio files", stand.pair(), original)
@@ -928,7 +938,7 @@ def exercise_tgif(v, stand, origin, original):
           "Authorization; token absent from page, network bodies and wizard log; radio files and services untouched", flush=True)
 
 
-HOSELINE_LOG = "/run/pistar-qa/hoseline-events"
+HOSELINE_LOG = "/run/gospot-qa/hoseline-events"
 HOSELINE_SOURCE = 2340001  # fake_hoseline.py --source
 
 
@@ -1056,7 +1066,7 @@ def exercise_backup(v, stand, origin, folder, original):
         const b = new Uint8Array(await r.arrayBuffer()); let s=''; for (const x of b) s += String.fromCharCode(x);
         arguments[arguments.length-1]([r.status, r.headers.get('content-disposition'), btoa(s)]); })""", 'args': []})
     equal("backup status", blob[0], 200)
-    assert re.search(r'filename="Pi-Star_Config_[^"]+_\d{4}-[A-Z][a-z]{2}-\d{2}\.zip"', blob[1]), blob[1]
+    assert re.search(r'filename="GoSpot_Config_[^"]+_\d{4}-[A-Z][a-z]{2}-\d{2}\.zip"', blob[1]), blob[1]
     archive = base64.b64decode(blob[2])
     with ZipFile(io.BytesIO(archive)) as z:
         names = set(z.namelist())
@@ -1078,6 +1088,30 @@ def exercise_backup(v, stand, origin, folder, original):
     equal("restore modes", stand.exec("stat", "-c", "%a", "/etc/MMDVM-Host.ini", "/etc/DMRGateway.ini").stdout.decode().split(), ["644", "644"])
     history += ["dmrgateway.service ok", "mmdvmhost.service ok"]
     equal("restore restarts", stand.restarts(), history)
+    # a classic Pi-Star archive: its pistar-css.ini member lands in the GoSpot CSS file
+    css, theme = "/etc/gospot-css.ini", b"[Background]\nPage=123456\n"
+    css_before = stand.read(css) if stand.exists(css) else None
+    classic = io.BytesIO()
+    with ZipFile(classic, "w") as z:
+        z.writestr("mmdvmhost", host)
+        z.writestr("pistar-css.ini", theme)
+    path = folder / "Pi-Star_Config_pistar3_2026-Nov-27.zip"
+    path.write_bytes(classic.getvalue())
+    v.command("/url", {"url": origin + "/manage/#expert"})
+    v.command("/url", {"url": origin + "/manage/#backup"})
+    wait("backup page did not reload", lambda: v.js("return !!document.querySelector('input[type=file]')"))
+    v.choose_file("input[type=file]", path)
+    v.js("window.confirm = () => true")
+    v.click("button.icon")
+    wait("classic restore did not finish", lambda: v.js("return document.body.innerText.includes('Configuration restored.')"))
+    equal("classic member installed as gospot-css.ini", stand.read(css), theme)
+    assert not stand.exists("/etc/pistar-css.ini"), "classic member name written"
+    same_pair("classic restore radio files", stand.pair(), original)
+    history += ["dmrgateway.service ok", "mmdvmhost.service ok"]
+    equal("classic restore restarts", stand.restarts(), history)
+    if css_before is None:
+        stand.exec("rm", "-f", css)
+    path = folder / "restore.zip"
     # an unsafe archive is refused without touching anything
     bad = io.BytesIO()
     with ZipFile(bad, "w") as z:
@@ -1092,22 +1126,23 @@ def exercise_backup(v, stand, origin, folder, original):
     wait("unsafe archive not refused", lambda: v.js("return document.body.innerText.includes('has an unsafe name')"))
     same_pair("refused archive", stand.pair(), original)
     equal("refused archive restarts", stand.restarts(), history)
-    print("PASS Chromium Backup/Restore: classic zip download (Pi-Star_Config_<host>_<Y-M-d>.zip, classic member names, "
+    print("PASS Chromium Backup/Restore: classic zip download (GoSpot_Config_<host>_<Y-M-d>.zip, classic member names, "
           "exact file bytes, no PHP), restore of changed files back to the archive with modes kept and DMRGateway then "
-          "MMDVMHost restarted, unsafe archive refused without writes or restarts", flush=True)
+          "MMDVMHost restarted, a classic Pi-Star_Config zip restores pistar-css.ini as /etc/gospot-css.ini, "
+          "unsafe archive refused without writes or restarts", flush=True)
 
 DSTAR_FIXTURES = Path(__file__).resolve().parents[2] / "panel/testdata/dstar"
-DSTAR_CALLS = "/run/pistar-qa/remotecontrold-calls"
+DSTAR_CALLS = "/run/gospot-qa/remotecontrold-calls"
 DSTAR_PASSWORD = "rc-Secret-7"  # remotePassword of the ircddbgateway fixture
 DSTAR_ACCEPTED = "remotecontrold: command accepted by the gateway/starnetserver"
 
 
 def exercise_dstar(v, stand, origin, original):
     """D-Star panels (dstarrepeater/*.php) for both controllers and the D-Star Link
-    Manager, with classic fixture logs and a fake remotecontrold at PISTAR_BIN_DIR."""
+    Manager, with classic fixture logs and a fake remotecontrold at GOSPOT_BIN_DIR."""
     conf = stand_settings(stand)
     host_ini = conf["CONF_MMDVMHOST"]
-    logs, hosts = conf["PISTAR_LOG_DIR"], conf["PISTAR_HOSTS_DIR"]
+    logs, hosts = conf["GOSPOT_LOG_DIR"], conf["GOSPOT_HOSTS_DIR"]
     markers = conf["MARKER_MMDVMHOST"], conf["MARKER_DSTARREPEATER"]
     history = stand.restarts()
     seen = []
@@ -1121,9 +1156,9 @@ def exercise_dstar(v, stand, origin, original):
     for name in ("DCS_Hosts.txt", "DPlus_Hosts.txt", "DExtra_Hosts.txt"):
         put(f"{hosts}/{name}", (DSTAR_FIXTURES / name).read_text())
     put(conf["CONF_IRCDDBGATEWAY"], (DSTAR_FIXTURES / "ircddbgateway").read_text())
-    install_fake(stand, FAKES / "fake-remotecontrold", conf["PISTAR_BIN_DIR"] + "/remotecontrold")
-    stand.exec("sh", "-c", 'rm -f "$1" && touch "$1" && chown pistar-wizard:pistar-wizard "$1"', "sh", DSTAR_CALLS)
-    # MMDVMHost with D-Star and the D-Star network; the panels read the INI as pistar-wizard.
+    install_fake(stand, FAKES / "fake-remotecontrold", conf["GOSPOT_BIN_DIR"] + "/remotecontrold")
+    stand.exec("sh", "-c", 'rm -f "$1" && touch "$1" && chown gospot-wizard:gospot-wizard "$1"', "sh", DSTAR_CALLS)
+    # MMDVMHost with D-Star and the D-Star network; the panels read the INI as gospot-wizard.
     stand.exec("sh", "-c", 'printf "\\n[D-Star]\\nEnable=1\\n\\n[D-Star Network]\\nEnable=1\\n" >>"$1" && chmod 644 "$1"', "sh", host_ini)
     stand.exec("sh", "-c", 'rm -f "$2" && touch "$1"', "sh", *markers)
 
@@ -1166,7 +1201,7 @@ def exercise_dstar(v, stand, origin, original):
     def post(body, csrf=True):
         return v.command('/execute/async', {'script': """const done=arguments[arguments.length-1];
           fetch('/manage/api/links/dstar',{cache:'no-store'}).then(r=>r.json()).then(d=>fetch('/manage/api/links/dstar',
-          {method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':arguments[1]?d.csrf:''},body:JSON.stringify(arguments[0])}))
+          {method:'POST',headers:{'Content-Type':'application/json','X-GoSpot-CSRF':arguments[1]?d.csrf:''},body:JSON.stringify(arguments[0])}))
           .then(async r=>done([r.status,(await r.text()).trim()]))""", 'args': [body, csrf]})
 
     def no_password(stage):
@@ -1180,7 +1215,7 @@ def exercise_dstar(v, stand, origin, original):
                 except Exception:  # a body the page dropped carries nothing to leak
                     pass
         texts = {"page": v.js("return document.documentElement.outerHTML"), "network": "\n".join(seen),
-                 "logs": stand.read("/tmp/pistar-wizard.log").decode(errors="replace") + stand.read("/tmp/pistar-panel.log").decode(errors="replace")}
+                 "logs": stand.read("/tmp/gospot-wizard.log").decode(errors="replace") + stand.read("/tmp/gospot-panel.log").decode(errors="replace")}
         for name, text in texts.items():
             for secret in (DSTAR_PASSWORD, "irc-Secret-3"):
                 if secret in text:
@@ -1312,7 +1347,7 @@ def main():
     # TemporaryDirectory creates a mode-0700 directory for both download and upload.
     with TemporaryDirectory(prefix="write-browser-", dir=shared) as folder:
         with chromium(args.origin, args.key) as command:
-            auth = args.origin.replace("://", f"://pi-star:{quote(password, safe='')}@", 1)
+            auth = args.origin.replace("://", f"://gospot:{quote(password, safe='')}@", 1)
             command("/url", {"url": auth + "/manage/"})
             cdp(command, "Browser.setDownloadBehavior", behavior="allow", downloadPath=folder)
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)

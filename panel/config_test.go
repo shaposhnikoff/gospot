@@ -8,7 +8,7 @@ import (
 )
 
 // The repository copy is the shipped default; every test runs against it.
-const shippedSettings = "../Pi-Star_dash_new/pistar.conf"
+const shippedSettings = "../Pi-Star_dash_new/gospot.conf"
 
 func TestMain(m *testing.M) {
 	if err := loadSettings(shippedSettings); err != nil {
@@ -22,7 +22,7 @@ func TestShippedSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mmdvmINI.location() != "/etc/mmdvmhost" || modemUnit != "mmdvmhost.service" || configHelper != "/usr/lib/pistar-dashboard/pistar-config" {
+	if mmdvmINI.location() != "/etc/mmdvmhost" || modemUnit != "mmdvmhost.service" || configHelper != "/usr/lib/gospot/gospot-config" {
 		t.Fatalf("unexpected defaults: %s %s %s", mmdvmINI.location(), modemUnit, configHelper)
 	}
 	for k, v := range s {

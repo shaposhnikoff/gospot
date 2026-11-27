@@ -8,7 +8,7 @@ import (
 )
 
 // Shared request checks of the HTTPS management API: hex tokens, single
-// headers and the double-submit CSRF check (cookie + X-PiStar-CSRF + Origin).
+// headers and the double-submit CSRF check (cookie + X-GoSpot-CSRF + Origin).
 
 func archiveHex(v string) bool {
 	if len(v) != 64 {
@@ -38,7 +38,7 @@ func archiveCSRF(r *http.Request) bool {
 			token = c.Value
 		}
 	}
-	return token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(archiveHeader(r, "X-PiStar-CSRF"))) == 1
+	return token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(archiveHeader(r, "X-GoSpot-CSRF"))) == 1
 }
 
 // Dispatch ONLY after wizardHandler's TLS and Basic Auth checks.

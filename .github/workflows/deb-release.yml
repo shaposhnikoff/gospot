@@ -1,4 +1,4 @@
-name: Build and publish Bookworm deb
+name: Build and publish GoSpot Bookworm deb
 on: push
 
 permissions:
@@ -30,9 +30,10 @@ jobs:
           npm test
           go -C ../panel test ./...
           python3 -B -m unittest discover -s ../panel/helper
-          debian/test-pistar-conf-merge.sh
+          debian/test-gospot-conf-merge.sh
+          debian/test-gospot-migrate.sh
           ../radio/test_seed_configs.sh
-          python3 -B -m unittest discover -s ../radio -p 'test_pistar_*.py'
+          python3 -B -m unittest discover -s ../radio -p 'test_gospot_*.py'
       - name: Build and check armhf package
         working-directory: Pi-Star_dash_new
         run: |
@@ -41,7 +42,7 @@ jobs:
           base=$(sed -n 's/^Version: //p' debian/control)
           export DEB_VERSION="${base}+ci.${GITHUB_RUN_NUMBER}"
           scripts/build-deb
-          packages=(build/release-*/pistar-dashboard_*_armhf.deb)
+          packages=(build/release-*/gospot_*_armhf.deb)
           test "${#packages[@]}" -eq 1
           test "$(dpkg-deb -f "${packages[0]}" Version)" = "$DEB_VERSION"
           test "$(dpkg-deb -f "${packages[0]}" Architecture)" = armhf

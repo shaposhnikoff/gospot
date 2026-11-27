@@ -5,12 +5,12 @@ import pathlib
 import socket
 import sys
 
-# pistar-configure asks which units are installed before restarting them.
+# gospot-configure asks which units are installed before restarting them.
 if sys.argv[1:4] == ["show", "-p", "LoadState"] and len(sys.argv) == 6 and sys.argv[4] == "--value":
     print("loaded" if sys.argv[5] in ("dmrgateway.service", "mmdvmhost.service") else "not-found")
     sys.exit(0)
-qa = pathlib.Path("/run/pistar-qa")
-# pistar-calibrate holds MMDVMHost around MMDVMCal: only the two QA units are
+qa = pathlib.Path("/run/gospot-qa")
+# gospot-calibrate holds MMDVMHost around MMDVMCal: only the two QA units are
 # active; a stop or start is recorded (no unit changes), a restart goes below.
 if len(sys.argv) == 4 and sys.argv[1:3] == ["is-active", "--quiet"]:
     sys.exit(0 if sys.argv[3] in ("dmrgateway.service", "mmdvmhost.service") else 3)

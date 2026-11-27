@@ -54,6 +54,10 @@ type dashRow struct {
 	RSSI     *float64  `json:"rssi"`
 	Live     bool      `json:"live"`
 	Note     string    `json:"note"`
+	// Name and TargetName come from DMRIds.dat and the TGList files in
+	// PISTAR_HOSTS_DIR ("" when unknown); the classic pages ignore them.
+	Name       string `json:"name"`
+	TargetName string `json:"targetName"`
 }
 
 type dashDStar struct {
@@ -135,6 +139,7 @@ type dashInputs struct {
 	hostname                        string
 	controller                      string
 	now                             time.Time
+	names                           heardNames // nil: no name lookups
 }
 
 func (in dashInputs) running(name string) bool {
@@ -416,10 +421,14 @@ func buildDashboard(in dashInputs) dashboard {
 		row := dashRow{Time: r.At, Clock: classicClock(r.At), Mode: heardMode(r), Callsign: r.From, Suffix: r.Suffix, Target: r.To, Source: r.Source,
 			Duration: r.Duration, Loss: r.Loss, BER: r.BER, RSSI: r.RSSI, Note: r.Note,
 			Live: r.Duration == nil && r.Note == "" && live[callKey{r.At, r.Source, r.From, r.To, r.Slot, r.Mode}]}
-		if len(d.Heard) < 20 {
+		heard, local := len(d.Heard) < 20, r.Source == "RF" && r.Mode != "POCSAG" && len(d.Local) < 20
+		if in.names != nil && r.Mode != "POCSAG" && (heard || local) {
+			row.Name, row.TargetName = in.names.operator(r.From), in.names.target(trxMode(r), r.To)
+		}
+		if heard {
 			d.Heard = append(d.Heard, row)
 		}
-		if r.Source == "RF" && r.Mode != "POCSAG" && len(d.Local) < 20 {
+		if local {
 			d.Local = append(d.Local, row)
 		}
 	}
@@ -472,7 +481,7 @@ func gatherDashboard(now time.Time) dashboard {
 		dmr2ysf: dmr2ysfINI.load(), dmr2nxdn: dmr2nxdnINI.load(),
 		procs: procs, login: login, firmware: firmware, tcxo: tcxo, release: releaseINI(),
 		rows: rows, active: active, heardOK: ok, hostname: strings.TrimSpace(string(host)),
-		controller: controllerMode(), now: now,
+		controller: controllerMode(), now: now, names: currentHostNames(),
 	})
 	d.DStarInfo = dstarDashboard(d.Controller, mmdvm, ircddbINI.load())
 	d.Theme = currentTheme()

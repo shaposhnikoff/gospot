@@ -111,7 +111,9 @@ func operatorProxy(writer http.ResponseWriter, request *http.Request, client *ht
 }
 
 func operatorRedirect(request *http.Request, managementPort int) string {
-	public := map[string]string{"/index.php": "/", "/mmdvmhost/lh.php": "/", "/mmdvmhost/localtx.php": "/", "/mmdvmhost/repeaterinfo.php": "/"}
+	// The app's assets are relative to the page: /kiosk/ would resolve them
+	// under /kiosk/assets/.
+	public := map[string]string{"/index.php": "/", "/mmdvmhost/lh.php": "/", "/mmdvmhost/localtx.php": "/", "/mmdvmhost/repeaterinfo.php": "/", "/kiosk/": "/kiosk"}
 	if location := public[request.URL.RequestURI()]; location != "" {
 		return location
 	}
@@ -132,7 +134,8 @@ func operatorRedirect(request *http.Request, managementPort int) string {
 
 func operatorStatic(writer http.ResponseWriter, request *http.Request, assetDir string) {
 	path := request.URL.EscapedPath()
-	if path == "/" {
+	// /kiosk is the wall-screen view of the same single-page app.
+	if path == "/" || path == "/kiosk" {
 		path = "/index.html"
 	}
 	types := map[string]string{".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2", ".webp": "image/webp"}

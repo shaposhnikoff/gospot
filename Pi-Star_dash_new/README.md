@@ -44,6 +44,12 @@ npm run build
 Проверки пилота: `ssh pistar3 'python3 -' < qa/board.py` (на плате) и
 `python3 qa/full_ui.py --url http://192.168.210.194:8789/ --expect live` (браузер).
 
+Экран входящих вызовов для настенного монитора — `http://<плата>:8789/kiosk`
+(тот же `/api/dashboard` раз в секунду; имена операторов из `DMRIds.dat`,
+названия TG из `TGList_*.txt` в `PISTAR_HOSTS_DIR`). Проверка на реальном
+Go-бэкенде с фикстурой и скриншоты 1920×1080, 1280×720, 1080×1920:
+`python3 -B qa/kiosk_screens.py --out <каталог>` после `npm run build`.
+
 ## Нативный пакет без PHP
 
 `npm run package:native` собирает `build/release-*/ui` независимо от старого

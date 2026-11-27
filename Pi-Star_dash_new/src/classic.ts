@@ -8,6 +8,8 @@ export type Row = {
   time: string; clock: string; mode: string; callsign: string; target: string; source: string;
   duration: number | null; loss: number | null; ber: number | null; rssi: number | null; live: boolean;
   suffix?: string; note?: string;
+  // DMRIds.dat / TGList names from the Go backend ("" when unknown).
+  name?: string; targetName?: string;
 };
 export type Dashboard = {
   Hostname: string; Callsign: string; Version: string; PiStar: string; Controller: string;

@@ -128,6 +128,16 @@ func applySettings(s settings) error {
 	if source != "files" && source != "journal" {
 		errs = append(errs, "RADIO_LOG_SOURCE must be files or journal")
 	}
+	// The Wi-Fi page's helper reads these; refuse a file it would reject.
+	if b := s["WIFI_BACKEND"]; b != "networkmanager" && b != "wpa_supplicant" {
+		errs = append(errs, "WIFI_BACKEND must be networkmanager or wpa_supplicant")
+	}
+	if !regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`).MatchString(s["WIFI_INTERFACE"]) {
+		errs = append(errs, "WIFI_INTERFACE must be an interface name")
+	}
+	for _, key := range []string{"WPA_SUPPLICANT_CONF", "SYSFS_NET_DIR", "WPA_CTRL_DIR", "WIFI_REGDOM_CONF", "NMCLI_BIN", "WPA_CLI_BIN", "IP_BIN", "IW_BIN"} {
+		path(key)
+	}
 	pp, mp, op := port("PANEL_PORT"), port("MANAGEMENT_PORT"), port("OPERATOR_PORT")
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid settings: %s", strings.Join(errs, "; "))

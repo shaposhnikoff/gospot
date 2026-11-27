@@ -145,6 +145,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		case "/manage/api/configure":
 			serveConfigure(w, r, runConfigureHelper)
 			return
+		case "/manage/api/wifi":
+			serveWifi(w, r, runConfigureHelper)
+			return
 		case "/manage/api/dashboard":
 			// The classic admin page shows the same tables as the dashboard.
 			if r.Method != http.MethodGet {

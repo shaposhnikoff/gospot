@@ -11,12 +11,14 @@ unset DOCKER_CONTEXT
 dist=
 scenario=()
 preview=false
+wifi=false
 if [[ ${1:-} == --preview ]]; then preview=true; shift; fi
 if [[ ${1:-} == --services ]]; then scenario+=(--services); shift; fi
 if [[ ${1:-} == --expert ]]; then scenario+=(--expert); shift; fi
 if [[ ${1:-} == --backup ]]; then scenario+=(--backup); shift; fi
 if [[ ${1:-} == --configure ]]; then scenario+=(--configure); shift; fi
 if [[ ${1:-} == --css ]]; then scenario+=(--css); shift; fi
+if [[ ${1:-} == --wifi ]]; then scenario+=(--wifi); wifi=true; shift; fi
 if (($#)); then
   [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
@@ -64,7 +66,10 @@ openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout "$work/key.pem" -out "
   -subj /CN=127.0.0.1 -addext 'subjectAltName=IP:127.0.0.1' 2>/dev/null
 sed 's|@DASHBOARD_LIB_DIR@|/usr/local/libexec|g' debian/sudoers >"$work/sudoers"
 # The fixture keeps its own layout; only its copy of pistar.conf differs.
-sed -e 's|^CONF_MMDVMHOST=.*|CONF_MMDVMHOST=/etc/MMDVM-Host.ini|' -e 's|^CONF_DMRGATEWAY=.*|CONF_DMRGATEWAY=/etc/DMRGateway.ini|' \
+# --wifi: the Wi-Fi page edits a wpa_supplicant.conf fixture (no NetworkManager here).
+stand_conf=()
+if $wifi; then stand_conf=(-e 's|^WIFI_BACKEND=.*|WIFI_BACKEND=wpa_supplicant|'); fi
+sed "${stand_conf[@]}" -e 's|^CONF_MMDVMHOST=.*|CONF_MMDVMHOST=/etc/MMDVM-Host.ini|' -e 's|^CONF_DMRGATEWAY=.*|CONF_DMRGATEWAY=/etc/DMRGateway.ini|' \
     -e 's|^DASHBOARD_LIB_DIR=.*|DASHBOARD_LIB_DIR=/usr/local/libexec|' -e 's|^DASHBOARD_UI_DIR=.*|DASHBOARD_UI_DIR=/usr/local/share/pistar-native-ui|' \
     pistar.conf >"$work/pistar.conf"
 test -s "$work/sudoers"

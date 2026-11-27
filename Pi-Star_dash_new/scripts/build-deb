@@ -24,7 +24,7 @@ install -m755 debian/{postinst,prerm,postrm} "$p/DEBIAN/"
 install -Dm440 debian/sudoers "$p/etc/sudoers.d/pistar-dashboard"
 install -m755 ../panel/helper/{pistar-config,pistar-archive} "$p$lib/"
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go -C ../panel build -trimpath \
-  -ldflags="-s -w -X main.adminAssets=$share/ui -X main.operatorAssets=$share/ui -X main.configHelper=$lib/pistar-config -X main.archiveHelperPath=$lib/pistar-archive" \
+  -ldflags="-s -w -X main.dashboardVersion=$version -X main.adminAssets=$share/ui -X main.operatorAssets=$share/ui -X main.configHelper=$lib/pistar-config -X main.archiveHelperPath=$lib/pistar-archive" \
   -o "$p$lib/panel" .
 cp -a "$root/ui" "$p$share/ui"
 printf '%s\n' "$release" >"$p$share/RELEASE"

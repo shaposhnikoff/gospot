@@ -61,10 +61,6 @@ type heardRecordJSON struct {
 
 var recentHeard heardHistory
 
-func collectHeard(ctx context.Context) ([]HeardRow, bool) {
-	return recentHeard.collect(ctx, runDiagnostic, time.Now)
-}
-
 func (h *heardHistory) collect(ctx context.Context, run diagRun, now func() time.Time) ([]HeardRow, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -107,19 +103,51 @@ func (h *heardHistory) ingest(out []byte, now time.Time) {
 		h.cursor = ""
 	}
 	for _, e := range events {
-		h.cursor = e.Cursor
-		if h.invocation != e.Invocation {
-			clear(h.open)
-			h.invocation = e.Invocation
-		}
-		us, err := strconv.ParseInt(e.Stamp, 10, 64)
-		at := time.UnixMicro(us).UTC()
-		if e.Message == "" || err != nil || us <= 0 || at.Before(cutoff) || at.After(now) {
-			clear(h.open)
-			continue
-		}
-		h.observe(at, e.Message)
+		h.push(e, cutoff, now)
 	}
+	h.trim(now)
+}
+
+// push applies one journal record; the caller holds h.mu.
+func (h *heardHistory) push(e heardRecordJSON, cutoff, now time.Time) {
+	if h.open == nil {
+		h.open = make(map[heardLane]HeardRow)
+	}
+	h.cursor = e.Cursor
+	if h.invocation != e.Invocation {
+		clear(h.open)
+		h.invocation = e.Invocation
+	}
+	us, err := strconv.ParseInt(e.Stamp, 10, 64)
+	at := time.UnixMicro(us).UTC()
+	if e.Message == "" || err != nil || us <= 0 || at.Before(cutoff) || at.After(now) {
+		clear(h.open)
+		return
+	}
+	h.observe(at, e.Message)
+}
+
+// stream applies a record from a continuous journal follower.
+func (h *heardHistory) stream(e heardRecordJSON, now time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.push(e, now.Add(-heardAge), now)
+	h.trim(now)
+	h.ok = true
+}
+
+// live returns the retained rows and the calls that are still in progress.
+func (h *heardHistory) live() (rows []HeardRow, active []HeardRow, ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, row := range h.open {
+		active = append(active, row)
+	}
+	return append([]HeardRow{}, h.rows...), active, h.ok
+}
+
+func (h *heardHistory) trim(now time.Time) {
+	cutoff := now.Add(-heardAge)
 	sort.SliceStable(h.rows, func(i, j int) bool { return h.rows[i].At.After(h.rows[j].At) })
 	keep := make([]HeardRow, 0, heardLimit)
 	for _, row := range h.rows {

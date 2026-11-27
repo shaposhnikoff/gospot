@@ -54,7 +54,7 @@ func TestOperatorStaticAndRouting(t *testing.T) {
 	for path, location := range map[string]string{
 		"/admin/configure.php": "https://station.example:8788/manage/#configuration",
 		"/admin/expert/":       "https://station.example:8788/manage/#expert",
-		"/mmdvmhost/lh.php":    "/#heard-all",
+		"/mmdvmhost/lh.php":    "/",
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest("GET", "http://station.example:8789"+path, nil))

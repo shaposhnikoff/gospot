@@ -64,25 +64,21 @@ func main() {
 		log.Fatal(srv.ListenAndServeTLS(*cert, *key))
 	}
 	var snapshot atomic.Pointer[Status]
+	// One journalctl follower feeds last-heard, modem firmware and DMR login
+	// state; pages never fork a log scan.
+	go followJournal(context.Background())
 	go func() {
-		var rows []HeardRow
-		var ok bool
-		var next time.Time
 		for {
 			s := collect()
 			s.Radio = readRadio()
-			if !time.Now().Before(next) {
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				rows, ok = collectHeard(ctx)
-				cancel()
-				next = time.Now().Add(15 * time.Second)
-			}
+			rows, _, ok := recentHeard.live()
 			s.Heard, s.HeardAvailable, s.UpdatedAt = rows, ok, time.Now().UTC()
 			snapshot.Store(&s)
 			time.Sleep(5 * time.Second)
 		}
 	}()
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/dashboard", dashboardHandler())
 	mux.HandleFunc("GET /api/last_heard.php", func(w http.ResponseWriter, r *http.Request) {
 		serveLegacyHeard(w, r, snapshot.Load())
 	})

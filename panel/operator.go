@@ -47,7 +47,7 @@ func operatorHandler(assetDir, upstream string, managementPort int) http.Handler
 		case "/runtime.json":
 			operatorReply(writer, request, 200, "application/json", []byte(fmt.Sprintf(`{"backend":"pistar-go","wizardPort":%d}`, managementPort)))
 			return
-		case "/api/status":
+		case "/api/status", "/api/dashboard":
 			operatorProxy(writer, request, client, upstream, target, true)
 			return
 		}
@@ -105,7 +105,7 @@ func operatorProxy(writer http.ResponseWriter, request *http.Request, client *ht
 }
 
 func operatorRedirect(request *http.Request, managementPort int) string {
-	public := map[string]string{"/index.php": "/#overview", "/mmdvmhost/lh.php": "/#heard-all", "/mmdvmhost/localtx.php": "/#heard-rf", "/mmdvmhost/repeaterinfo.php": "/#overview"}
+	public := map[string]string{"/index.php": "/", "/mmdvmhost/lh.php": "/", "/mmdvmhost/localtx.php": "/", "/mmdvmhost/repeaterinfo.php": "/"}
 	if location := public[request.URL.RequestURI()]; location != "" {
 		return location
 	}

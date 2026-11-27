@@ -44,7 +44,7 @@ func TestPreviewProxiesOnlyToAuthenticatedTLSFixture(t *testing.T) {
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls++
 		user, password, ok := request.BasicAuth()
-		if !ok || user != "admin" || password != "fixture-only" {
+		if !ok || user != "pi-star" || password != "fixture-only" {
 			t.Error("missing fixture authentication")
 		}
 		if request.Header.Get("Origin") != "https://"+request.Host {

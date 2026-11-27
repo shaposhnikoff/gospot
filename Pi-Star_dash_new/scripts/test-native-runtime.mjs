@@ -76,7 +76,7 @@ try {
   function management(path, authenticated) {
     return new Promise((done, reject) => {
       const request = httpsRequest({ hostname: '127.0.0.1', port: adminPort, path, ca: readFileSync(cert),
-        headers: authenticated ? { Authorization: 'Basic ' + Buffer.from('admin:' + password).toString('base64') } : {} }, response => {
+        headers: authenticated ? { Authorization: 'Basic ' + Buffer.from('pi-star:' + password).toString('base64') } : {} }, response => {
         const chunks = [];
         response.on('data', chunk => chunks.push(chunk));
         response.on('end', () => done({ status: response.statusCode, body: Buffer.concat(chunks) }));

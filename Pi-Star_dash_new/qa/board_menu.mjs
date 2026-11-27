@@ -80,7 +80,7 @@ try {
       const a=p.authChallenge;
       const allow=a.source==='Server' && a.origin===admin && a.realm==='Pi-Star' && a.scheme==='basic' && new URL(p.request.url).pathname.startsWith('/manage/');
       void cdp('Fetch.continueWithAuth',{requestId:p.requestId,authChallengeResponse:allow?
-        {response:'ProvideCredentials',username:'admin',password:ssh('sudo -n cat /etc/pistar-wizard/admin-password')}:{response:'CancelAuth'}});
+        {response:'ProvideCredentials',username:'pi-star',password:ssh('sudo -n cat /etc/pistar-wizard/admin-password')}:{response:'CancelAuth'}});
     } else if(method==='Network.responseReceived' && posts.some(x=>x.id===p.requestId)){
       posts.find(x=>x.id===p.requestId).status=p.response.status;
     } else if(method==='Network.responseReceived' && ['/manage/api/services','/manage/api/protocols'].some(k=>p.response.url===admin+k)){

@@ -44,9 +44,9 @@ func TestWizardAuthentication(t *testing.T) {
 			status           int
 		}{
 			{"https://node", "", "", 401},
-			{"https://node", "admin", "bad", 401},
+			{"https://node", wizardUser, "bad", 401},
 			{"https://node", "guest", "admin-secret", 401},
-			{"http://node", "admin", "admin-secret", 503},
+			{"http://node", wizardUser, "admin-secret", 503},
 		} {
 			r := httptest.NewRequest("GET", tc.base+path, nil)
 			if tc.user != "" {
@@ -64,7 +64,7 @@ func TestWizardAuthentication(t *testing.T) {
 	for _, path := range paths {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "https://node"+path, nil)
-		r.SetBasicAuth("admin", "")
+		r.SetBasicAuth(wizardUser, "")
 		mux.ServeHTTP(w, r)
 		if w.Code != 503 {
 			t.Errorf("%s missing credential: %d", path, w.Code)
@@ -87,7 +87,7 @@ func TestWizardForms(t *testing.T) {
 		return []byte(`{"callsign":"\"><script>","password":"network-secret"}`), nil
 	}, t.TempDir()).ServeHTTP
 	get := httptest.NewRequest("GET", "https://node/?action=rollback", nil)
-	get.SetBasicAuth("admin", "admin-secret")
+	get.SetBasicAuth(wizardUser, "admin-secret")
 	w := httptest.NewRecorder()
 	handle(w, get)
 	if w.Code != 200 || action != "read" || strings.Contains(w.Body.String(), "<script>") || strings.Contains(w.Body.String(), "secret") {
@@ -99,7 +99,7 @@ func TestWizardForms(t *testing.T) {
 	}
 	post := func(origin, body string, cookie bool) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "https://node/", strings.NewReader(body))
-		r.SetBasicAuth("admin", "admin-secret")
+		r.SetBasicAuth(wizardUser, "admin-secret")
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		r.Header.Set("Origin", origin)
 		if cookie {
@@ -144,7 +144,7 @@ func TestWizardForms(t *testing.T) {
 
 func wizardRequest(method, path string, form url.Values, origin string, cookie *http.Cookie) *http.Request {
 	r := httptest.NewRequest(method, "https://node"+path, strings.NewReader(form.Encode()))
-	r.SetBasicAuth("admin", "admin-secret")
+	r.SetBasicAuth(wizardUser, "admin-secret")
 	if form != nil {
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}

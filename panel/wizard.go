@@ -89,6 +89,9 @@ func wizardCredential() ([32]byte, bool) {
 	return [32]byte{}, false
 }
 
+// wizardUser is the classic Pi-Star administrator login.
+const wizardUser = "pi-star"
+
 const wizardCookie = "__Host-pistar-csrf"
 const wizardConfigPath = "/manage/api/config"
 
@@ -108,7 +111,7 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		}
 		user, pass, ok := r.BasicAuth()
 		sum := sha256.Sum256([]byte(pass))
-		if !ok || user != "admin" || subtle.ConstantTimeCompare(sum[:], password[:]) != 1 {
+		if !ok || user != wizardUser || subtle.ConstantTimeCompare(sum[:], password[:]) != 1 {
 			h.Set("WWW-Authenticate", `Basic realm="Pi-Star", charset="UTF-8"`)
 			http.Error(w, "Требуется вход", 401)
 			return

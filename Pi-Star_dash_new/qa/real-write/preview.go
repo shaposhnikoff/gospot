@@ -33,7 +33,7 @@ func previewHandler(assets string, upstream *url.URL, password string, roots *x5
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.SetURL(upstream)
 			request.Out.Host = upstream.Host
-			request.Out.SetBasicAuth("admin", password)
+			request.Out.SetBasicAuth("pi-star", password)
 			if request.In.Header.Get("Origin") != "" {
 				request.Out.Header.Set("Origin", upstream.String())
 			}

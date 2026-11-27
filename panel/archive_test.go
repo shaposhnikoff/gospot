@@ -75,7 +75,7 @@ func TestArchiveAuthenticatedDispatch(t *testing.T) {
 			t.Fatalf("%s did not require credentials", path)
 		}
 		// Wrong method exercises dispatch without ever invoking sudo.
-		r.SetBasicAuth("admin", "admin-secret")
+		r.SetBasicAuth(wizardUser, "admin-secret")
 		if path == archiveBackupPath {
 			r.Method = "POST"
 		}

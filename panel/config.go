@@ -137,6 +137,7 @@ func applySettings(s settings) error {
 	lib, ui, bm := path("DASHBOARD_LIB_DIR"), path("DASHBOARD_UI_DIR"), path("DASHBOARD_BM_STATE_DIR")
 	logDir, release, hosts := path("PISTAR_LOG_DIR"), path("PISTAR_RELEASE_FILE"), path("PISTAR_HOSTS_DIR")
 	cssFile := path("PISTAR_CSS_FILE")
+	keeperLog := path("PISTAR_KEEPER_LOG")
 	update := path("PISTAR_UPDATE_LOG")
 	path("MODEM_FLASH_LOG")
 	jitter, jitterLimit := path("PISTAR_JITTER_LOG"), seconds("JITTER_TIMEOUT", 1, 9999)
@@ -193,6 +194,7 @@ func applySettings(s settings) error {
 	bmKeyFile = bmKey
 	tgifKeyFile, tgifAPIURL, tgifSessionURL = tgifKey, tgifAPI, tgifSession
 	pistarCSSFile = cssFile
+	pistarKeeperLog = keeperLog
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort = pp, mp, op
 	modemDiagnostic, masterDiagnostic = diagnosticFor(modem, modemRules), diagnosticFor(master, masterRules)
 	return nil

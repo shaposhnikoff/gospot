@@ -1,0 +1,6 @@
+2026-11-27 06:20:00: Repeater header - My: M0XYZ   /ID51  Your: CQCQCQ    Rpt1: M1ABC  B  Rpt2: M1ABC  G  Flags: 00 00 00
+2026-11-27 06:21:00: DCS header - My: PU2ZHZ  /T     Your: CQCQCQ    Rpt1: PU2ZHZ B  Rpt2: DCS007 B  Flags: 00 00 00
+2026-11-27 06:22:00: Repeater header - My: M0XYZ   /ID51  Your: DCS001CL  Rpt1: M1ABC  B  Rpt2: M1ABC  G  Flags: 00 00 00
+2026-11-27 06:23:00: DPlus header - My: PD1RB   /IC92  Your: CQCQCQ    Rpt1: PE1RJV B  Rpt2: REF017 A  Flags: 00 00 00
+2026-11-27 06:24:00: DExtra header - My: M1ABC   /TIME  Your: CQCQCQ    Rpt1: XRF001 G  Rpt2: XRF001 C  Flags: 00 00 00
+2026-11-27 06:25:00: Repeater header - My: 2E0ABC  /      Your: CQCQCQ    Rpt1: M1ABC  B  Rpt2: M1ABC  G  Flags: 00 00 00

@@ -144,6 +144,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		case "/manage/api/configure/factory-reset":
 			serveFactoryReset(w, r, runConfigureHelper)
 			return
+		case "/manage/api/links/dstar", "/manage/api/links/dstar/keeper":
+			serveDStarLinks(w, r, runRemoteControl)
+			return
 		case "/manage/api/links/tgif":
 			serveTGIF(w, r, tgif)
 			return

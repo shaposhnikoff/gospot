@@ -978,6 +978,189 @@ def exercise_backup(v, stand, origin, folder, original):
           "exact file bytes, no PHP), restore of changed files back to the archive with modes kept and DMRGateway then "
           "MMDVMHost restarted, unsafe archive refused without writes or restarts", flush=True)
 
+DSTAR_FIXTURES = Path(__file__).resolve().parents[2] / "panel/testdata/dstar"
+DSTAR_CALLS = "/run/pistar-qa/remotecontrold-calls"
+DSTAR_PASSWORD = "rc-Secret-7"  # remotePassword of the ircddbgateway fixture
+DSTAR_ACCEPTED = "remotecontrold: command accepted by the gateway/starnetserver"
+
+
+def exercise_dstar(v, stand, origin, original):
+    """D-Star panels (dstarrepeater/*.php) for both controllers and the D-Star Link
+    Manager, with classic fixture logs and a fake remotecontrold at PISTAR_BIN_DIR."""
+    conf = stand_settings(stand)
+    host_ini = conf["CONF_MMDVMHOST"]
+    logs, hosts = conf["PISTAR_LOG_DIR"], conf["PISTAR_HOSTS_DIR"]
+    markers = conf["MARKER_MMDVMHOST"], conf["MARKER_DSTARREPEATER"]
+    history = stand.restarts()
+    seen = []
+
+    def put(path, data, mode="644"):
+        stand.exec("sh", "-c", 'mkdir -p "$(dirname "$1")" && printf "%s" "$2" >"$1" && chown root:root "$1" && chmod "$3" "$1"',
+                   "sh", path, data, mode)
+
+    for name in ("Links.log", "Headers.log", "STARnet.log"):
+        put(f"{logs}/{name}", (DSTAR_FIXTURES / name).read_text())
+    for name in ("DCS_Hosts.txt", "DPlus_Hosts.txt", "DExtra_Hosts.txt"):
+        put(f"{hosts}/{name}", (DSTAR_FIXTURES / name).read_text())
+    put(conf["CONF_IRCDDBGATEWAY"], (DSTAR_FIXTURES / "ircddbgateway").read_text())
+    install_fake(stand, FAKES / "fake-remotecontrold", conf["PISTAR_BIN_DIR"] + "/remotecontrold")
+    stand.exec("sh", "-c", 'rm -f "$1" && touch "$1" && chown pistar-wizard:pistar-wizard "$1"', "sh", DSTAR_CALLS)
+    # MMDVMHost with D-Star and the D-Star network; the panels read the INI as pistar-wizard.
+    stand.exec("sh", "-c", 'printf "\\n[D-Star]\\nEnable=1\\n\\n[D-Star Network]\\nEnable=1\\n" >>"$1" && chmod 644 "$1"', "sh", host_ini)
+    stand.exec("sh", "-c", 'rm -f "$2" && touch "$1"', "sh", *markers)
+
+    def calls():
+        return [json.loads(line) for line in stand.read(DSTAR_CALLS).decode().splitlines()]
+
+    def rows(selector):
+        return v.js("return [...document.querySelectorAll(arguments[0])].map(r => [...r.cells].map(c => "
+                    "c.textContent.replace(/\\u00a0/g, ' ').trim()))", selector)
+
+    def reload():
+        v.command("/url", {"url": origin + "/manage/#power"})
+        v.command("/url", {"url": origin + "/manage/"})
+
+    def choose(name, value):
+        v.js("const e=document.querySelector(`#dstarLinkManager [name=\"${arguments[0]}\"]`); e.value=arguments[1];"
+             "e.dispatchEvent(new Event('change',{bubbles:true}))", name, value)
+
+    def request(module, ref, letter, action="LINK"):
+        wait("D-Star Link Manager form", lambda: v.js("return !!document.querySelector('#dstarLinkManager select[name=Module] option')"))
+        choose("Module", module)
+        if ref is not None:
+            choose("RefName", ref)
+        choose("Letter", letter)
+        v.js("document.querySelector(`#dstarLinkManager input[name=Link][value=\"${arguments[0]}\"]`).click()", action)
+        before = len(calls())
+        v.click('#dstarLinkManager input[type=submit]')
+        wait("Command Output " + DSTAR_ACCEPTED, lambda: v.js(
+            "return [...document.querySelectorAll('td')].some(td => td.textContent.trim() === arguments[0])", DSTAR_ACCEPTED))
+        new = calls()[before:]
+        equal("one remotecontrold call", len(new), 1)
+        call = new[0]
+        equal("remotecontrold settings", (call["address"], call["port"], call["password_sha256"], call["home_mode"], call["conf_mode"]),
+              ("127.0.0.1", "10022", sha256(DSTAR_PASSWORD.encode()).hexdigest(), "0o700", "0o600"))
+        equal("remotecontrold environment", call["env"], ["HOME", "LANG", "PATH"])
+        equal("private HOME removed", stand.exists(call["home"]), False)
+        wait("form back after 2 s", lambda: v.js("return !!document.querySelector('#dstarLinkManager')"), timeout=8)
+        return call["argv"]
+
+    def post(body, csrf=True):
+        return v.command('/execute/async', {'script': """const done=arguments[arguments.length-1];
+          fetch('/manage/api/links/dstar',{cache:'no-store'}).then(r=>r.json()).then(d=>fetch('/manage/api/links/dstar',
+          {method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':arguments[1]?d.csrf:''},body:JSON.stringify(arguments[0])}))
+          .then(async r=>done([r.status,(await r.text()).trim()]))""", 'args': [body, csrf]})
+
+    def no_password(stage):
+        for e in v.events():
+            p = e["params"]
+            if e["method"] == "Network.requestWillBeSent" and "/api/" in p["request"]["url"]:
+                seen.append(p["request"].get("postData", ""))
+            if e["method"] == "Network.responseReceived" and "/api/" in p["response"]["url"]:
+                try:
+                    seen.append(v.cdp("Network.getResponseBody", {"requestId": p["requestId"]})["body"])
+                except Exception:  # a body the page dropped carries nothing to leak
+                    pass
+        texts = {"page": v.js("return document.documentElement.outerHTML"), "network": "\n".join(seen),
+                 "logs": stand.read("/tmp/pistar-wizard.log").decode(errors="replace") + stand.read("/tmp/pistar-panel.log").decode(errors="replace")}
+        for name, text in texts.items():
+            for secret in (DSTAR_PASSWORD, "irc-Secret-3"):
+                if secret in text:
+                    raise AssertionError(f"{stage}: a gateway password is visible in the {name}")
+
+    links = [["M1ABC  B", "DCS001 C", "Auto", "Never", "Up", "DCS001 C", "DCS", "Outgoing", "06:10:01 Nov 27th"],
+             ["M1ABC  B", "", "", "", "Up", "XRF023 A", "DExtra", "Incoming", "06:11:02 Nov 27th"],
+             ["M1ABC  B", "", "", "", "Up", "W1CDG", "DPlus", "Incoming", "06:12:03 Nov 27th"],
+             ["M1ABC  C", "", "No", "5min", "Down", "None", "--", "----", "----"],
+             ["M1ABC  C", "", "", "", "Up", "W1CDG", "DPlus", "Incoming", "06:12:03 Nov 27th"]]
+    ccs = [["M1ABC  B", "DL5DI", "CCS", "Incoming", "06:13:04 Nov 27th"]]
+    groups = [["STN001 A", "STN001 L", "QA Net", "300", "0"]]
+    members = [["06:31:00 Nov 27th", "STN001 A", "2E0ABC"], ["06:33:00 Nov 27th", "STN001 A", "M0XYZ"]]
+
+    def common_panels(stage):
+        wait(stage + " reflector links", lambda: rows("#refLinks tr:not(:first-child)") == links, timeout=10)
+        equal(stage + " link table title", v.js("return document.querySelector('#refLinks > b')?.textContent"), "D-Star Link Information")
+        equal(stage + " CCS rows", rows("#cssConnects table:nth-of-type(1) tr:not(:first-child)"), ccs)
+        titles = v.js("return [...document.querySelectorAll('#cssConnects > b')].map(b => b.textContent)")
+        equal(stage + " CCS titles", titles, ["Active CCS Connections", "Active Starnet Groups", "Active Starnet Group Members"])
+        equal(stage + " StarNet groups", rows("#cssConnects table:nth-of-type(2) tr:not(:first-child)"), groups)
+        equal(stage + " StarNet members", rows("#cssConnects table:nth-of-type(3) tr:not(:first-child)"), members)
+        wait(stage + " link manager", lambda: v.js("return !!document.querySelector('#dstarLinkManager select[name=Module] option')"))
+        equal(stage + " modules", v.js("return [...document.querySelectorAll('#dstarLinkManager select[name=Module] option')].map(o => o.value)"),
+              ["M1ABC  B", "M1ABC  C"])
+        equal(stage + " reflectors", v.js("return [...document.querySelectorAll('#dstarLinkManager select[name=RefName] option')].map(o => o.textContent)"),
+              ["DCS001", "Text Entry", "DCS001", "DCS002", "XLX000", "REF001", "XRF757", "XRF001", "XRF023"])
+        equal(stage + " letters", v.js("return [...document.querySelectorAll('#dstarLinkManager select[name=Letter] option')].map(o => o.value).join('')"),
+              "C" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+    v.events()
+    # 1. MMDVMHost with the D-Star network: links, link manager and CCS in the content column
+    reload()
+    common_panels("MMDVMHost")
+    equal("MMDVMHost: no gateway table or D-Star heard lists", v.js("return !!document.querySelector('#lh, #localTx')"), False)
+    equal("MMDVMHost: side menu kept", v.js("return !!document.querySelector('.nav')"), True)
+    # 2. link, unlink and Text Entry run the fake with exactly the classic arguments
+    equal("link", request("M1ABC  C", "XRF023", "A"), ["M1ABC  C", "link", "never", "XRF023 A"])
+    equal("unlink", request("M1ABC  B", None, "C", "UNLINK"), ["M1ABC  B", "unlink"])
+    wait("form", lambda: v.js("return !!document.querySelector('#dstarLinkManager select[name=RefName]')"))
+    choose("RefName", "customOption")
+    wait("Text Entry field", lambda: v.js("return !!document.querySelector('#dstarLinkManager input[name=RefName]')"))
+    v.type_into('#dstarLinkManager input[name=RefName]', "xlx123")
+    equal("Text Entry", request("M1ABC  B", None, "D"), ["M1ABC  B", "link", "never", "XLX123 D"])
+    # 3. refused requests run nothing
+    before = len(calls())
+    for body, csrf, status in (
+            ({"action": "LINK", "module": "M1ABC  B", "refName": "DCS002", "letter": "B"}, False, 403),
+            ({"action": "LINK", "module": "M1ABC  B", "refName": "DCS002;reboot", "letter": "B", "custom": True}, True, 400),
+            ({"action": "UNLINK", "module": "G0XYZ  B"}, True, 422),
+            ({"action": "LINK", "module": "M1ABC  B", "refName": "REF999", "letter": "A"}, True, 422)):
+        equal(f"refused {body}", post(body, csrf)[0], status)
+    equal("self link", post({"action": "LINK", "module": "M1ABC  B", "refName": "M1ABC", "letter": "B", "custom": True}),
+          [200, '{"output":"Cannot link to myself - Aborting link request!"}'])
+    equal("refused requests ran nothing", len(calls()), before)
+    no_password("MMDVMHost")
+    # 3b. the classic bare-text message for bad input, shown by the page itself
+    choose("RefName", "customOption")
+    wait("Text Entry field", lambda: v.js("return !!document.querySelector('#dstarLinkManager input[name=RefName]')"))
+    v.type_into('#dstarLinkManager input[name=RefName]', "bad;x")
+    v.click('#dstarLinkManager input[type=submit]')
+    wait("classic input message", lambda: "Somthing wrong with your input, try again" in v.js("return document.querySelector('.content').innerText"))
+    equal("bad input ran nothing", len(calls()), before)
+    wait("form back", lambda: v.js("return !!document.querySelector('#dstarLinkManager')"), timeout=8)
+    # 4. DStarRepeater controller: D-Star only page, gateway config and Headers.log lists
+    stand.exec("sh", "-c", 'rm -f "$1" && touch "$2"', "sh", *markers)
+    reload()
+    wait("DStarRepeater layout", lambda: v.js("return !!document.querySelector('#lh table') && !document.querySelector('.nav')"), timeout=10)
+    equal("gateway software config", rows(".contentwide:not(#sysInfo) > table tr"),
+          [["ircDDB Network", "APRS Host", "CCS", "DCS", "DExtra", "DPlus", "D-Rats", "Info", "ircDDB", "Echo", "Log"],
+           ["ircv4.openquad.net", "rotate.aprs2.net", "OFF", "ON", "ON", "ON", "OFF", "ON", "ON", "ON", "ON"]])
+    common_panels("DStarRepeater")
+    heard = [["06:25:00 Nov 27th", "2E0ABC (dPRS)", "CQCQCQ", "M1ABC  B", "M1ABC  G"],
+             ["06:23:00 Nov 27th", "PD1RB/IC92 (dPRS)", "CQCQCQ", "PE1RJV B", "REF017 A"],
+             ["06:22:00 Nov 27th", "M0XYZ/ID51 (dPRS)", "DCS001CL", "M1ABC  B", "M1ABC  G"],
+             ["06:21:00 Nov 27th", "PU2ZHZ/T (dPRS)", "CQCQCQ", "PU2ZHZ B", "DCS007 B"]]
+    equal("Gateway Activity", rows("#lh tr:not(:first-child)"), heard)
+    equal("Local RF Activity", rows("#localTx tr:not(:first-child)"), [heard[0], heard[2]])
+    equal("list titles", v.js("return [document.querySelector('#lh > b').textContent, document.querySelector('#localTx > b').textContent]"),
+          ["Gateway Activity", "Local RF Activity"])
+    equal("lookup links", v.js("return [...document.querySelectorAll('#lh tr:nth-child(3) a')].map(a => a.href)"),
+          ["https://database.radioid.net/database/view?callsign=PD1RB", "https://aprs.fi/#!call=PD1RB*"])
+    equal("DStarRepeater unlink", request("M1ABC  C", None, "C", "UNLINK"), ["M1ABC  C", "unlink"])
+    no_password("DStarRepeater")
+    # restore the fixture: markers off, original MMDVMHost INI bytes and mode
+    stand.exec("rm", "-f", *markers)
+    stand.exec("sh", "-c", 'printf "%s" "$2" >"$1" && chown mmdvm:mmdvm "$1" && chmod 640 "$1"', "sh", host_ini, original[0].decode())
+    same_pair("D-Star leaves radio files", stand.pair(), original)
+    equal("D-Star restarts", stand.restarts(), history)
+    print("PASS Chromium D-Star: MMDVMHost with the D-Star network shows D-Star Link Information (module B linked out to DCS001 C, "
+          "incoming XRF023 A and dongle W1CDG; module C Down, 5min timer), the D-Star Link Manager and Active CCS Connections with "
+          "Starnet groups/members from the classic logs; DStarRepeater adds the gateway software config, Gateway Activity "
+          "(newest per station, /TIME dropped) and Local RF Activity without the side menu; link, unlink and Text Entry run the "
+          "fake remotecontrold once each with exactly [module, link, never, reflector] / [module, unlink], a private 0700 HOME "
+          "with a 0600 .Remote Control (127.0.0.1, remotePort, remotePassword) that is removed afterwards; CSRF 403, bad input "
+          "400, unknown module/reflector 422 and self-link run nothing; the gateway passwords never reach the page, network "
+          "or logs; radio files and services untouched", flush=True)
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -992,6 +1175,7 @@ def main():
     parser.add_argument("--calibration", action="store_true")
     parser.add_argument("--jitter", action="store_true")
     parser.add_argument("--tgif", action="store_true")
+    parser.add_argument("--dstar", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -1015,7 +1199,7 @@ def main():
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
             # /manage/ is the classic admin page; the station settings, DMR
             # services and backup pages live under their own sections.
-            if not (args.expert or args.backup or args.configure or args.css or args.factory or args.wifi or args.calibration or args.jitter or args.tgif):
+            if not (args.expert or args.backup or args.configure or args.css or args.factory or args.wifi or args.calibration or args.jitter or args.tgif or args.dstar):
                 command("/url", {"url": args.origin + "/manage/#settings"})
                 wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
             try:
@@ -1048,6 +1232,8 @@ def run_scenario(args, v, stand, folder, original, changed):
         exercise_jitter(v, stand, args.origin, original)
     elif args.tgif:
         exercise_tgif(v, stand, args.origin, original)
+    elif args.dstar:
+        exercise_dstar(v, stand, args.origin, original)
     elif args.services:
         exercise_services(v, stand, original)
     else:

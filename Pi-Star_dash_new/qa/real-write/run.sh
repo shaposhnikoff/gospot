@@ -22,6 +22,8 @@ if [[ ${1:-} == --factory ]]; then scenario+=(--factory); shift; fi
 if [[ ${1:-} == --wifi ]]; then scenario+=(--wifi); wifi=true; shift; fi
 if [[ ${1:-} == --calibration ]]; then scenario+=(--calibration); shift; fi
 if [[ ${1:-} == --jitter ]]; then scenario+=(--jitter); shift; fi
+# --dstar: fixture logs/configs and a fake remotecontrold are installed by the scenario itself.
+if [[ ${1:-} == --dstar ]]; then scenario+=(--dstar); shift; fi
 tgif=false
 if [[ ${1:-} == --tgif ]]; then scenario+=(--tgif); tgif=true; shift; fi
 if (($#)); then

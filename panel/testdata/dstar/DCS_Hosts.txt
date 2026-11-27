@@ -1,0 +1,5 @@
+# DCS_Hosts.txt
+# DCS999	commented.example
+DCS001	dcs001.xreflector.net
+DCS002	dcs002.xreflector.net
+XLX000	xlx000.example

@@ -23,6 +23,10 @@ Main page done (`ClassicDashboard.svelte`, `/api/dashboard`, release `deb-10`). 
 5. **Expert**: Quick Edit (generic section editor per file), Full Edit (text editors), Tools (SSH, jitter, modem firmware, upgrade), API keys.
 6. **Wi-Fi, Power, Update (Go: host files + apt, no dashboard git pull), Backup/Restore, Live Logs, Calibration.**
 
+### Deferred (user decision 2026-11-27)
+
+- **Displays (OLED, Nextion, HD44780, TFT): skipped, the user does not use screens.** The PS4 `MMDVMHost` still links `libArduiPi_OLED.so.1`, so `radio/build-libs.sh` ships the library only to let the binary start; no display configuration, `pistar-oledtext.py`/`pistar-nextiontext.py` handling, NextionDriver unit or display settings pages until requested.
+
 ## OS image (Trixie, armhf first, arm64 later, local build only)
 
 All three boards are Raspberry Pi 2 Model B (Bookworm armhf); Rev 1.1 boards cannot run arm64. Steps 2–5 target armhf first; repeat them for arm64 only after the armhf image passes verification.

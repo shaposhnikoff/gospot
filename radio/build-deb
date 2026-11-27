@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# Build pistar-radio: the Pi-Star PS4 radio binaries, the reusable Pi-Star
+# sbin tools and service handlers, systemd units for them, the shared
+# libraries Debian lacks, and a daily host-file update timer.
+# All paths come from Pi-Star_dash_new/pistar.conf.
+set -euo pipefail
+cd "$(dirname "$0")"
+umask 022
+suite=${1:-bookworm}
+# shellcheck source=../Pi-Star_dash_new/pistar.conf
+source ../Pi-Star_dash_new/pistar.conf
+settings_dir=$PWD/../Pi-Star_dash_new
+bin_src=$(cd "$settings_dir/$PISTAR_BINARIES_BIN_DIR" && pwd)
+sbin_src=$(cd "$settings_dir/$PISTAR_BINARIES_SBIN_DIR" && pwd)
+libs=$PWD/build/$suite/lib
+[[ -e $libs/libArduiPi_OLED.so.1.0 ]] || ./build-libs.sh "$suite"
+
+# PS4 daemons and tools that run without wxWidgets. D-Star (ircddbgatewayd,
+# dstarrepeaterd, ...), displays (NextionDriver, MMDVMHost_Adafruit) and the
+# apt/dpkg remount wrappers are deliberately not shipped.
+binaries=(MMDVMHost DMRGateway YSFGateway P25Gateway NXDNGateway DAPNETGateway M17Gateway
+  DGIdGateway APRSGateway YSF2DMR YSF2NXDN YSF2P25 DMR2YSF DMR2NXDN NXDN2DMR
+  YSFParrot P25Parrot NXDNParrot MMDVMCal RemoteCommand MobileGPS teensy_loader_cli platformDetect.sh)
+# Service handlers (start|stop|restart) for the shipped daemons.
+services=(mmdvmhost dmrgateway ysfgateway ysfparrot p25gateway p25parrot nxdngateway nxdnparrot
+  nxdn2dmr dapnetgateway m17gateway dgidgateway aprsgateway ysf2dmr ysf2nxdn ysf2p25 dmr2ysf dmr2nxdn mobilegps)
+# Tools without references to the PHP dashboard, nginx or /var/www.
+tools=(HostFilesUpdate.sh pistar-bmapi pistar-dapnetapi pistar-tgifapi pistar-link pistar-ysflink
+  pistar-p25link pistar-nxdnlink pistar-findmodem pistar-mmdvmcal pistar-mmdvmhost-module
+  pistar-mmdvmremote pistar-modemupgrade pistar-jittertest pistar-sendcw pistar-motdgen
+  pistar-firewall pistar-expand)
+
+version=$(sed -n 's/^Version: //p' debian/control)
+version=${DEB_VERSION:-$version}
+dpkg --validate-version "$version"
+d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+p=$d/pkg
+install -d "$p/DEBIAN" "$p$PISTAR_BIN_DIR" "$p$PISTAR_SBIN_DIR" "$p/usr/local/lib" "$p$SYSTEMD_UNIT_DIR" "$p$RADIO_SHARE_DIR"
+sed "s/^Version: .*/Version: $version/" debian/control >"$p/DEBIAN/control"
+install -m755 debian/postinst "$p/DEBIAN/"
+
+for b in "${binaries[@]}"; do install -m755 "$bin_src/$b" "$p$PISTAR_BIN_DIR/$b"; done
+cp -a "$bin_src/firmware" "$p$PISTAR_BIN_DIR/firmware"
+find "$p$PISTAR_BIN_DIR/firmware" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
+install -m644 "$bin_src/config_clean.zip" "$p$RADIO_SHARE_DIR/config_clean.zip"
+for t in "${tools[@]}"; do install -m755 "$sbin_src/$t" "$p$PISTAR_SBIN_DIR/$t"; done
+# Shared libraries; the OLED one only satisfies MMDVMHost's link, no display is configured.
+for f in "$libs"/*; do
+  if [[ -L $f ]]; then ln -s "$(basename "$(readlink "$f")")" "$p/usr/local/lib/$(basename "$f")"
+  else install -m644 "$f" "$p/usr/local/lib/"; fi
+done
+
+for s in "${services[@]}"; do
+  install -m755 "$sbin_src/$s.service" "$p$PISTAR_SBIN_DIR/$s.service"
+  cat >"$p$SYSTEMD_UNIT_DIR/$s.service" <<EOF
+[Unit]
+Description=Pi-Star $s (handler $PISTAR_SBIN_DIR/$s.service)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# The Pi-Star handler starts the daemon (Daemon=1 in its config) and exits;
+# it exits without starting anything when the mode is not configured.
+Type=forking
+ExecStart=$PISTAR_SBIN_DIR/$s.service start
+ExecStop=$PISTAR_SBIN_DIR/$s.service stop
+ExecReload=$PISTAR_SBIN_DIR/$s.service restart
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+done
+
+cat >"$p$SYSTEMD_UNIT_DIR/pistar-hostfiles.service" <<EOF
+[Unit]
+Description=Pi-Star host files and ID database update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$PISTAR_SBIN_DIR/HostFilesUpdate.sh
+EOF
+cat >"$p$SYSTEMD_UNIT_DIR/pistar-hostfiles.timer" <<EOF
+[Unit]
+Description=Daily Pi-Star host files update
+
+[Timer]
+OnBootSec=10min
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Paths the maintainer script needs, resolved at build time.
+cat >"$p$RADIO_SHARE_DIR/paths" <<EOF
+PISTAR_LOG_DIR=$PISTAR_LOG_DIR
+PISTAR_HOSTS_DIR=$PISTAR_HOSTS_DIR
+PISTAR_RELEASE_FILE=$PISTAR_RELEASE_FILE
+RADIO_USER=$RADIO_USER
+EOF
+chmod 644 "$p$RADIO_SHARE_DIR/paths"
+
+if find "$p" -name '*.php' | grep -q .; then echo "PHP in package" >&2; exit 1; fi
+(cd "$p" && find usr lib -type f -print0 | LC_ALL=C sort -z | xargs -0 md5sum >DEBIAN/md5sums)
+mkdir -p "build/$suite"
+dest=build/$suite/pistar-radio_${version}_armhf.deb
+dpkg-deb --root-owner-group --build "$p" "$dest" >/dev/null
+sha256sum "$dest"

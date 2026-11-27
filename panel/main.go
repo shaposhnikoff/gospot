@@ -67,7 +67,7 @@ func main() {
 	var snapshot atomic.Pointer[Status]
 	// One journalctl follower feeds last-heard, modem firmware and DMR login
 	// state; pages never fork a log scan.
-	go followJournal(context.Background())
+	go followRadioLogs(context.Background())
 	go func() {
 		for {
 			s := collect()

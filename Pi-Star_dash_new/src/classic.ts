@@ -7,7 +7,7 @@ export type Row = {
   duration: number | null; loss: number | null; ber: number | null; rssi: number | null; live: boolean;
 };
 export type Dashboard = {
-  Hostname: string; Callsign: string; Version: string; Controller: string;
+  Hostname: string; Callsign: string; Version: string; PiStar: string; Controller: string;
   Modes: Cell[] | null; Networks: Cell[] | null;
   TRX: { kind: string; mode: string; label: string };
   TX: string; RX: string; Firmware: string; TCXO: string;

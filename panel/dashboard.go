@@ -77,6 +77,7 @@ type dashboard struct {
 	Hostname   string
 	Callsign   string
 	Version    string
+	PiStar     string
 	Controller string
 	Modes      []dashCell
 	Networks   []dashCell
@@ -123,6 +124,7 @@ type dashInputs struct {
 	procs                           map[string]bool
 	login                           map[string]int
 	firmware, tcxo                  string
+	release                         iniData
 	rows, active                    []HeardRow
 	heardOK                         bool
 	hostname                        string
@@ -144,11 +146,15 @@ func (in dashInputs) enabled(section string) bool { return in.host.on(section, "
 // dmrViaGateway mirrors the classic check: MMDVMHost points its DMR network
 // at the local DMRGateway.
 func (in dashInputs) dmrViaGateway() bool {
-	addr := in.host.get("DMR Network", "Address")
-	if addr == "" {
-		addr = in.host.get("DMR Network", "GatewayAddress")
+	if t := in.host.get("DMR Network", "Type"); t != "" {
+		return t == "Gateway"
 	}
-	return addr == "127.0.0.1"
+	for _, key := range []string{"Address", "RemoteAddress", "GatewayAddress"} {
+		if addr := in.host.get("DMR Network", key); addr != "" {
+			return addr == "127.0.0.1"
+		}
+	}
+	return false
 }
 
 func (in dashInputs) xEnabled(d iniData) bool { return d.on("Enabled", "Enabled") }
@@ -318,7 +324,7 @@ func buildDashboard(in dashInputs) dashboard {
 		return mhz(v)
 	}
 	zone, _ := in.now.In(time.Local).Zone()
-	d := dashboard{Hostname: in.hostname, Callsign: callsign, Version: dashboardVersion, Controller: in.controller,
+	d := dashboard{Hostname: in.hostname, Callsign: callsign, Version: dashboardVersion, PiStar: in.release.get("Pi-Star", "Version"), Controller: in.controller,
 		TX: freq("TXFrequency"), RX: freq("RXFrequency"), Firmware: in.firmware, TCXO: in.tcxo,
 		HeardReady: in.heardOK, TimeZone: zone, Now: in.now.UTC()}
 	if in.controller != "mmdvmhost" {
@@ -415,7 +421,7 @@ func gatherDashboard(now time.Time) dashboard {
 		host: mmdvmINI.load(), gw: dmrGWINI.load(), dapnet: dapnetINI.load(), ircddb: ircddbINI.load(), dstar: dstarRptINI.load(),
 		ysf2dmr: ysf2dmrINI.load(), ysf2nxdn: ysf2nxdnINI.load(), ysf2p25: ysf2p25INI.load(),
 		dmr2ysf: dmr2ysfINI.load(), dmr2nxdn: dmr2nxdnINI.load(),
-		procs: runningProcesses(), login: login, firmware: firmware, tcxo: tcxo,
+		procs: runningProcesses(), login: login, firmware: firmware, tcxo: tcxo, release: releaseINI(),
 		rows: rows, active: active, heardOK: ok, hostname: strings.TrimSpace(string(host)),
 		controller: controllerMode(), now: now,
 	})
@@ -460,4 +466,13 @@ func classicClock(t time.Time) string {
 		}
 	}
 	return t.Format("15:04:05 Jan ") + strconv.Itoa(day) + suffix
+}
+
+var pistarRelease = newINIFile()
+
+func releaseINI() iniData {
+	if pistarRelease.location() != pistarReleaseFile {
+		pistarRelease.setPath(pistarReleaseFile)
+	}
+	return pistarRelease.load()
 }

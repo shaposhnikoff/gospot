@@ -94,7 +94,7 @@
 <div class="container" id="top">
   <div class="header">
     <div style="font-size: 8px; text-align: left; padding-left: 8px; float: left;">Hostname: {d?.Hostname ?? ''}</div>
-    <div style="font-size: 8px; text-align: right; padding-right: 8px;">Pi-Star:native / Dashboard: {d?.Version ?? ''}</div>
+    <div style="font-size: 8px; text-align: right; padding-right: 8px;">Pi-Star:{d?.PiStar || 'native'} / Dashboard: {d?.Version ?? ''}</div>
     <h1>Pi-Star Digital Voice Dashboard for {d?.Callsign ?? ''}</h1>
     <p style="padding-right: 5px; text-align: right; color: #ffffff;">
       <a href="/" style="color: #ffffff;">Dashboard</a> |

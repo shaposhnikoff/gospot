@@ -1024,12 +1024,24 @@ def exercise_hoseline(v, stand, origin, original):
     v.js("window.qaHoseline.forEach(s => s.close())")
     wait("listeners closed", lambda: len(spotter("close", before)) == limit, timeout=10)
     no_console_errors("limit", refused=True)
+    # 6. without AudioWorklet (the operator page over plain HTTP is not a secure
+    #    context) the player schedules buffer sources instead of failing
+    v.js("""Object.defineProperty(BaseAudioContext.prototype, 'audioWorklet', {get: () => undefined, configurable: true});
+            window.qaSources = 0; const orig = BaseAudioContext.prototype.createBufferSource;
+            BaseAudioContext.prototype.createBufferSource = function () { window.qaSources++; return orig.call(this); };""")
+    v.click('input[name="hoselinePlay"]')
+    wait("fallback plays audio", lambda: v.js("return window.qaSources") > 0, timeout=15)
+    if "unavailable" in status():
+        raise AssertionError("fallback reported: " + status())
+    v.click('input[name="hoselineStop"]')
+    wait("fallback stopped", lambda: status() == "Stopped")
     same_pair("Hoseline leaves radio files", stand.pair(), original)
     equal("Hoseline restarts", stand.restarts(), history)
     print("PASS Chromium Hoseline: table under Local RF Activity lists HOSELINE_TALKGROUPS (TG91 default); Play opens "
           f"one relay for TG{tg} (spotter saw the page token, Origin and the spotter subprotocol, then [1,[{tg}]]); "
           f"480-byte μ-law frames and start/end events arrive, the status links caller {HOSELINE_SOURCE}; Stop closes "
-          f"the upstream; with {limit} listeners open Play shows the limit error without a new relay; no CSP errors; "
+          f"the upstream; with {limit} listeners open Play shows the limit error without a new relay; without AudioWorklet "
+          "(plain HTTP) audio plays through scheduled buffer sources; no CSP errors; "
           "radio files and services untouched", flush=True)
 
 

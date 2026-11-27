@@ -129,3 +129,13 @@ export function refusal(g: Groups | null): string {
   if (g && g.max > 0 && g.listeners >= g.max) return `Too many listeners: all ${g.max} Hoseline slots are in use. Try again later.`;
   return 'Hoseline relay unavailable';
 }
+
+// Fallback player for insecure contexts (the operator page over plain HTTP
+// has no AudioWorklet): decoded frames are queued back to back as
+// AudioBufferSourceNodes. startAt picks when a frame begins: right after
+// the previous one, or PREBUFFER seconds from now after a gap or underrun.
+export const PREBUFFER = 0.2;
+
+export function startAt(now: number, next: number, prebuffer = PREBUFFER): number {
+  return next < now + 0.02 ? now + prebuffer : next;
+}

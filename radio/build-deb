@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build pistar-radio: the Pi-Star PS4 radio binaries, the reusable Pi-Star
-# sbin tools and service handlers, systemd units for them, the shared
-# libraries Debian lacks, and a daily host-file update timer.
+# sbin tools and service handlers, the Python 3 ports of pistar-watchdog and
+# pistar-remote (radio/sbin), systemd units for them, the shared libraries
+# Debian lacks, and a daily host-file update timer.
 # All paths come from Pi-Star_dash_new/pistar.conf.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -35,6 +36,9 @@ tools=(HostFilesUpdate.sh pistar-bmapi pistar-dapnetapi pistar-tgifapi pistar-li
   pistar-p25link pistar-nxdnlink pistar-findmodem pistar-mmdvmcal pistar-mmdvmhost-module
   pistar-mmdvmremote pistar-modemupgrade pistar-jittertest pistar-sendcw pistar-motdgen
   pistar-firewall pistar-expand)
+# Python 3 ports of Pi-Star daemons (radio/sbin) and their handlers, which are
+# named like their units, as in Pi-Star.
+daemons=(pistar-watchdog:"$UNIT_PISTAR_WATCHDOG" pistar-remote:"$UNIT_PISTAR_REMOTE")
 
 version=$(sed -n 's/^Version: //p' debian/control)
 version=${DEB_VERSION:-$version}
@@ -65,26 +69,53 @@ for f in "$libs"/*; do
   else install -m644 "$f" "$p/usr/local/lib/"; fi
 done
 
-for s in "${services[@]}"; do
-  install -m755 "$sbin_src/$s.service" "$p$PISTAR_SBIN_DIR/$s.service"
-  cat >"$p$SYSTEMD_UNIT_DIR/$s.service" <<EOF
+# A unit that runs a Pi-Star handler (start|stop|restart): the handler starts
+# its daemon and exits, or exits without starting anything when the mode (or
+# the remote) is not configured.
+handler_unit() {
+  local unit=$1
+  cat >"$p$SYSTEMD_UNIT_DIR/$unit" <<EOF
 [Unit]
-Description=Pi-Star $s (handler $PISTAR_SBIN_DIR/$s.service)
+Description=Pi-Star ${unit%.service} (handler $PISTAR_SBIN_DIR/$unit)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-# The Pi-Star handler starts the daemon (Daemon=1 in its config) and exits;
-# it exits without starting anything when the mode is not configured.
 Type=forking
-ExecStart=$PISTAR_SBIN_DIR/$s.service start
-ExecStop=$PISTAR_SBIN_DIR/$s.service stop
-ExecReload=$PISTAR_SBIN_DIR/$s.service restart
+ExecStart=$PISTAR_SBIN_DIR/$unit start
+ExecStop=$PISTAR_SBIN_DIR/$unit stop
+ExecReload=$PISTAR_SBIN_DIR/$unit restart
 TimeoutStartSec=120
 
 [Install]
 WantedBy=multi-user.target
 EOF
+}
+for s in "${services[@]}"; do
+  install -m755 "$sbin_src/$s.service" "$p$PISTAR_SBIN_DIR/$s.service"
+  handler_unit "$s.service"
+done
+# Pi-Star's own handlers for these run /usr/bin/python (Python 2); radio/sbin
+# has handlers for the Python 3 ports, which read the paths file below.
+for entry in "${daemons[@]}"; do
+  daemon=${entry%%:*} unit=${entry#*:}
+  sed "s|@RADIO_SHARE_DIR@|$RADIO_SHARE_DIR|g" "sbin/$daemon" >"$p$PISTAR_SBIN_DIR/$daemon"
+  chmod 755 "$p$PISTAR_SBIN_DIR/$daemon"
+  if grep -q '@RADIO_SHARE_DIR@' "$p$PISTAR_SBIN_DIR/$daemon"; then echo "placeholder left in $daemon" >&2; exit 1; fi
+  install -m755 "sbin/$daemon.service" "$p$PISTAR_SBIN_DIR/$unit"
+  handler_unit "$unit"
+done
+# The watchdog and the remote act only on units this package installs (the
+# Pi-Star delay timers they also stop are optional).
+for item in ${WATCHDOG_DSTARREPEATER_PROCESSES//,/ } ${WATCHDOG_MMDVMHOST_PROCESSES//,/ } \
+    ${WATCHDOG_COMMON_PROCESSES//,/ } "$UNIT_MMDVMHOST" "$UNIT_DSTARREPEATER" "$UNIT_PISTAR_REMOTE" \
+    ${REMOTE_MMDVMHOST_STOP_UNITS//,/ } ${REMOTE_DSTARREPEATER_STOP_UNITS//,/ } ${REMOTE_DMR_RESTART_UNITS//,/ } \
+    ${REMOTE_P25_RESTART_UNITS//,/ } ${REMOTE_DSTAR_RESTART_UNITS//,/ } ${REMOTE_YSF_RESTART_UNITS//,/ } \
+    ${REMOTE_DSTARREPEATER_RESTART_UNITS//,/ }; do
+  unit=${item#*:}
+  if [[ $unit != *.timer && ! -e $p$SYSTEMD_UNIT_DIR/$unit ]]; then
+    echo "pistar.conf names $unit, which pistar-radio does not install" >&2; exit 1
+  fi
 done
 
 cat >"$p$SYSTEMD_UNIT_DIR/pistar-hostfiles.service" <<EOF
@@ -111,14 +142,19 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-# Paths the maintainer script needs, resolved at build time.
-cat >"$p$RADIO_SHARE_DIR/paths" <<EOF
-PISTAR_LOG_DIR=$PISTAR_LOG_DIR
-PISTAR_HOSTS_DIR=$PISTAR_HOSTS_DIR
-PISTAR_RELEASE_FILE=$PISTAR_RELEASE_FILE
-RADIO_USER=$RADIO_USER
-RADIO_SHARE_DIR=$RADIO_SHARE_DIR
-EOF
+# Paths and units the maintainer script, pistar-watchdog and pistar-remote
+# need, resolved at build time.
+paths_keys=(PISTAR_LOG_DIR PISTAR_HOSTS_DIR PISTAR_RELEASE_FILE RADIO_USER RADIO_SHARE_DIR
+  PISTAR_BIN_DIR PISTAR_SBIN_DIR SYSTEM_LOG_DIR MARKER_MMDVMHOST MARKER_DSTARREPEATER
+  CONF_MMDVMHOST CONF_YSFGATEWAY CONF_PISTAR_REMOTE UNIT_MMDVMHOST UNIT_DSTARREPEATER UNIT_PISTAR_REMOTE
+  WATCHDOG_DSTARREPEATER_PROCESSES WATCHDOG_MMDVMHOST_PROCESSES WATCHDOG_COMMON_PROCESSES
+  REMOTE_MMDVMHOST_STOP_UNITS REMOTE_DSTARREPEATER_STOP_UNITS REMOTE_DMR_RESTART_UNITS REMOTE_P25_RESTART_UNITS
+  REMOTE_DSTAR_RESTART_UNITS REMOTE_YSF_RESTART_UNITS REMOTE_DSTARREPEATER_RESTART_UNITS
+  IP_BIN IW_BIN SYSFS_NET_DIR WIFI_INTERFACE)
+for key in "${paths_keys[@]}"; do
+  if [[ -z ${!key:-} ]]; then echo "pistar.conf has no $key" >&2; exit 1; fi
+  printf '%s=%s\n' "$key" "${!key}"
+done >"$p$RADIO_SHARE_DIR/paths"
 chmod 644 "$p$RADIO_SHARE_DIR/paths"
 
 # Default Pi-Star configurations (config_clean.zip) and where each one lives;

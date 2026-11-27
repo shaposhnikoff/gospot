@@ -12,3 +12,5 @@ pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR
 pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR@/pistar-configure css-write, @DASHBOARD_LIB_DIR@/pistar-configure css-reset
 pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR@/pistar-configure factory-reset
 pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR@/pistar-configure wifi-read, @DASHBOARD_LIB_DIR@/pistar-configure wifi-write, @DASHBOARD_LIB_DIR@/pistar-configure wifi-scan, @DASHBOARD_LIB_DIR@/pistar-configure wifi-action up, @DASHBOARD_LIB_DIR@/pistar-configure wifi-action down, @DASHBOARD_LIB_DIR@/pistar-configure wifi-action reset
+pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR@/pistar-calibrate run, @DASHBOARD_LIB_DIR@/pistar-calibrate restore
+pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-jitter run BM, @DASHBOARD_LIB_DIR@/pistar-jitter run DMR+, @DASHBOARD_LIB_DIR@/pistar-jitter run HB

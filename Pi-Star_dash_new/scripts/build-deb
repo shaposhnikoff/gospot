@@ -39,7 +39,7 @@ install -d -m755 "$p$lib"
 install -m644 pistar.conf "$p$lib/pistar.conf.default"
 install -m755 debian/pistar-conf-merge "$p$lib/pistar-conf-merge"
 printf '%s\n' /etc/pistar-dashboard/pistar.conf >"$p/DEBIAN/conffiles"
-install -m755 ../panel/helper/{pistar-config,pistar-power,pistar-native-update,pistar-configure,pistar-modem} "$p$lib/"
+install -m755 ../panel/helper/{pistar-config,pistar-power,pistar-native-update,pistar-configure,pistar-modem,pistar-calibrate,pistar-jitter} "$p$lib/"
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go -C ../panel build -trimpath \
   -ldflags="-s -w -X main.dashboardVersion=$version" \
   -o "$p$lib/panel" .

@@ -20,6 +20,8 @@ if [[ ${1:-} == --configure ]]; then scenario+=(--configure); shift; fi
 if [[ ${1:-} == --css ]]; then scenario+=(--css); shift; fi
 if [[ ${1:-} == --factory ]]; then scenario+=(--factory); shift; fi
 if [[ ${1:-} == --wifi ]]; then scenario+=(--wifi); wifi=true; shift; fi
+if [[ ${1:-} == --calibration ]]; then scenario+=(--calibration); shift; fi
+if [[ ${1:-} == --jitter ]]; then scenario+=(--jitter); shift; fi
 if (($#)); then
   [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
@@ -90,7 +92,7 @@ radio_share=$(sed -n 's/^RADIO_SHARE_DIR=//p' pistar.conf)
 bins=$(sed -n 's/^PISTAR_BINARIES_BIN_DIR=//p' pistar.conf)
 docker exec "$name" mkdir -p "$radio_share"
 docker cp "$bins/config_clean.zip" "$name:$radio_share/config_clean.zip"
-for h in pistar-config pistar-configure; do
+for h in pistar-config pistar-configure pistar-calibrate pistar-jitter; do
   docker cp "../panel/helper/$h" "$name:/usr/local/libexec/$h"
   test "$(sha256sum "../panel/helper/$h"|cut -d' ' -f1)" = "$(docker exec "$name" sha256sum "/usr/local/libexec/$h"|cut -d' ' -f1)"
 done

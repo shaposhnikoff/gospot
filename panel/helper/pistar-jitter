@@ -1,0 +1,44 @@
+#!/bin/bash
+# Privileged entry point for the Expert Jitter Test (admin/expert/jitter_test.php):
+# clear PISTAR_JITTER_LOG, say "started", then run Pi-Star's pistar-jittertest for
+# one host group (BM, DMR+ or HB) with its output in that log, for at most
+# JITTER_TIMEOUT seconds. pistar-jittertest holds its own single-run lock.
+set -euo pipefail
+conf=/etc/pistar-dashboard/pistar.conf
+if ((EUID == 0)); then
+  export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+else
+  # Unprivileged runs (tests) may name another settings file.
+  conf=${PISTAR_SETTINGS:-$conf}
+fi
+# Trust the settings only if no one but their owner (us) can change them.
+[[ -f $conf && ! -L $conf ]] || { echo "unsafe settings file" >&2; exit 1; }
+read -r owner mode < <(stat -c '%u %a' -- "$conf")
+((owner == EUID && (8#$mode & 8#022) == 0)) || { echo "unsafe settings file" >&2; exit 1; }
+declare -A cfg=()
+while IFS= read -r line || [[ -n $line ]]; do
+  line=${line#"${line%%[![:space:]]*}"}
+  [[ -z $line || $line == \#* ]] && continue
+  if [[ $line =~ ^([A-Z][A-Z0-9_]*)=([^[:space:]\"\'\$\`\\]*)$ ]]; then
+    cfg[${BASH_REMATCH[1]}]=${BASH_REMATCH[2]}
+  else
+    echo "invalid settings file" >&2; exit 1
+  fi
+done <"$conf"
+abs() { [[ ${cfg[$1]:-} == /* && ${cfg[$1]} != *//* && ${cfg[$1]} != */./* && ${cfg[$1]} != */../* && ${cfg[$1]} != */ ]] || { echo "$1 must be a clean absolute path" >&2; exit 1; }; }
+abs PISTAR_SBIN_DIR
+abs PISTAR_JITTER_LOG
+[[ ${cfg[JITTER_TIMEOUT]:-} =~ ^[1-9][0-9]{0,3}$ ]] || { echo "JITTER_TIMEOUT must be a number of seconds" >&2; exit 1; }
+tool=${cfg[PISTAR_SBIN_DIR]}/pistar-jittertest
+log=${cfg[PISTAR_JITTER_LOG]}
+case "$# ${1:-} ${2:-}" in
+  "2 run BM" | "2 run DMR+" | "2 run HB") group=$2 ;;
+  *) echo "usage: pistar-jitter run BM|DMR+|HB" >&2; exit 2 ;;
+esac
+[[ -x $tool ]] || { echo "pistar-jittertest is not installed" >&2; exit 1; }
+# Recreate the log rather than follow whatever the path now names.
+rm -f -- "$log"
+(set -o noclobber; : >"$log")
+chmod 0644 -- "$log"
+echo started
+exec timeout --kill-after=5 "${cfg[JITTER_TIMEOUT]}" "$tool" "$group" </dev/null >>"$log" 2>&1

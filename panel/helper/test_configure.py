@@ -16,7 +16,7 @@ for line in conf.splitlines():
                                           "WPA_SUPPLICANT_CONF", "CRONTAB_FILE", "PISTAR_HOSTS_DIR",
                                           "BM_API_KEY_FILE", "DAPNET_API_KEY_FILE", "TGIF_API_KEY_FILE",
                                           "HOSTS_FILE", "HOSTAPD_CONF", "HOSTAP_OFF_FLAG", "PISTAR_UPNP_SCRIPT",
-                                          "WIZARD_CONFIG_DIR"):
+                                          "WIZARD_CONFIG_DIR", "DHCPCD_CONF", "PISTAR_CSS_FILE"):
         line = f"{key}={TMP / key.lower()}"
     lines.append(line)
 settings = TMP / "pistar.conf"
@@ -48,6 +48,8 @@ class ConfigureTest(unittest.TestCase):
         helper.FILES["mmdvmhost"].write_text(HOST)
         os.chmod(helper.FILES["mmdvmhost"], 0o640)
         helper.FILES["ircddbgateway"].write_text(FLAT)
+        for m in helper.MARKERS.values():
+            m.unlink(missing_ok=True)
         self.calls = []
 
     def run_apply(self, changes, restart=(), revision=None):
@@ -164,6 +166,84 @@ class SystemOpsTest(unittest.TestCase):
         self.assertEqual((helper.WIZARD_DIR / "admin-password").read_text(), "s3cret pass\n")
         self.assertEqual(oct((helper.WIZARD_DIR / "admin-password").stat().st_mode & 0o777), "0o600")
         self.assertEqual([a[0] for a in ran], ["/usr/bin/systemd-run"])
+
+
+class BackupTest(unittest.TestCase):
+    def setUp(self):
+        helper.FILES["mmdvmhost"].write_text(HOST)
+        helper.FILES["dmrgateway"].write_text("[General]\nId=1\n")
+        helper.MARKERS["mmdvmhost"].write_text("[Modem]\nHardware=zum\n")
+        helper.MARKERS["dstarrepeater"].unlink(missing_ok=True)
+        helper.HOSTNAME.write_text("pistar3\n")
+        helper.FILES["ircddbgateway"].write_text(FLAT)
+        Path(_settings_path("DHCPCD_CONF")).write_text("interface eth0\n#static ip_address=1.2.3.4/24\n")
+
+    def names(self, blob):
+        import io, zipfile
+        return sorted(zipfile.ZipFile(io.BytesIO(blob)).namelist())
+
+    def test_backup_lists_classic_names(self):
+        names = self.names(helper.backup())
+        for n in ("mmdvmhost", "dmrgateway", "dstar-radio.mmdvmhost", "hostname", "ircddbgateway"):
+            self.assertIn(n, names)
+        self.assertNotIn("dhcpcd.conf", names)  # no active static address
+        Path(_settings_path("DHCPCD_CONF")).write_text("interface eth0\nstatic ip_address=1.2.3.4/24\n")
+        self.assertIn("dhcpcd.conf", self.names(helper.backup()))
+
+    def test_round_trip_and_rollback(self):
+        import io, zipfile
+        blob = helper.backup()
+        helper.FILES["mmdvmhost"].write_text("[General]\nCallsign=CHANGED\n")
+        helper.MARKERS["mmdvmhost"].unlink()
+        helper.MARKERS["dstarrepeater"].write_text("")
+        calls = []
+        out = helper.restore(blob, run=lambda *a: calls.append(a), is_loaded=lambda u: u in ("mmdvmhost.service", "dmrgateway.service"))
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(helper.FILES["mmdvmhost"].read_text(), HOST)
+        self.assertEqual(helper.MARKERS["mmdvmhost"].read_text(), "[Modem]\nHardware=zum\n")
+        self.assertFalse(helper.MARKERS["dstarrepeater"].exists())
+        self.assertEqual(calls, [("restart", "dmrgateway.service"), ("restart", "mmdvmhost.service")])
+        # a failing restart puts the previous files back
+        helper.FILES["mmdvmhost"].write_text("[General]\nCallsign=KEEP\n")
+        def fail(*a):
+            raise RuntimeError("down")
+        out = helper.restore(blob, run=fail, is_loaded=lambda u: u == "mmdvmhost.service")
+        self.assertFalse(out["ok"])
+        self.assertEqual(helper.FILES["mmdvmhost"].read_text(), "[General]\nCallsign=KEEP\n")
+        self.assertTrue(helper.MARKERS["mmdvmhost"].exists())
+
+    def test_classic_archive_and_refusals(self):
+        import io, zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("mmdvmhost", "[General]\nCallsign=OLD\n")
+            z.writestr("config.php", "<?php date_default_timezone_set('Etc/UTC'); ?>")
+            z.writestr("ircddblocal.php", "<?php $callsign='X'; ?>")
+        orig = helper.subprocess.run
+        ran = []
+        helper.subprocess.run = lambda args, **kw: ran.append(args)
+        try:
+            out = helper.restore(buf.getvalue(), run=lambda *a: None, is_loaded=lambda u: False)
+        finally:
+            helper.subprocess.run = orig
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(helper.FILES["mmdvmhost"].read_text(), "[General]\nCallsign=OLD\n")
+        self.assertEqual(ran, [["/usr/bin/timedatectl", "set-timezone", "Etc/UTC"]])
+        self.assertFalse(any(p.suffix == ".php" for p in TMP.iterdir()))
+        for bad in ({"../etc/shadow": "x"}, {".hidden": "x"}, {"unknown.txt": "x"}):
+            b = io.BytesIO()
+            with zipfile.ZipFile(b, "w") as z:
+                for k, v in bad.items():
+                    z.writestr(k, v)
+            self.assertFalse(helper.restore(b.getvalue(), run=lambda *a: None, is_loaded=lambda u: False)["ok"])
+        self.assertFalse(helper.restore(b"not a zip", run=lambda *a: None)["ok"])
+        self.assertFalse(helper.restore(b"", run=lambda *a: None)["ok"])
+
+
+def _settings_path(key):
+    for line in settings.read_text().splitlines():
+        if line.startswith(key + "="):
+            return line.split("=", 1)[1]
 
 
 class KeysTest(unittest.TestCase):

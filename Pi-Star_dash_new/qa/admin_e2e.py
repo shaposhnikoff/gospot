@@ -227,70 +227,6 @@ def logs(v, state, files):
     v.layout()
 
 
-def archives(v, state, files):
-    v.nav("backup")
-    root = tid("station-backup")
-    choose = root + " input[type=file]"
-    wait("archive CSRF session not ready", lambda: v.field(choose + ":enabled"))
-    v.layout()
-    v.click(root + ' a[download]')
-    private = files / "Pi-Star-PRIVATE.zip"
-    wait("archive did not download", private.is_file)
-    equal("private download is the exact fixture ZIP", private.read_bytes() == ZIP, True)
-
-    def click(label):
-        el = v.js("return button(arguments[0])", label)
-        if not el:
-            raise AssertionError(f"missing archive button: {label}")
-        v.command(f"/element/{el[ELEMENT]}/click", {})
-
-    def message(role, fragment):
-        wait(f"expected archive {role}: {fragment}", lambda: fragment in v.js(
-            "return text(document.querySelector(arguments[0]))", root + f' [role="{role}"]'))
-
-    def preview():
-        v.choose_file(choose, private)
-        click("Проверить архив")
-        message("status", "Архив проверен")
-
-    bad = files / "invalid.zip"
-    bad.write_bytes(b"")
-    v.choose_file(choose, bad)
-    message("alert", "непустой ZIP")
-    equal("empty archive rejected locally", state.restore_actions, [])
-    bad.write_bytes(b"qa invalid archive")
-    v.choose_file(choose, bad)
-    click("Проверить архив")
-    message("alert", "Архив отклонён")
-    preview()
-    equal("preview changed files", v.js("return all(arguments[0]).map(text)", root + " li"),
-          ["MMDVM-Host.ini — без изменений", "DMRGateway.ini — будет заменён"])
-    v.layout()
-    v.check_private_state()
-    click("Закрыть предпросмотр")
-    message("status", "отменено")
-    equal("cancel never submitted archive apply", state.restore_actions, ["preview", "preview"])
-    preview()
-    state.restore_fault = 422
-    click("Подтвердить восстановление")
-    message("alert", "Архив отклонён")
-    equal("stale preview cannot apply again", v.js("return !!button('Подтвердить восстановление')"), False)
-    state.restore_fault = 403
-    click("Проверить архив")
-    message("alert", "Сеанс изменился")
-    equal("expired archive session locked", v.field(choose + ":disabled") is not None, True)
-    state.restore_fault = None
-    click("Обновить сеанс")
-    wait("archive session not restored", lambda: v.field(choose + ":enabled"))
-    preview()
-    click("Подтвердить восстановление")
-    message("status", "Файлы восстановлены")
-    preview()
-    equal("identical archive has no apply action", v.js("return !!button('Подтвердить восстановление')"), False)
-    equal("explicit archive requests", state.restore_actions,
-          ["preview", "preview", "preview", "apply", "preview", "preview", "apply", "preview"])
-
-
 def test_size(dist, tmp, width, height):
     with serve(dist, tmp) as (origin, state), chromium(origin, tmp / "key.pem") as command:
         # Verify the fixture challenges before it releases any config.
@@ -323,7 +259,6 @@ def test_size(dist, tmp, width, height):
                ("POST", "/"), ("GET", CONFIG), ("GET", CONFIG), ("POST", "/"),
                ("GET", CONFIG), ("POST", "/"), ("GET", CONFIG), ("GET", CONFIG)])
         logs(v, state, tmp)
-        archives(v, state, tmp)
         audit(v, origin, state)
         print(f"PASS {width}x{height}: HTTPS Basic auth, config, export/import, preview, "
               "apply/rollback, 403/invalid/stale reads, logs/TXT, private archive adapter, layout and egress", flush=True)

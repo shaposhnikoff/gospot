@@ -9,7 +9,6 @@ cd -- "$(dirname -- "$0")"
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
 install -m 0755 helper/pistar-config "$tmp/pistar-config"
-install -m 0755 helper/pistar-archive "$tmp/pistar-archive"
 go run . -h >"$tmp/flags" 2>&1
 for flag in admin-listen tls-cert tls-key; do
   grep -q "^  -$flag " "$tmp/flags" || { echo "Missing flag: -$flag" >&2; exit 1; }
@@ -38,7 +37,6 @@ UNIT
 cat >"$tmp/sudoers" <<'RULE'
 pistar-wizard ALL=(root) NOPASSWD: /usr/local/libexec/pistar-config read, /usr/local/libexec/pistar-config apply, /usr/local/libexec/pistar-config rollback
 pistar-wizard ALL=(root) NOPASSWD: /usr/local/libexec/pistar-config services-read, /usr/local/libexec/pistar-config services-apply
-pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: /usr/local/libexec/pistar-archive backup, /usr/local/libexec/pistar-archive preview, /usr/local/libexec/pistar-archive apply
 RULE
 
 cat >"$tmp/install.sh" <<'INSTALL'
@@ -91,7 +89,6 @@ replace() {
   mv -fT "$stage" "$3"
 }
 replace 0755 pistar-config /usr/local/libexec/pistar-config
-replace 0755 pistar-archive /usr/local/libexec/pistar-archive
 replace 0755 pistar-wizard /usr/local/bin/pistar-wizard
 replace 0440 sudoers /etc/sudoers.d/pistar-wizard
 replace 0644 pistar-wizard.service /etc/systemd/system/pistar-wizard.service
@@ -101,7 +98,7 @@ systemctl restart pistar-wizard.service
 systemctl is-active pistar-wizard.service
 INSTALL
 
-tar -C "$tmp" -cf - pistar-wizard pistar-config pistar-archive pistar-wizard.service sudoers install.sh |
+tar -C "$tmp" -cf - pistar-wizard pistar-config pistar-wizard.service sudoers install.sh |
   ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes pistar3 "sudo -n sh -ec '
     test \"\$(hostname -s)\" = pistar3
     umask 077

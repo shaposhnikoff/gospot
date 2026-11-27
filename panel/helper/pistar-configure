@@ -10,6 +10,7 @@ are single-line strings; comments, ordering, ownership and modes are kept.
 Every change is written atomically and rolled back, together with the service
 restarts, if any step fails.
 """
+import errno
 import fcntl
 import hashlib
 import json
@@ -167,6 +168,155 @@ def keys_write(request):
         st_uid, st_gid, st_mode = owner.pw_uid, owner.pw_gid, 0o600
     replace(KEYS[request["target"]][0], "\n".join(lines) + "\n", Private)
     return {"ok": True}
+
+
+# Backup/Restore (admin/config_backup.php backup_files()): archive name ->
+# (path, mode, owner). Owner None means root. Names match classic Pi-Star
+# archives, so their backups restore here and ours restore there.
+def backup_files():
+    s = _SETTINGS
+    files = {
+        "dhcpcd.conf": (setting_path(s, "DHCPCD_CONF"), 0o644, None),
+        "wpa_supplicant.conf": (setting_path(s, "WPA_SUPPLICANT_CONF"), 0o600, None),
+    }
+    for name in ("ircddbgateway", "mmdvmhost", "dstarrepeater", "dapnetgateway", "p25gateway", "m17gateway",
+                 "ysfgateway", "ysf2dmr", "dgidgateway", "nxdngateway", "dmrgateway", "starnetserver",
+                 "timeserver", "pistar-remote"):
+        files[name] = (FILES[name], 0o644, None)
+    files["dstar-radio.mmdvmhost"] = (MARKERS["mmdvmhost"], 0o644, None)
+    files["dstar-radio.dstarrepeater"] = (MARKERS["dstarrepeater"], 0o644, None)
+    files["hosts"] = (HOSTS, 0o644, None)
+    files["hostname"] = (HOSTNAME, 0o644, None)
+    for name, key in (("bmapi.key", "bm"), ("dapnetapi.key", "dapnet"), ("tgifapi.key", "tgif")):
+        files[name] = (KEYS[key][0], 0o600, KEY_OWNER)
+    files["pistar-css.ini"] = (setting_path(s, "PISTAR_CSS_FILE"), 0o644, None)
+    files["RSSI.dat"] = (setting_path(s, "PISTAR_HOSTS_DIR") / "RSSI.dat", 0o644, None)
+    return files
+
+
+ZIP_MAX = 256 * 1024
+UNPACKED_MAX = 4 * 1024 * 1024
+
+
+def backup():
+    import io, time, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, (path, _, _) in backup_files().items():
+            if name == "dhcpcd.conf":
+                text, _ = read_file(path)
+                # Only a static address is worth restoring (config_backup.php).
+                if not text or not any("static ip_address" in l and not l.lstrip().startswith("#") for l in text.splitlines()):
+                    continue
+            data, _ = read_file(path)
+            if data is not None:
+                z.writestr(zipfile.ZipInfo(name, time.gmtime()[:6]), data)
+    return buf.getvalue()
+
+
+def restore(blob, run=None, is_loaded=None):
+    import io, zipfile
+    run = run or systemctl
+    is_loaded = is_loaded or loaded
+    out = []
+    if not (0 < len(blob) <= ZIP_MAX):
+        return {"ok": False, "output": [f"Uploaded file is empty or too large (limit {ZIP_MAX // 1024} KB)."]}
+    try:
+        z = zipfile.ZipFile(io.BytesIO(blob))
+        infos = z.infolist()
+    except zipfile.BadZipFile:
+        return {"ok": False, "output": ["Uploaded file is not a valid .zip archive."]}
+    allowed = backup_files()
+    admit = {}
+    total = 0
+    for info in infos:
+        name = info.filename
+        if not name:
+            continue
+        if "/" in name or "\\" in name or "\0" in name or name.startswith("."):
+            return {"ok": False, "output": [f"Refusing ZIP — entry '{name[:64]}' has an unsafe name."]}
+        total += info.file_size
+        if total > UNPACKED_MAX:
+            return {"ok": False, "output": ["Refusing ZIP — unpacked size is too large."]}
+        if name in allowed:
+            admit[name] = info
+    timezone = None
+    if "config.php" in {i.filename for i in infos}:
+        m = re.search(rb"date_default_timezone_set\(\s*['\"]([^'\"]+)['\"]\s*\)", z.read("config.php")[:65536])
+        if m and Path("/usr/share/zoneinfo", m.group(1).decode(errors="replace")).is_file():
+            timezone = m.group(1).decode()
+    if not admit:
+        return {"ok": False, "output": ["ZIP contained no recognised Pi-Star config files."]}
+    contents = {}
+    for name, info in admit.items():
+        data = z.read(info)
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return {"ok": False, "output": [f"Refusing ZIP — {name} is not a text file."]}
+        require("\0" not in text, "binary content")
+        contents[name] = text
+    out.append(f"Your .zip file was uploaded and unpacked ({len(admit)} files).")
+    import pwd
+    # Snapshot everything a restore may touch, including both markers.
+    touched = set(admit) | {"dstar-radio.mmdvmhost", "dstar-radio.dstarrepeater"}
+    before = {}
+    for name in touched:
+        path = allowed[name][0]
+        text, st = read_file(path)
+        before[name] = (text, st)
+    written = []
+    try:
+        out.append("Writing new Config")
+        if any(n.startswith("dstar-radio.") for n in admit):
+            for n in ("dstar-radio.mmdvmhost", "dstar-radio.dstarrepeater"):
+                allowed[n][0].unlink(missing_ok=True)
+                written.append(n)
+        for name, text in contents.items():
+            path, mode, owner = allowed[name]
+            # root under sudo; the running user in unprivileged tests
+            uid, gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+            if owner and os.geteuid() == 0:
+                pw = pwd.getpwnam(owner)
+                uid, gid = pw.pw_uid, pw.pw_gid
+
+            class Target:
+                st_uid, st_gid, st_mode = uid, gid, mode
+            replace(path, text, Target)
+            written.append(name)
+        out.append(f"Installed {len(contents)} file(s).")
+        if timezone:
+            subprocess.run(["/usr/bin/timedatectl", "set-timezone", timezone], check=True, timeout=30,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            out.append(f"Timezone set to {timezone}.")
+        out.append("Starting Services.")
+        for unit in RESTORE_UNITS:
+            if is_loaded(unit):
+                run("restart", unit)
+    except Exception:
+        for name in reversed(written):
+            text, st = before[name]
+            path = allowed[name][0]
+            if text is None:
+                path.unlink(missing_ok=True)
+            else:
+                replace(path, text, st)
+        for unit in RESTORE_UNITS:
+            try:
+                if is_loaded(unit):
+                    run("restart", unit)
+            except Exception:
+                pass
+        return {"ok": False, "output": out + ["Restore failed; previous configuration restored."]}
+    out.append("Configuration restored.")
+    return {"ok": True, "output": out}
+
+
+# Services config_backup.php stops before and starts after a restore.
+RESTORE_UNITS = ["dstarrepeater.service", "ircddbgateway.service", "timeserver.service", "pistar-watchdog.service",
+                 "pistar-remote.service", "ysfgateway.service", "ysf2dmr.service", "p25gateway.service",
+                 "nxdngateway.service", "m17gateway.service", "dapnetgateway.service", "mobilegps.service",
+                 "dmrgateway.service", "mmdvmhost.service"]
 
 
 def full_read(name):
@@ -331,7 +481,18 @@ def replace(path, text, st):
             os.fchown(fd, st.st_uid if st else os.geteuid(), st.st_gid if st else os.getegid())
             os.fchmod(fd, stat.S_IMODE(st.st_mode) if st else 0o644)
             os.fsync(fd)
-        os.replace(tmp, path)
+        try:
+            os.replace(tmp, path)
+        except OSError as exc:
+            # A bind-mounted file (e.g. /etc/hosts in a container) cannot be
+            # replaced by rename; rewrite its contents in place instead.
+            if exc.errno not in (errno.EBUSY, errno.EXDEV):
+                raise
+            with open(path, "r+b") as f:
+                f.write(text.encode())
+                f.truncate()
+                f.flush()
+                os.fsync(f.fileno())
     finally:
         Path(tmp).unlink(missing_ok=True)
 
@@ -538,6 +699,13 @@ def read():
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] == "backup":
+        sys.stdout.buffer.write(backup())
+        return
+    if len(sys.argv) == 2 and sys.argv[1] == "restore":
+        blob = sys.stdin.buffer.read(ZIP_MAX + 1)
+        print(json.dumps(restore(blob)))
+        return
     if len(sys.argv) == 2 and sys.argv[1] in ("keys-read", "keys-write"):
         if sys.argv[1] == "keys-read":
             print(json.dumps(keys_read()))

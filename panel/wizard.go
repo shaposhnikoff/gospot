@@ -25,7 +25,7 @@ import (
 
 // Overridden by the Debian build; keep standalone deployment paths compatible.
 // Set from DASHBOARD_UI_DIR and DASHBOARD_LIB_DIR by applySettings.
-var adminAssets, configHelper, archiveHelperPath string
+var adminAssets, configHelper string
 
 // registerWizard is used only on the dedicated HTTPS management mux.
 func registerWizard(mux *http.ServeMux) {
@@ -139,6 +139,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		case "/manage/api/links", "/manage/api/links/bm":
 			serveLinks(w, r, bm, sendRemoteCommand)
 			return
+		case "/manage/api/backup/classic":
+			serveClassicBackup(w, r, runConfigureHelper, time.Now())
+			return
 		case "/manage/api/configure":
 			serveConfigure(w, r, runConfigureHelper)
 			return
@@ -153,9 +156,6 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 			return
 		case "/manage/api/log", "/manage/api/log/download":
 			serveRadioLog(w, r)
-			return
-		case "/manage/api/backup", "/manage/api/restore":
-			serveArchive(w, r)
 			return
 		}
 		if path != "/" {
@@ -350,7 +350,8 @@ func serveWizardAsset(w http.ResponseWriter, r *http.Request, dir string) {
 		// Expert > SSH Access embeds the shellinabox client on this host.
 		frames = fmt.Sprintf(" frame-src http://*:%d https://*:%d;", port, port)
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self';"+frames+" form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	// The classic markup colours cells with style attributes; scripts stay same-origin only.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self';"+frames+" form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 	w.Header().Set("Content-Type", contentType)
 	http.ServeContent(w, r, name, info.ModTime(), f)
 }

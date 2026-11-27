@@ -10,6 +10,7 @@ if (settings) {
     power: () => import('./Power.svelte'), update: () => import('./Update.svelte'),
     expert: () => import('./Expert.svelte'),
     configuration: () => import('./Configure.svelte'),
+    backup: () => import('./BackupRestore.svelte'),
     workspace: () => import('./AdminWorkspace.svelte'),
   };
   const page = (): keyof typeof pages => {
@@ -19,14 +20,16 @@ if (settings) {
   };
   let shown: string | null = null;
   let app: ReturnType<typeof mount> | null = null;
+  let generation = 0;
   const route = async () => {
     const next = page();
-    const props = next === 'admin' ? { admin: true } : next === 'expert' ? { page: location.hash.replace(/^#expert-?/, '') } : {};
     if (shown === next && next !== 'expert') return;
-    if (shown === next && app) { void unmount(app); app = null; }
+    // Only the latest navigation may mount: earlier imports can resolve later.
+    const mine = ++generation;
     shown = next;
     const component = (await pages[next]()).default;
-    if (shown !== next) return;
+    if (mine !== generation) return;
+    const props = next === 'admin' ? { admin: true } : next === 'expert' ? { page: location.hash.replace(/^#expert-?/, '') } : {};
     if (app) void unmount(app);
     target.replaceChildren();
     app = mount(component as never, { target, props });

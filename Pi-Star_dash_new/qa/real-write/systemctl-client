@@ -4,6 +4,10 @@ import pathlib
 import socket
 import sys
 
+# pistar-configure asks which units are installed before restarting them.
+if sys.argv[1:4] == ["show", "-p", "LoadState"] and len(sys.argv) == 6 and sys.argv[4] == "--value":
+    print("loaded" if sys.argv[5] in ("dmrgateway.service", "mmdvmhost.service") else "not-found")
+    sys.exit(0)
 assert len(sys.argv) == 3 and sys.argv[1] == "restart"
 unit = sys.argv[2]
 assert unit in ("dmrgateway.service", "mmdvmhost.service")

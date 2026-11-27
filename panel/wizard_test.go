@@ -301,3 +301,18 @@ func TestWizardNativeAssets(t *testing.T) {
 		t.Fatal("followed symlinked asset directory")
 	}
 }
+
+// The classic markup colours table cells with style attributes; a CSP without
+// 'unsafe-inline' styles silently drops every status colour on the admin pages.
+func TestAdminAssetCSPAllowsClassicStyles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	serveWizardAsset(w, httptest.NewRequest("GET", "https://node/manage/", nil), dir)
+	csp := w.Header().Get("Content-Security-Policy")
+	if w.Code != 200 || !strings.Contains(csp, "style-src 'self' 'unsafe-inline'") || !strings.Contains(csp, "script-src 'self';") || !strings.Contains(csp, "img-src 'self'") {
+		t.Fatalf("%d %q", w.Code, csp)
+	}
+}

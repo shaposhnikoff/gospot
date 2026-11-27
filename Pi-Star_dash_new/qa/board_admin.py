@@ -1,4 +1,5 @@
 """Run locally on pistar3 via `sudo python3 -`. Never submit an apply or rollback."""
+import re
 import base64
 import http.cookiejar
 import io
@@ -20,7 +21,7 @@ def req(path, *, extra=None, auth=True, data=None):
     return api.open(u.Request(origin+'/manage/'+path, data=data,
                               headers={**(headers if auth else {}), **(extra or {})}), timeout=15)
 
-for name in ('', 'api/config', 'api/system', 'api/log', 'api/log/download','api/backup','api/restore'):
+for name in ('', 'api/config', 'api/system', 'api/log', 'api/log/download','api/backup/classic','api/configure'):
     try:
         req(name, auth=False)
     except urllib.error.HTTPError as e:
@@ -34,12 +35,10 @@ print('PASS system:',system['hostname'],system['model'],system['kernel'])
 rows=json.load(req('api/log'))['rows']; assert isinstance(rows,list)
 assert req('api/log/download').headers.get_content_type()=='text/plain'
 print('PASS log and plain-text download;',len(rows),'sanitized rows')
-with req('api/backup') as r:
+with req('api/backup/classic') as r:
     assert r.headers.get_content_type()=='application/zip'
+    assert re.search(r'filename="Pi-Star_Config_[^"]+\.zip"', r.headers.get('Content-Disposition',''))
     archive=r.read()
 with zipfile.ZipFile(io.BytesIO(archive)) as z:
-    assert {'MMDVM-Host.ini','DMRGateway.ini'} <= set(z.namelist())
-preview=json.load(req('api/restore',data=archive,extra={'Origin':origin,'X-PiStar-CSRF':cfg['csrf'],
-                                                      'X-PiStar-Action':'preview','Content-Type':'application/zip'}))
-assert preview['changed']==[] and len(preview['receipt'])==64
-print('PASS private backup + read-only preview of unchanged live files (archive kept only in memory)')
+    assert {'mmdvmhost','dmrgateway'} <= set(z.namelist()) and not any(n.endswith('.php') for n in z.namelist())
+print('PASS classic Backup download (archive kept only in memory; restore not called on the board)')

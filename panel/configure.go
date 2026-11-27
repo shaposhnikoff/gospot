@@ -5,6 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -94,3 +98,63 @@ func readConfigState(ctx context.Context, run configHelperFunc) (configState, er
 }
 
 func setConfigHelper(lib string) { configureHelper = filepath.Join(lib, "pistar-configure") }
+
+// Backup/Restore (admin/config_backup.php) through the helper's backup and
+// restore commands; archives are classic Pi-Star compatible zip files.
+
+const restoreLimit = 256 * 1024
+
+func serveClassicBackup(w http.ResponseWriter, r *http.Request, run configHelperFunc, now time.Time) {
+	switch r.Method {
+	case http.MethodGet:
+		if r.URL.Query().Get("csrf") == "1" {
+			csrf := editorToken(w, r)
+			if csrf != "" {
+				writeJSON(w, 200, map[string]string{"csrf": csrf})
+			}
+			return
+		}
+		out, err := run(r.Context(), "backup", nil)
+		if err != nil || len(out) == 0 {
+			http.Error(w, "Backup failed", 502)
+			return
+		}
+		host, _ := os.ReadFile(hostnameFile)
+		stamp := now.Local().Format("2006-Jan-02") // PHP Y-M-d
+		name := "Pi-Star_Config_" + stamp + ".zip"
+		if h := strings.TrimSpace(string(host)); h != "" && h != "pi-star" && !strings.ContainsAny(h, "\"/\\\r\n") {
+			name = "Pi-Star_Config_" + h + "_" + stamp + ".zip"
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+		_, _ = w.Write(out)
+	case http.MethodPost:
+		if !archiveCSRF(r) {
+			http.Error(w, "Перечитайте страницу", 403)
+			return
+		}
+		if archiveHeader(r, "Content-Type") != "application/zip" {
+			http.Error(w, "Expected a .zip file", 415)
+			return
+		}
+		blob, err := io.ReadAll(http.MaxBytesReader(w, r.Body, restoreLimit+1))
+		if err != nil || len(blob) > restoreLimit {
+			http.Error(w, "Uploaded file is too large (limit 256 KB).", 413)
+			return
+		}
+		out, err := run(r.Context(), "restore", blob)
+		var reply struct {
+			OK     bool     `json:"ok"`
+			Output []string `json:"output"`
+		}
+		if json.Unmarshal(out, &reply) != nil {
+			http.Error(w, "Restore failed", 502)
+			return
+		}
+		_ = err
+		writeJSON(w, 200, reply)
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		http.Error(w, "Метод не поддерживается", 405)
+	}
+}

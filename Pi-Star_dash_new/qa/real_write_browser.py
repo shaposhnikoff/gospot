@@ -27,8 +27,6 @@ FAILED_AND_RECOVERED = ["dmrgateway.service ok", "mmdvmhost.service fail", *REST
 EVENTS = "/run/pistar-qa/events"
 FAULT = "/run/pistar-qa/fail-next-mmdvmhost"
 STATE = "/var/lib/pistar-panel-config/"
-ARCHIVE = tid("station-backup")
-CHOOSE = ARCHIVE + " input[type=file]"
 
 
 def loopback_origin(value):
@@ -104,47 +102,6 @@ class Stand:
         return snapshot
 
 
-def backup_page(v):
-    v.nav("backup")
-    wait("archive session not ready", lambda: v.field(CHOOSE + ":enabled"))
-
-
-def download(v, folder, expected):
-    path = folder / "Pi-Star-PRIVATE.zip"
-    if path.exists():
-        raise AssertionError("archive download destination already exists")
-    v.click(ARCHIVE + " a[download]")
-    wait("PRIVATE ZIP download missing", path.is_file)
-    with ZipFile(path) as z:
-        equal("PRIVATE ZIP members", z.namelist(), list(NAMES))
-        equal("PRIVATE ZIP signature envelope",
-              bool(re.fullmatch(rb"Pi-Star PRIVATE archive v1 \| [0-9a-f]{64}", z.comment)), True)
-        same_pair("downloaded ZIP", [z.read(name) for name in NAMES], expected)
-    return path
-
-
-def archive_button(v, label):
-    el = v.js("return button(arguments[0])", label)
-    if not el:
-        raise AssertionError(f"missing archive button: {label}")
-    v.command(f"/element/{el[ELEMENT]}/click", {})
-
-
-def archive_notice(v, role, fragment):
-    wait("expected archive " + role + ": " + fragment, lambda: fragment in v.js(
-        "return text(document.querySelector(arguments[0]))", ARCHIVE + f' [role="{role}"]'))
-
-
-def preview(v, path, changed):
-    v.choose_file(CHOOSE, path)
-    archive_button(v, "Проверить архив")
-    archive_notice(v, "status", "Архив проверен")
-    label = "будет заменён" if changed else "без изменений"
-    equal("archive preview rows", v.js("return all(arguments[0]).map(text)", ARCHIVE + " li"),
-          [f"{name} — {label}" for name in NAMES])
-    equal("restore confirmation offered", v.js("return !!button('Подтвердить восстановление')"), changed)
-
-
 def apply_settings(v, fail=False):
     v.nav("settings")
     v.ready(INITIAL)
@@ -159,64 +116,40 @@ def apply_settings(v, fail=False):
 
 
 def exercise(v, stand, folder, original, changed):
+    """Station settings: apply, confirmed operator rollback and an injected service failure."""
     history = stand.restarts()
     v.ready(INITIAL)
-    backup_page(v)
-    first = download(v, folder, original).rename(folder / "original.zip")
-    preview(v, first, changed=False)
-
     apply_settings(v)
     history += RESTARTS
     stand.check_state("settings applied", changed, original, history)
     print("PASS on-disk settings: Callsign=DEMO1 -> DEMO2; master Address=192.0.2.11 -> 192.0.2.12; "
           "all other bytes unchanged; applied SHA256: " +
-          ", ".join(f"{name} {sha256(data).hexdigest()}" for name,data in zip(NAMES,changed)), flush=True)
-    backup_page(v)
-    second = download(v, folder, changed)
-    preview(v, first, changed=True)
-    stand.check_state("restore preview", changed, original, history)
-    archive_button(v, "Подтвердить восстановление")
-    archive_notice(v, "status", "Файлы восстановлены")
-    history += RESTARTS
-    snapshot = stand.check_state("archive restored", original, changed, history)
-    print("PASS settings apply and signed archive restore; original SHA256: " +
-          ", ".join(f"{n} {sha256(b).hexdigest()}" for n, b in zip(NAMES, original)), flush=True)
+          ", ".join(f"{name} {sha256(data).hexdigest()}" for name, data in zip(NAMES, changed)), flush=True)
 
-    stand.exec("touch", FAULT)
-    apply_settings(v, fail=True)
-    history += FAILED_AND_RECOVERED
-    after = stand.check_state("failed settings apply", original, changed, history)
-    equal("failed settings apply preserved previous.json bytes", after == snapshot, True)
-
-    backup_page(v)
-    preview(v, second, changed=True)
-    stand.check_state("failed-restore preview", original, changed, history)
-    stand.exec("touch", FAULT)
-    archive_button(v, "Подтвердить восстановление")
-    archive_notice(v, "alert", "Операция не выполнена")
-    history += FAILED_AND_RECOVERED
-    after = stand.check_state("failed archive restore", original, changed, history)
-    equal("failed restore preserved previous.json bytes", after == snapshot, True)
-    preview(v, first, changed=False)
-    v.nav("settings")
-    v.ready(INITIAL)
-    print("PASS injected settings and archive failures: both files, rollback snapshot, "
-          "pending state, service recovery order and UI reread", flush=True)
-
-    apply_settings(v)
-    history += RESTARTS
-    stand.check_state("before manual rollback", changed, original, history)
     v.settings("rollback")
     same_pair("opening confirmation did not write", stand.pair(), changed)
     equal("opening confirmation did not restart services", stand.restarts(), history)
     v.settings("confirm-rollback")
     v.notice("status", "настройки восстановлены и перечитаны")
     v.ready(INITIAL)
+    history += RESTARTS
     same_pair("operator rollback", stand.pair(), original)
     equal("operator rollback consumed snapshot", stand.exists(STATE + "previous.json"), False)
     equal("operator rollback left no pending transaction", stand.exists(STATE + "pending.json"), False)
-    equal("operator rollback restart order", stand.restarts(), history + RESTARTS)
+    equal("operator rollback restart order", stand.restarts(), history)
     print("PASS confirmed operator rollback: both original files byte-identical, previous.json consumed", flush=True)
+
+    stand.exec("touch", FAULT)
+    apply_settings(v, fail=True)
+    history += FAILED_AND_RECOVERED
+    same_pair("failed settings apply", stand.pair(), original)
+    equal("failed settings apply restarts", stand.restarts(), history)
+    equal("failed settings apply consumed the fault", stand.exists(FAULT), False)
+    equal("failed settings apply left no pending transaction", stand.exists(STATE + "pending.json"), False)
+    v.nav("services")  # leave the page so the form is read again from the server
+    v.nav("settings")
+    v.ready(INITIAL)
+    print("PASS injected settings failure: both files restored, service recovery order, no pending state, UI reread", flush=True)
 
 
 def exercise_services(v, stand, original):
@@ -339,11 +272,64 @@ def exercise_expert(v, stand, origin, original):
           "System Cron refuses a blocked pattern without writing", flush=True)
 
 
+def exercise_backup(v, stand, origin, folder, original):
+    """Classic Backup/Restore through Chromium against the real helper."""
+    import base64
+    import io
+    host, gw = original
+    v.command("/url", {"url": origin + "/manage/#backup"})
+    wait("backup page did not load", lambda: v.js("return !!document.querySelector('input[type=file]')"))
+    blob = v.command('/execute/async', {'script': """fetch('/manage/api/backup/classic').then(async r => {
+        const b = new Uint8Array(await r.arrayBuffer()); let s=''; for (const x of b) s += String.fromCharCode(x);
+        arguments[arguments.length-1]([r.status, r.headers.get('content-disposition'), btoa(s)]); })""", 'args': []})
+    equal("backup status", blob[0], 200)
+    assert re.search(r'filename="Pi-Star_Config_[^"]+_\d{4}-[A-Z][a-z]{2}-\d{2}\.zip"', blob[1]), blob[1]
+    archive = base64.b64decode(blob[2])
+    with ZipFile(io.BytesIO(archive)) as z:
+        names = set(z.namelist())
+        equal("backup mmdvmhost", z.read("mmdvmhost"), host)
+        equal("backup dmrgateway", z.read("dmrgateway"), gw)
+    assert not any(n.endswith(".php") for n in names), names
+    history = stand.restarts()
+    # change both files, then restore the archive through the page
+    stand.exec("sed", "-i", "s/^Callsign=DEMO1$/Callsign=CHANGED/", "/etc/MMDVM-Host.ini")
+    stand.exec("sed", "-i", "s/^Address=192.0.2.11$/Address=192.0.2.99/", "/etc/DMRGateway.ini")
+    assert stand.pair() != original
+    path = folder / "restore.zip"
+    path.write_bytes(archive)
+    v.choose_file("input[type=file]", path)
+    v.js("window.confirm = () => true")
+    v.click("button.icon")
+    wait("restore did not finish", lambda: v.js("return document.body.innerText.includes('Configuration restored.')"))
+    same_pair("restored files", stand.pair(), original)
+    equal("restore modes", stand.exec("stat", "-c", "%a", "/etc/MMDVM-Host.ini", "/etc/DMRGateway.ini").stdout.decode().split(), ["644", "644"])
+    history += ["dmrgateway.service ok", "mmdvmhost.service ok"]
+    equal("restore restarts", stand.restarts(), history)
+    # an unsafe archive is refused without touching anything
+    bad = io.BytesIO()
+    with ZipFile(bad, "w") as z:
+        z.writestr("../mmdvmhost", "[General]\nCallsign=EVIL\n")
+    path.write_bytes(bad.getvalue())
+    v.command("/url", {"url": origin + "/manage/#expert"})
+    v.command("/url", {"url": origin + "/manage/#backup"})
+    wait("backup page did not reload", lambda: v.js("return !!document.querySelector('input[type=file]')"))
+    v.choose_file("input[type=file]", path)
+    v.js("window.confirm = () => true")
+    v.click("button.icon")
+    wait("unsafe archive not refused", lambda: v.js("return document.body.innerText.includes('has an unsafe name')"))
+    same_pair("refused archive", stand.pair(), original)
+    equal("refused archive restarts", stand.restarts(), history)
+    print("PASS Chromium Backup/Restore: classic zip download (Pi-Star_Config_<host>_<Y-M-d>.zip, classic member names, "
+          "exact file bytes, no PHP), restore of changed files back to the archive with modes kept and DMRGateway then "
+          "MMDVMHost restarted, unsafe archive refused without writes or restarts", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--origin", type=loopback_origin, required=True)
     parser.add_argument("--services", action="store_true")
     parser.add_argument("--expert", action="store_true")
+    parser.add_argument("--backup", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -366,15 +352,29 @@ def main():
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
             # /manage/ is the classic admin page; the station settings, DMR
             # services and backup pages live under their own sections.
-            if not args.expert:
+            if not (args.expert or args.backup):
                 command("/url", {"url": args.origin + "/manage/#settings"})
                 wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
-            if args.expert:
-                exercise_expert(v, stand, args.origin, original)
-            elif args.services:
-                exercise_services(v, stand, original)
-            else:
-                exercise(v, stand, Path(folder), original, changed)
+            try:
+                run_scenario(args, v, stand, folder, original, changed)
+            except AssertionError:
+                print("DEBUG page:", v.js("return location.href + ' :: ' + document.body.innerHTML.slice(0, 2500)"), flush=True)
+                try:
+                    print("DEBUG console:", v.command("/se/log", {"type": "browser"}), flush=True)
+                except Exception as e:
+                    print("DEBUG console unavailable:", e, flush=True)
+                raise
+
+
+def run_scenario(args, v, stand, folder, original, changed):
+    if args.expert:
+        exercise_expert(v, stand, args.origin, original)
+    elif args.backup:
+        exercise_backup(v, stand, args.origin, Path(folder), original)
+    elif args.services:
+        exercise_services(v, stand, original)
+    else:
+        exercise(v, stand, Path(folder), original, changed)
 
 
 if __name__ == "__main__":

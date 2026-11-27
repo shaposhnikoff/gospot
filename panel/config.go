@@ -137,7 +137,7 @@ func applySettings(s settings) error {
 	modemUnit, masterUnit = modem, master
 	markerMMDVMHost, markerDStarRepeater, hostnameFile = mm, ds, host
 	adminAssets, operatorAssets = ui, ui
-	configHelper, archiveHelperPath = filepath.Join(lib, "pistar-config"), filepath.Join(lib, "pistar-archive")
+	configHelper = filepath.Join(lib, "pistar-config")
 	powerHelper, updateHelper, updateLog = filepath.Join(lib, "pistar-power"), filepath.Join(lib, "pistar-native-update"), update
 	setConfigHelper(lib)
 	setToolPaths(lib, s)

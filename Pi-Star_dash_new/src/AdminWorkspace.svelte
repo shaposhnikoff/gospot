@@ -6,9 +6,8 @@
   import Protocols from './Protocols.svelte';
   import SystemInfo from './SystemInfo.svelte';
   import LogView from './LogView.svelte';
-  import Backup from './Backup.svelte';
   const pages = [
-    ['configuration','Configuration'], ['settings','Настройки станции'], ['expert','Expert'], ['services','Сервисы · DMR'], ['system','Система'], ['logs','Live Logs'], ['backup','Backup / Restore']
+    ['configuration','Configuration'], ['settings','Настройки станции'], ['expert','Expert'], ['services','Сервисы · DMR'], ['system','Система'], ['logs','Live Logs']
   ] as const;
   const current = () => ['#expert-dmrgateway','#expert-mmdvmhost'].includes(location.hash) ? location.hash.slice(1) : pages.find(([id]) => '#'+id === location.hash)?.[0] || 'settings';
   let page = $state(current());
@@ -46,7 +45,6 @@
   {:else if page === 'services'}<Services />
   {:else if page === 'system'}<SystemInfo />
   {:else if page === 'logs'}<LogView />
-  {:else if page === 'backup'}<Backup />
   {:else}<StationSettings />{/if}
 </div>
 <style>

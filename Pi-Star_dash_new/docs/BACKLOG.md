@@ -14,6 +14,31 @@
 - [#10 — Tools и обслуживание](https://github.com/shaposhnikoff/gospot/issues/10)
 - [#11 — Полная приёмка и пилот](https://github.com/shaposhnikoff/gospot/issues/11)
 
+### REPO-01
+
+Переезд в <https://github.com/shaposhnikoff/gospot-radio> чистым стартом.
+Решения пользователя записаны в [AGENTS.md](../AGENTS.md).
+
+Порядок работ:
+
+1. Довести образ Trixie до зелёного и слить ветку в текущем репозитории.
+2. Собрать новое дерево: `dashboard/` (бывший `Pi-Star_dash_new`), `panel/`,
+   `radio/`, `image/`, `docs/`, `.github/`. Без `compat/`, `qa/classic-*`,
+   `docs/configure-spec`, `docs/PARITY.md`, `tasks/` и кода миграции с
+   пакетов `pistar-*`.
+3. Перевести сборку радиочасти на исходники g4klx: закреплённые ревизии
+   MMDVMHost, DMRGateway, YSFClients, P25Clients, NXDNClients, M17Gateway,
+   DAPNETGateway, MMDVMCal и прочего, сборка в контейнере целевого выпуска,
+   как `radio/build-dstar.sh`. Таблица переименования и готовые бинарники
+   Pi-Star больше не нужны. Списки хостов по-прежнему скачиваются с pistar.uk.
+4. Документация на двух языках, релизы с пакетами, образом и суммами.
+5. Один первый коммит, затем проверка целиком: юнит-тесты, стенд, пакеты,
+   образ, установка на плату.
+
+**Приёмка:** в новом репозитории `grep -ri "pistar\|pi-star"` находит только
+адреса pistar.uk и подпись «Pi-Star compatible»; все наборы тестов зелёные;
+пакеты и образ собираются из чистого клона.
+
 ### CLI-01
 
 Интерфейс командной строки `gospot` с тем же набором действий, что и у веба

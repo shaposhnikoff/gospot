@@ -117,6 +117,7 @@ func applySettings(s settings) error {
 	mm, ds, host := path("MARKER_MMDVMHOST"), path("MARKER_DSTARREPEATER"), path("HOSTNAME_FILE")
 	lib, ui, bm := path("DASHBOARD_LIB_DIR"), path("DASHBOARD_UI_DIR"), path("DASHBOARD_BM_STATE_DIR")
 	logDir, release, hosts := path("PISTAR_LOG_DIR"), path("PISTAR_RELEASE_FILE"), path("PISTAR_HOSTS_DIR")
+	update := path("PISTAR_UPDATE_LOG")
 	binDir, sbinDir := path("PISTAR_BIN_DIR"), path("PISTAR_SBIN_DIR")
 	source := s["RADIO_LOG_SOURCE"]
 	if source != "files" && source != "journal" {
@@ -133,6 +134,7 @@ func applySettings(s settings) error {
 	markerMMDVMHost, markerDStarRepeater, hostnameFile = mm, ds, host
 	adminAssets, operatorAssets = ui, ui
 	configHelper, archiveHelperPath = filepath.Join(lib, "pistar-config"), filepath.Join(lib, "pistar-archive")
+	powerHelper, updateHelper, updateLog = filepath.Join(lib, "pistar-power"), filepath.Join(lib, "pistar-native-update"), update
 	bmStateDir = bm
 	pistarLogDir, radioLogSource, pistarReleaseFile, pistarHostsDir = logDir, source, release, hosts
 	pistarBinDir, pistarSbinDir = binDir, sbinDir

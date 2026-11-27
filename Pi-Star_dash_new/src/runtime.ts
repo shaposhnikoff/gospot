@@ -39,3 +39,13 @@ export async function detectRuntime(): Promise<{mode:'demo'|'pi', classicPort:nu
   if (object(x) && x.backend === 'demo') return {mode:'demo',classicPort:null,wizardPort:null,preview:false};
   throw Error('Не распознан режим панели');
 }
+
+// HTTP origin of the operator dashboard as advertised by the management server.
+export async function operatorOrigin(): Promise<string | null> {
+  try {
+    const c = await readJSON('/runtime.json');
+    return serviceOrigin(location.origin, 'http:', object(c) ? c.operatorPort : null);
+  } catch {
+    return null;
+  }
+}

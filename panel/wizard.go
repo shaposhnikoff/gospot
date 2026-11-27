@@ -129,6 +129,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		case "/manage/api/system":
 			serveSystemInfo(w, r)
 			return
+		case "/manage/api/livelog", "/manage/api/livelog/download", "/manage/api/power", "/manage/api/update":
+			serveMaintenance(w, r, runMaintenanceHelper, time.Now())
+			return
 		case "/manage/api/dashboard":
 			// The classic admin page shows the same tables as the dashboard.
 			if r.Method != http.MethodGet {
@@ -273,7 +276,7 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 	}
 }
 
-var wizardBundle = regexp.MustCompile(`^/manage/assets/([A-Za-z0-9_-][A-Za-z0-9._-]*\.(js|css))$`)
+var wizardBundle = regexp.MustCompile(`^/manage/assets/([A-Za-z0-9_-][A-Za-z0-9._-]*\.(js|css|png))$`)
 
 func serveWizardAsset(w http.ResponseWriter, r *http.Request, dir string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -295,8 +298,11 @@ func serveWizardAsset(w http.ResponseWriter, r *http.Request, dir string) {
 			return
 		}
 		bundle, name, contentType = true, match[1], "text/javascript; charset=utf-8"
-		if match[2] == "css" {
+		switch match[2] {
+		case "css":
 			contentType = "text/css; charset=utf-8"
+		case "png":
+			contentType = "image/png"
 		}
 	}
 
@@ -329,7 +335,7 @@ func serveWizardAsset(w http.ResponseWriter, r *http.Request, dir string) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 	w.Header().Set("Content-Type", contentType)
 	http.ServeContent(w, r, name, info.ModTime(), f)
 }

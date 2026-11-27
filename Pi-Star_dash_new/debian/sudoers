@@ -3,3 +3,5 @@ pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-config services-re
 pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-config protocols-read, @DASHBOARD_LIB_DIR@/pistar-config protocols-apply
 pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-config bm-peer
 pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR@/pistar-archive backup, @DASHBOARD_LIB_DIR@/pistar-archive preview, @DASHBOARD_LIB_DIR@/pistar-archive apply
+pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-power reboot, @DASHBOARD_LIB_DIR@/pistar-power shutdown
+pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-native-update start

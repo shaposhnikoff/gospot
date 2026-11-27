@@ -34,7 +34,7 @@ chmod 440 "$p/etc/sudoers.d/pistar-dashboard"
 if grep -q @ "$p/etc/sudoers.d/pistar-dashboard"; then echo "unresolved sudoers placeholder" >&2; exit 1; fi
 install -m644 pistar.conf "$p/etc/pistar-dashboard/pistar.conf"
 printf '%s\n' /etc/pistar-dashboard/pistar.conf >"$p/DEBIAN/conffiles"
-install -m755 ../panel/helper/{pistar-config,pistar-archive} "$p$lib/"
+install -m755 ../panel/helper/{pistar-config,pistar-archive,pistar-power,pistar-native-update} "$p$lib/"
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go -C ../panel build -trimpath \
   -ldflags="-s -w -X main.dashboardVersion=$version" \
   -o "$p$lib/panel" .

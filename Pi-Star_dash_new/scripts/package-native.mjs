@@ -1,9 +1,15 @@
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { auditNative } from './audit-native.mjs';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
+
+// Ports and paths come from pistar.conf (see AGENTS.md).
+export function readSettings(file = join(project, 'pistar.conf')) {
+  return Object.fromEntries(readFileSync(file, 'utf8').split('\n').map(l => l.trim())
+    .filter(l => l && !l.startsWith('#')).map(l => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+}
 
 export function packageNative({ dist = join(project, 'dist'), output = join(project, 'build') } = {}) {
   auditNative(dist);
@@ -12,7 +18,7 @@ export function packageNative({ dist = join(project, 'dist'), output = join(proj
   const release = mkdtempSync(join(output, 'release-'));
   const ui = join(release, 'ui');
   cpSync(dist, ui, { recursive: true, errorOnExist: true, force: false });
-  writeFileSync(join(ui, 'runtime.json'), JSON.stringify({ backend: 'pistar-go', wizardPort: 8788 }) + '\n');
+  writeFileSync(join(ui, 'runtime.json'), JSON.stringify({ backend: 'pistar-go', wizardPort: Number(readSettings().MANAGEMENT_PORT) }) + '\n');
   function publish(path) {
     const directory = statSync(path).isDirectory();
     chmodSync(path, directory ? 0o755 : 0o644);

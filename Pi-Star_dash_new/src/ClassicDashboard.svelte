@@ -144,6 +144,8 @@
         <a href={operator} style="color: #ffffff;">Dashboard</a> |
         <a href="/manage/" style="color: #ffffff;">Admin</a> |
         <a href="/manage/#logs" style="color: #ffffff;">Live Logs</a> |
+        <a href="/manage/#power" style="color: #ffffff;">Power</a> |
+        <a href="/manage/#update" style="color: #ffffff;">Update</a> |
         <a href="/manage/#configuration" style="color: #ffffff;">Configuration</a>
       {:else}
         <a href="/" style="color: #ffffff;">Dashboard</a> |

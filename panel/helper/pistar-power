@@ -1,0 +1,12 @@
+#!/bin/bash
+# Privileged entry point for the Power page: reboot or shut down the board.
+# The action is scheduled a few seconds ahead so the web request can answer.
+set -euo pipefail
+case "${1:-}" in
+  reboot) verb=reboot ;;
+  shutdown) verb=poweroff ;;
+  *) echo "usage: pistar-power reboot|shutdown" >&2; exit 2 ;;
+esac
+sync
+/usr/bin/systemd-run --quiet --collect --unit="pistar-power-$verb" --on-active=3 /usr/bin/systemctl "$verb"
+echo "$verb scheduled"

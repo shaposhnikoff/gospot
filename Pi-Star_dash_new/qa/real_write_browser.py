@@ -450,6 +450,138 @@ def exercise_css(v, stand, origin, original):
           "keeps the newer file; Factory Reset refuses a wrong confirmation and RESET removes the file, restoring the palette", flush=True)
 
 
+TGIF_ID = "234123401"
+TGIF_LOG = "/run/pistar-qa/tgif-requests"
+# Matches the TGIFSTG1 format of tgif_static_common.php; a stand-only value.
+TGIF_TOKEN = "TGIFSTG1.00112233445566aa.bbccddeeff001122." + "QaStandOnlyToken_" + "x" * 30
+
+
+def exercise_tgif(v, stand, origin, original):
+    """TGIF connections table and both TGIF managers, against the fake TGIF API run by run.sh --tgif."""
+    history = stand.restarts()
+    seen = []
+
+    def requests():
+        data = stand.read(TGIF_LOG).decode() if stand.exists(TGIF_LOG) else ""
+        return [json.loads(line) for line in data.splitlines()]
+
+    def new_requests(before):
+        return [{k: r[k] for k in ("scheme", "method", "path", "body", "auth")} for r in requests()[before:]]
+
+    def network():
+        # Every request and response body of the admin API seen by Chromium.
+        for e in v.events():
+            p = e["params"]
+            if e["method"] == "Network.requestWillBeSent" and "/manage/api/" in p["request"]["url"]:
+                seen.append(p["request"]["url"] + " " + p["request"].get("postData", ""))
+            if e["method"] == "Network.responseReceived" and "/manage/api/links" in p["response"]["url"]:
+                try:
+                    seen.append(v.cdp("Network.getResponseBody", {"requestId": p["requestId"]})["body"])
+                except Exception:  # a body the page dropped (204 or reload) carries nothing to leak
+                    pass
+
+    def no_token(stage):
+        network()
+        html = v.js("return document.documentElement.outerHTML")
+        for name, text in (("page", html), ("network", "\n".join(seen))):
+            if TGIF_TOKEN in text or "TGIFSTG1" in text:
+                raise AssertionError(f"{stage}: TGIF token visible in {name} text")
+
+    def cells():
+        return v.js("const r = document.querySelector('#tgifStaticConnects table tr:nth-child(2)');"
+                    "return r ? [...r.cells].map(c => c.innerText.trim()) : null")
+
+    def submit(value):
+        v.js("[...document.querySelectorAll('input[type=submit]')].find(b => b.value === arguments[0]).click()", value)
+
+    def output(text):
+        wait(f"command output {text!r}", lambda: v.js(
+            "return [...document.querySelectorAll('td')].some(td => td.innerText.trim() === arguments[0])", text))
+
+    def manager(tg, slot, action, button):
+        v.type_into('input[name="tgifStaticTalkgroup"]', tg)
+        v.js(f"document.getElementById('{slot}').click(); document.getElementById('{action}').click()")
+        submit(button)
+
+    def write_token(value):
+        stand.exec("sh", "-c", 'umask 077; printf "[key]\\napikey=%s\\n" "$1" >"$2"; chown pistar-wizard:pistar-wizard "$2"',
+                   "sh", value, "/etc/tgifapi.key")
+
+    stand.exec("rm", "-f", TGIF_LOG)
+    write_token(TGIF_TOKEN)
+    v.events()
+    # 1. the admin page paints at once: placeholder row first, TGIF data later (the fake API waits 1.5 s)
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/"})
+    wait("TGIF placeholder", lambda: cells() == ["tgif.network", TGIF_ID, "…", "…"])
+    equal("TGIF Manager form with the placeholder",
+          v.js("return ['Set Static','Set Dynamic'].every(x => [...document.querySelectorAll('input[type=submit]')].some(b => b.value === x))"), True)
+    equal("legacy manager hidden", v.js("return !!document.querySelector('input[name=tgifNumber]')"), False)
+    wait("TGIF table filled", lambda: cells() == ["tgif.network", TGIF_ID, "TG91(1)\nTG235(2)", "TG9990(2)"], timeout=10)
+    got = new_requests(0)
+    equal("initial TGIF requests", sorted((r["method"], r["path"], r["auth"]) for r in got),
+          [("GET", f"/v1/dynamic-talkgroups/{TGIF_ID}", "token"), ("GET", f"/v1/static-talkgroups/{TGIF_ID}", "token")])
+    no_token("table")
+    # 2. add a static TG on TS1: exactly one POST with the classic body, then the table is reloaded
+    before = len(requests())
+    manager("31665", "rbTgifTS1", "rbTgifAdd", "Set Static")
+    output("Static Talkgroup added.")
+    equal("add static request", new_requests(before)[:1],
+          [{"scheme": "https", "method": "POST", "path": f"/v1/static-talkgroups/{TGIF_ID}",
+            "body": '{"slot":1,"talkgroup":31665}', "auth": "token"}])
+    wait("table shows the added TG", lambda: (cells() or [""] * 3)[2] == "TG91(1)\nTG235(2)\nTG31665(1)", timeout=12)
+    # 3. remove a static TG on TS2: exactly one DELETE
+    before = len(requests())
+    manager("235", "rbTgifTS2", "rbTgifDel", "Set Static")
+    output("Static Talkgroup removed.")
+    equal("remove static request", new_requests(before)[:1],
+          [{"scheme": "https", "method": "DELETE", "path": f"/v1/static-talkgroups/{TGIF_ID}",
+            "body": '{"slot":2,"talkgroup":235}', "auth": "token"}])
+    wait("table without the removed TG", lambda: (cells() or [""] * 3)[2] == "TG91(1)\nTG31665(1)", timeout=12)
+    # 4. Set Dynamic / Remove unlinks with TG 4000
+    before = len(requests())
+    manager("91", "rbTgifTS2", "rbTgifDel", "Set Dynamic")
+    output("Dynamic Talkgroup unlinked.")
+    equal("dynamic unlink request", new_requests(before)[:1],
+          [{"scheme": "https", "method": "POST", "path": f"/v1/dynamic-talkgroups/{TGIF_ID}",
+            "body": '{"slot":2,"talkgroup":4000}', "auth": "token"}])
+    wait("dynamic cell after unlink", lambda: (cells() or [""] * 4)[3] == "None", timeout=12)
+    # 5. an invalid talkgroup is refused by the board and never reaches TGIF
+    before = len(requests())
+    manager("0", "rbTgifTS1", "rbTgifAdd", "Set Static")
+    output("Enter a valid talkgroup and timeslot.")
+    equal("invalid TG sent nothing", new_requests(before), [])
+    wait("form back after the refusal", lambda: v.js("return !!document.querySelector('input[name=tgifStaticTalkgroup]')"))
+    no_token("static manager")
+    # 6. no token: the legacy link manager replaces both, and sends no Authorization
+    write_token("None")
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/"})
+    wait("legacy TGIF manager", lambda: v.js("return !!document.querySelector('input[name=tgifNumber]')"))
+    equal("static table hidden", v.js("return !!document.getElementById('tgifStaticConnects')"), False)
+    equal("static manager hidden", v.js("return !!document.querySelector('input[name=tgifStaticTalkgroup]')"), False)
+    before = len(requests())
+    v.type_into('input[name="tgifNumber"]', "91")
+    v.js("document.querySelector('input[name=tgifSlot][value=\"1\"]').click();"
+         "document.querySelector('input[name=tgifAction][value=LINK]').click()")
+    submit("Modify Static")
+    output("TGIF API: OK")
+    # The stand hotspot is simplex (Slot1=0), so tgif_manager.php always targets TS2 (slot index 1).
+    equal("legacy request", new_requests(before),
+          [{"scheme": "http", "method": "GET", "path": f"/api/sessions/update/{TGIF_ID}/1/91", "body": "", "auth": ""}])
+    no_token("legacy manager")
+    wizard_log = stand.read("/tmp/pistar-wizard.log").decode(errors="replace")
+    if TGIF_TOKEN in wizard_log:
+        raise AssertionError("TGIF token in the wizard log")
+    same_pair("TGIF leaves radio files", stand.pair(), original)
+    equal("TGIF restarts", stand.restarts(), history)
+    print("PASS Chromium TGIF: admin page paints the classic table with placeholders, then the fake API's static "
+          "TG91(1) TG235(2) and dynamic TG9990(2); Set Static add/remove and Set Dynamic remove send exactly one "
+          "POST/DELETE/POST with the classic JSON and Bearer token, the table reloads; TG 0 refused without a request; "
+          "without a token the legacy manager sends one GET sessions/update/<id>/1/91 (simplex TS2) without "
+          "Authorization; token absent from page, network bodies and wizard log; radio files and services untouched", flush=True)
+
+
 def exercise_backup(v, stand, origin, folder, original):
     """Classic Backup/Restore through Chromium against the real helper."""
     import base64
@@ -510,6 +642,7 @@ def main():
     parser.add_argument("--backup", action="store_true")
     parser.add_argument("--configure", action="store_true")
     parser.add_argument("--css", action="store_true")
+    parser.add_argument("--tgif", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -532,7 +665,7 @@ def main():
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
             # /manage/ is the classic admin page; the station settings, DMR
             # services and backup pages live under their own sections.
-            if not (args.expert or args.backup or args.configure or args.css):
+            if not (args.expert or args.backup or args.configure or args.css or args.tgif):
                 command("/url", {"url": args.origin + "/manage/#settings"})
                 wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
             try:
@@ -555,6 +688,8 @@ def run_scenario(args, v, stand, folder, original, changed):
         exercise_configure(v, stand, args.origin, original)
     elif args.css:
         exercise_css(v, stand, args.origin, original)
+    elif args.tgif:
+        exercise_tgif(v, stand, args.origin, original)
     elif args.services:
         exercise_services(v, stand, original)
     else:

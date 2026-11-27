@@ -3,9 +3,11 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -123,6 +125,17 @@ func applySettings(s settings) error {
 	path("MODEM_FLASH_LOG")
 	path("SHELLINABOX_DEFAULTS")
 	bmKey := path("BM_API_KEY_FILE")
+	tgifKey := path("TGIF_API_KEY_FILE")
+	baseURL := func(key string, schemes ...string) string {
+		v := s[key]
+		u, err := url.Parse(v)
+		if err != nil || !slices.Contains(schemes, u.Scheme) || u.Host == "" || u.User != nil ||
+			u.RawQuery != "" || u.Fragment != "" || !strings.HasSuffix(u.Path, "/") {
+			errs = append(errs, fmt.Sprintf("%s must be a %s URL ending with /", key, strings.Join(schemes, " or ")))
+		}
+		return v
+	}
+	tgifAPI, tgifSession := baseURL("TGIF_API_URL", "https"), baseURL("TGIF_SESSION_URL", "http", "https")
 	binDir, sbinDir := path("PISTAR_BIN_DIR"), path("PISTAR_SBIN_DIR")
 	source := s["RADIO_LOG_SOURCE"]
 	if source != "files" && source != "journal" {
@@ -149,6 +162,7 @@ func applySettings(s settings) error {
 	pistarLogDir, radioLogSource, pistarReleaseFile, pistarHostsDir = logDir, source, release, hosts
 	pistarBinDir, pistarSbinDir = binDir, sbinDir
 	bmKeyFile = bmKey
+	tgifKeyFile, tgifAPIURL, tgifSessionURL = tgifKey, tgifAPI, tgifSession
 	pistarCSSFile = cssFile
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort = pp, mp, op
 	modemDiagnostic, masterDiagnostic = diagnosticFor(modem, modemRules), diagnosticFor(master, masterRules)

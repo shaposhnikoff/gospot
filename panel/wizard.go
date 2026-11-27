@@ -101,6 +101,7 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 	password, ready := wizardCredential()
 	slot := make(chan struct{}, 1)
 	bm := newBMManager(helper)
+	tgif := newTGIFClient()
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Cache-Control", "no-store")
@@ -138,6 +139,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 			return
 		case "/manage/api/links", "/manage/api/links/bm":
 			serveLinks(w, r, bm, sendRemoteCommand)
+			return
+		case "/manage/api/links/tgif":
+			serveTGIF(w, r, tgif)
 			return
 		case "/manage/api/backup/classic":
 			serveClassicBackup(w, r, runConfigureHelper, time.Now())

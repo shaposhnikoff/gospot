@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -36,7 +35,7 @@ type configChange struct {
 	Revision string                                   `json:"revision"`
 	Changes  map[string]map[string]map[string]*string `json:"changes,omitempty"`
 	Restart  []string                                 `json:"restart,omitempty"`
-	System   map[string]string                        `json:"system,omitempty"`
+	System   map[string]any                           `json:"system,omitempty"`
 }
 
 type configHelperFunc func(ctx context.Context, verb string, input []byte) ([]byte, error)
@@ -95,8 +94,3 @@ func readConfigState(ctx context.Context, run configHelperFunc) (configState, er
 }
 
 func setConfigHelper(lib string) { configureHelper = filepath.Join(lib, "pistar-configure") }
-
-// serveConfigure is filled in with the Configuration page mapping.
-func serveConfigure(w http.ResponseWriter, r *http.Request, run configHelperFunc) {
-	http.Error(w, "Not yet available", 501)
-}

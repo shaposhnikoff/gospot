@@ -9,6 +9,7 @@ if (settings) {
     admin: () => import('./ClassicDashboard.svelte'), logs: () => import('./LiveLogs.svelte'),
     power: () => import('./Power.svelte'), update: () => import('./Update.svelte'),
     expert: () => import('./Expert.svelte'),
+    configuration: () => import('./Configure.svelte'),
     workspace: () => import('./AdminWorkspace.svelte'),
   };
   const page = (): keyof typeof pages => {

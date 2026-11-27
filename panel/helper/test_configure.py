@@ -14,7 +14,9 @@ for line in conf.splitlines():
     key = line.partition("=")[0]
     if key.startswith("CONF_") or key in ("DASHBOARD_STATE_DIR", "MARKER_MMDVMHOST", "MARKER_DSTARREPEATER", "HOSTNAME_FILE",
                                           "WPA_SUPPLICANT_CONF", "CRONTAB_FILE", "PISTAR_HOSTS_DIR",
-                                          "BM_API_KEY_FILE", "DAPNET_API_KEY_FILE", "TGIF_API_KEY_FILE"):
+                                          "BM_API_KEY_FILE", "DAPNET_API_KEY_FILE", "TGIF_API_KEY_FILE",
+                                          "HOSTS_FILE", "HOSTAPD_CONF", "HOSTAP_OFF_FLAG", "PISTAR_UPNP_SCRIPT",
+                                          "WIZARD_CONFIG_DIR"):
         line = f"{key}={TMP / key.lower()}"
     lines.append(line)
 settings = TMP / "pistar.conf"
@@ -51,7 +53,7 @@ class ConfigureTest(unittest.TestCase):
     def run_apply(self, changes, restart=(), revision=None):
         state = helper.read()
         req = {"revision": revision or state["revision"], "changes": changes, "restart": list(restart)}
-        return helper.apply(req, run=lambda *a: self.calls.append(a))
+        return helper.apply(req, run=lambda *a: self.calls.append(a), is_loaded=lambda u: True)
 
     def test_read(self):
         state = helper.read()
@@ -96,17 +98,72 @@ class ConfigureTest(unittest.TestCase):
         state = helper.read()
         with self.assertRaises(helper.Error):
             helper.apply({"revision": state["revision"], "changes": {"mmdvmhost": {"DMR": {"ColorCode": "9"}}},
-                          "restart": ["mmdvmhost.service"]}, run=fail)
+                          "restart": ["mmdvmhost.service"]}, run=fail, is_loaded=lambda u: True)
         self.assertEqual(helper.FILES["mmdvmhost"].read_text(), HOST)
         self.assertEqual(self.calls, [("restart", "mmdvmhost.service"), ("restart", "mmdvmhost.service")])
 
     def test_controller_switch_keeps_marker(self):
         helper.MARKERS["mmdvmhost"].write_text("[Modem]\nHardware=zumspotusb\n")
         state = helper.read()
-        helper.apply({"revision": state["revision"], "system": {"controller": "dstarrepeater"}}, run=lambda *a: None)
+        helper.apply({"revision": state["revision"], "system": {"controller": "dstarrepeater"}}, run=lambda *a: None, is_loaded=lambda u: True)
         self.assertFalse(helper.MARKERS["mmdvmhost"].exists())
         self.assertEqual(helper.MARKERS["dstarrepeater"].read_text(), "[Modem]\nHardware=zumspotusb\n")
         helper.MARKERS["dstarrepeater"].unlink()
+
+
+class SystemOpsTest(unittest.TestCase):
+    def apply(self, system, restart=(), loaded=lambda u: True):
+        state = helper.read()
+        calls = []
+        helper.apply({"revision": state["revision"], "system": system, "restart": list(restart)},
+                     run=lambda *a: calls.append(a), is_loaded=loaded)
+        return calls
+
+    def test_modem_autoap_psk_upnp(self):
+        helper.MARKERS["mmdvmhost"].write_text("")
+        helper.MARKERS["dstarrepeater"].unlink(missing_ok=True)
+        helper.HOSTAPD.write_text("interface=wlan0\nssid=pi-star\nwpa_passphrase=raspberry\n")
+        helper.UPNP.write_text("#!/bin/bash\n\t$DAEMON_PATH$DAEMON -a $ipVar 80 80 TCP\n\t$DAEMON_PATH$DAEMON -a $ipVar 22 22 TCP\n")
+        helper.CRONTAB.write_text("*/5 *\t* * *\troot\t/usr/local/sbin/pistar-upnp.service start > /dev/null 2>&1 &\n")
+        self.apply({"modem": {"Hardware": "zumspotusb"}, "autoap": "off", "autoap_psk": "newsecret1",
+                    "upnp": "off", "upnp_ports": {"80": "on", "22": "off"}})
+        self.assertEqual(helper.MARKERS["mmdvmhost"].read_text(), "[Modem]\nHardware=zumspotusb\n")
+        self.assertTrue(helper.HOSTAP_OFF.exists())
+        self.assertIn("wpa_passphrase=newsecret1\n", helper.HOSTAPD.read_text())
+        self.assertIn("\t$DAEMON_PATH$DAEMON -a $ipVar 80 80 TCP", helper.UPNP.read_text())
+        self.assertIn("#\t$DAEMON_PATH$DAEMON -a $ipVar 22 22 TCP", helper.UPNP.read_text())
+        self.assertTrue(helper.CRONTAB.read_text().startswith("#*/5"))
+        self.apply({"autoap": "on", "upnp": "on", "upnp_ports": {"22": "on"}})
+        self.assertFalse(helper.HOSTAP_OFF.exists())
+        self.assertTrue(helper.CRONTAB.read_text().startswith("*/5"))
+        self.assertNotIn("#\t$DAEMON", helper.UPNP.read_text())
+        helper.MARKERS["mmdvmhost"].unlink()
+
+    def test_rejects_unknown_or_bad_ops(self):
+        for system in ({"reboot": True}, {"autoap_psk": "short"}, {"password": "a:b"}, {"modem": {"Hardware": "x\ny"}},
+                       {"upnp_ports": {"8080": "on"}}, {"hostname": "Bad_Host"}, {"timezone": "../../etc/passwd"}):
+            with self.assertRaises(helper.Error, msg=str(system)):
+                self.apply(system)
+
+    def test_not_installed_units_are_skipped(self):
+        calls = self.apply({}, restart=["mmdvmhost.service", "ircddbgateway.service"], loaded=lambda u: u == "mmdvmhost.service")
+        self.assertEqual(calls, [("restart", "mmdvmhost.service")])
+
+    def test_password(self):
+        (helper.WIZARD_DIR).mkdir(exist_ok=True)
+        ran = []
+        orig = helper.subprocess.run
+        helper.subprocess.run = lambda args, **kw: ran.append(args)
+        saved_user = helper.LINUX_USER
+        helper.LINUX_USER = "no-such-user-pistar"
+        try:
+            self.apply({"password": "s3cret pass"})
+        finally:
+            helper.subprocess.run = orig
+            helper.LINUX_USER = saved_user
+        self.assertEqual((helper.WIZARD_DIR / "admin-password").read_text(), "s3cret pass\n")
+        self.assertEqual(oct((helper.WIZARD_DIR / "admin-password").stat().st_mode & 0o777), "0o600")
+        self.assertEqual([a[0] for a in ran], ["/usr/bin/systemd-run"])
 
 
 class KeysTest(unittest.TestCase):

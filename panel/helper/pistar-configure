@@ -68,6 +68,13 @@ STATE = setting_path(_SETTINGS, "DASHBOARD_STATE_DIR")
 MARKERS = {"mmdvmhost": setting_path(_SETTINGS, "MARKER_MMDVMHOST"),
            "dstarrepeater": setting_path(_SETTINGS, "MARKER_DSTARREPEATER")}
 HOSTNAME = setting_path(_SETTINGS, "HOSTNAME_FILE")
+HOSTS = setting_path(_SETTINGS, "HOSTS_FILE")
+HOSTAPD = setting_path(_SETTINGS, "HOSTAPD_CONF")
+HOSTAP_OFF = setting_path(_SETTINGS, "HOSTAP_OFF_FLAG")
+UPNP = setting_path(_SETTINGS, "PISTAR_UPNP_SCRIPT")
+CRONTAB = setting_path(_SETTINGS, "CRONTAB_FILE")
+WIZARD_DIR = setting_path(_SETTINGS, "WIZARD_CONFIG_DIR")
+LINUX_USER = _SETTINGS.get("PISTAR_LINUX_USER", "")
 # Services the page may restart: the Pi-Star radio daemons and helpers.
 UNITS = {u + ".service" for u in (
     "mmdvmhost", "dmrgateway", "ysfgateway", "ysfparrot", "p25gateway", "p25parrot", "nxdngateway",
@@ -357,7 +364,22 @@ def plan(request, texts):
     units = request.get("restart", [])
     require(type(units) is list and all(u in UNITS for u in units), "unknown service")
     system = request.get("system", {})
-    require(type(system) is dict and set(system) <= {"hostname", "timezone", "controller"}, "invalid system change")
+    require(type(system) is dict and set(system) <= SYSTEM_OPS, "invalid system change")
+    if "modem" in system:
+        require(type(system["modem"]) is dict and all(NAME.fullmatch(k) and type(v) is str and VALUE.fullmatch(v)
+                                                       for k, v in system["modem"].items()), "invalid modem settings")
+    if "password" in system:
+        pw = system["password"]
+        require(type(pw) is str and 1 <= len(pw) <= 128 and VALUE.fullmatch(pw) and ":" not in pw, "invalid password")
+    if "autoap_psk" in system:
+        psk = system["autoap_psk"]
+        require(type(psk) is str and 8 <= len(psk) <= 63 and re.fullmatch(r"[\x20-\x7e]+", psk), "invalid Auto AP PSK")
+    for flag in ("autoap", "upnp"):
+        if flag in system:
+            require(system[flag] in ("on", "off"), "invalid " + flag)
+    if "upnp_ports" in system:
+        require(type(system["upnp_ports"]) is dict and set(system["upnp_ports"]) <= {"80", "10022", "22"}
+                and all(v in ("on", "off") for v in system["upnp_ports"].values()), "invalid UPnP ports")
     if "hostname" in system:
         require(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", system["hostname"] or ""), "invalid hostname")
     if "timezone" in system:
@@ -369,11 +391,115 @@ def plan(request, texts):
     return targets, list(dict.fromkeys(units)), system
 
 
-def apply(request, run=systemctl):
+SYSTEM_OPS = {"hostname", "timezone", "controller", "modem", "password", "autoap", "autoap_psk", "upnp", "upnp_ports"}
+
+
+def set_line(path, pattern, line, comment=None):
+    """Replace the first line matching pattern (or append it); with comment=True/False toggle a leading #."""
+    if not path.exists():
+        return
+    text, st = read_file(path)
+    lines = text.split("\n")
+    for i, l in enumerate(lines):
+        if re.search(pattern, l):
+            if comment is None:
+                lines[i] = line
+            elif comment:
+                lines[i] = "#" + l.lstrip("#")
+            else:
+                lines[i] = l.lstrip("#")
+            break
+    else:
+        if comment is None:
+            lines.insert(len(lines) - 1 if lines and lines[-1] == "" else len(lines), line)
+    new = "\n".join(lines)
+    if new != text:
+        replace(path, new, st)
+
+
+def system_ops(system, run):
+    """Apply validated system changes; runs inside apply()'s rollback scope."""
+    if "hostname" in system:
+        old, new = system_state()["hostname"], system["hostname"]
+        if new != old:
+            subprocess.run(["/usr/bin/hostnamectl", "set-hostname", new], check=True, timeout=30,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if old and HOSTS.exists():
+                text, st = read_file(HOSTS)
+                replace(HOSTS, re.sub(r"(?<![A-Za-z0-9.-])" + re.escape(old) + r"(?![A-Za-z0-9.-])", new, text), st)
+            set_line(HOSTAPD, r"^ssid=", f"ssid={new}")
+    if "timezone" in system and system["timezone"] != system_state()["timezone"]:
+        subprocess.run(["/usr/bin/timedatectl", "set-timezone", system["timezone"]], check=True, timeout=30,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if "controller" in system:
+        want = MARKERS[system["controller"]]
+        for name, p in MARKERS.items():
+            if name != system["controller"] and p.exists():
+                if not want.exists():
+                    os.rename(p, want)  # keep the marker contents (modem selection)
+                else:
+                    p.unlink()
+        if not want.exists():
+            want.touch(0o644)
+    if "modem" in system:
+        marker = next((p for p in MARKERS.values() if p.exists()), None)
+        require(marker is not None, "no controller configured")
+        text, st = read_file(marker)
+        ini = Ini(text or "")
+        for key, value in system["modem"].items():
+            ini.set("Modem", key, value)
+        replace(marker, ini.text(), st)
+    if "autoap_psk" in system:
+        set_line(HOSTAPD, r"^wpa_passphrase=", "wpa_passphrase=" + system["autoap_psk"])
+    if "autoap" in system:
+        if system["autoap"] == "off":
+            HOSTAP_OFF.touch(0o644)
+        else:
+            HOSTAP_OFF.unlink(missing_ok=True)
+    if "upnp_ports" in system:
+        for port, state in system["upnp_ports"].items():
+            set_line(UPNP, rf"\$ipVar {port} {port}", "", comment=(state == "off"))
+    if "upnp" in system:
+        set_line(CRONTAB, r"pistar-upnp\.service", "", comment=(system["upnp"] == "off"))
+    if "password" in system:
+        pw = system["password"]
+        path = WIZARD_DIR / "admin-password"
+        _, st = read_file(path)
+
+        class Private:
+            st_uid = st.st_uid if st else os.geteuid()
+            st_gid = st.st_gid if st else os.getegid()
+            st_mode = 0o600
+        replace(path, pw + "\n", Private)
+        if LINUX_USER:
+            import pwd
+            try:
+                pwd.getpwnam(LINUX_USER)
+            except KeyError:
+                pass
+            else:
+                subprocess.run(["/usr/sbin/chpasswd"], input=f"{LINUX_USER}:{pw}\n".encode(), check=True, timeout=30,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # The HTTPS service loads its credential at start; answer the request first.
+        subprocess.run(["/usr/bin/systemd-run", "--quiet", "--collect", "--on-active=2", "/usr/bin/systemctl",
+                        "restart", "pistar-wizard.service"], check=True, timeout=30,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def loaded(unit):
+    out = subprocess.run(["/usr/bin/systemctl", "show", "-p", "LoadState", "--value", unit], timeout=30,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return out.stdout.decode().strip() == "loaded"
+
+
+def apply(request, run=systemctl, is_loaded=None):
+    is_loaded = is_loaded or loaded
     texts, stats, revision = snapshot()
     if request.get("revision") != revision:
         raise Stale("configuration changed since it was read")
     targets, units, system = plan(request, texts)
+    # Pi-Star restarts every radio service; skip units that are not installed.
+    units = [u for u in units if is_loaded(u)]
     STATE.mkdir(mode=0o700, exist_ok=True)
     pending = STATE / "configure-pending.json"
     require(not pending.exists(), "interrupted operation; inspect private pending backup")
@@ -384,23 +510,7 @@ def apply(request, run=systemctl):
         for name, text in targets.items():
             replace(FILES[name], text, stats[name])
             written.append(name)
-        if "hostname" in system and system["hostname"] != system_state()["hostname"]:
-            subprocess.run(["/usr/bin/hostnamectl", "set-hostname", system["hostname"]], check=True, timeout=30,
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if "timezone" in system and system["timezone"] != system_state()["timezone"]:
-            subprocess.run(["/usr/bin/timedatectl", "set-timezone", system["timezone"]], check=True, timeout=30,
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if "controller" in system:
-            want = MARKERS[system["controller"]]
-            other = [p for n, p in MARKERS.items() if n != system["controller"]]
-            for p in other:
-                if p.exists():
-                    if not want.exists():
-                        os.rename(p, want)  # keep the marker contents (modem selection)
-                    else:
-                        p.unlink()
-            if not want.exists():
-                want.touch(0o644)
+        system_ops(system, run)
         for unit in units:
             run("restart", unit)
     except Exception:

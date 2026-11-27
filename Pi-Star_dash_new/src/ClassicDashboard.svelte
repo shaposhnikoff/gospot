@@ -8,6 +8,7 @@
   } from './classic';
   import { readJSON, serviceOrigin } from './runtime';
   import LinkManagers from './LinkManagers.svelte';
+  import Hoseline from './Hoseline.svelte';
 
   // admin: the /admin/ variant of index.php, served by the HTTPS management UI.
   let { admin = false }: { admin?: boolean } = $props();
@@ -312,6 +313,8 @@
           </tbody>
         </table>
       </div>
+      <br />
+      <Hoseline {admin} lookup={d.Theme?.Lookup} />
     </div>
   {/if}
 

@@ -2,6 +2,7 @@
 """Exercise real settings and signed archive transactions on a disposable QA stand."""
 
 import argparse
+import base64
 from hashlib import pbkdf2_hmac, sha256
 from ipaddress import ip_address
 import json
@@ -927,6 +928,111 @@ def exercise_tgif(v, stand, origin, original):
           "Authorization; token absent from page, network bodies and wizard log; radio files and services untouched", flush=True)
 
 
+HOSELINE_LOG = "/run/pistar-qa/hoseline-events"
+HOSELINE_SOURCE = 2340001  # fake_hoseline.py --source
+
+
+def exercise_hoseline(v, stand, origin, original):
+    """BrandMeister Hoseline player under Local RF Activity, against fake_hoseline.py run by run.sh --hoseline."""
+    history = stand.restarts()
+    conf = stand_settings(stand)
+    groups = [int(g) for g in conf["HOSELINE_TALKGROUPS"].split(",")]
+    limit = int(conf["HOSELINE_MAX_LISTENERS"])
+    socket_url = "wss" + origin[len("https"):] + "/manage/api/hoseline?tg="
+
+    def log():
+        data = stand.read(HOSELINE_LOG).decode() if stand.exists(HOSELINE_LOG) else ""
+        return [json.loads(line) for line in data.splitlines()]
+
+    def spotter(kind, after=0):
+        return [e for e in log()[after:] if e["event"] == kind]
+
+    def status():
+        return v.js("return document.getElementById('hoselineStatus')?.innerText.trim() ?? null")
+
+    def sockets(events, url):
+        created = {e["params"]["requestId"] for e in events
+                   if e["method"] == "Network.webSocketCreated" and e["params"]["url"] == url}
+        frames = [e["params"]["response"] for e in events
+                  if e["method"] == "Network.webSocketFrameReceived" and e["params"]["requestId"] in created]
+        closed = [e for e in events if e["method"] == "Network.webSocketClosed" and e["params"]["requestId"] in created]
+        return created, frames, closed
+
+    def no_console_errors(stage, refused=False):
+        # A refused handshake (the limit check) is logged by Chromium itself.
+        for entry in v.command("/se/log", {"type": "browser"}):
+            text = entry.get("message", "")
+            if ("Content Security Policy" in text or "Uncaught" in text
+                    or ("hoseline" in text.lower() and not (refused and "503" in text))):
+                raise AssertionError(f"{stage}: browser console: {text}")
+
+    v.events()
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/"})
+    # 1. the player sits under Local RF Activity and offers the configured talkgroups
+    wait("Hoseline talkgroups", lambda: v.js("return document.querySelectorAll('select[name=hoselineTalkgroup] option').length") > 0,
+         timeout=15)
+    equal("Hoseline placement", v.js("const h = document.querySelector('#localTxs ~ #hoseline');"
+                                     "return h ? h.querySelector('b').innerText.trim() : null"), "BrandMeister Hoseline")
+    equal("offered talkgroups", v.js("return [...document.querySelectorAll('select[name=hoselineTalkgroup] option')].map(o => o.value)"),
+          [str(g) for g in sorted(set(groups))])
+    equal("default talkgroup", v.js("return document.querySelector('select[name=hoselineTalkgroup]').value"), "91")
+    equal("idle status", status(), "Stopped")
+    equal("no relay before Play", spotter("open"), [])
+    # 2. Play (a real click: the AudioContext needs a user gesture) opens one relay for the selected TG
+    tg = groups[1] if len(groups) > 1 else groups[0]
+    v.js("const s = document.querySelector('select[name=hoselineTalkgroup]'); s.value = arguments[0];"
+         "s.dispatchEvent(new Event('change', {bubbles: true}))", str(tg))
+    before = len(log())
+    v.click('input[name="hoselinePlay"]')
+    wait("listening status", lambda: (status() or "").startswith(f"Listening to TG {tg}"), timeout=10)
+    wait("caller shown", lambda: status() == f"Listening to TG {tg}: {HOSELINE_SOURCE}", timeout=10)
+    equal("caller link", v.js("return document.querySelector('#hoselineStatus a')?.href"),
+          f"https://database.radioid.net/database/view?id={HOSELINE_SOURCE}")
+    opened = spotter("open", before)
+    equal("one upstream connection", [(e["token"], e["origin"], e["spotter"]) for e in opened],
+          [(True, "https://" + urlsplit(conf["HOSELINE_PAGE_URL"]).netloc, True)])
+    equal("subscription", [(e["id"], e["tg"]) for e in spotter("subscribe", before)], [(opened[0]["id"], tg)])
+    # 3. μ-law audio reaches the browser as binary WebSocket frames
+    wait("audio frames", lambda: spotter("call", before), timeout=10)
+    events = v.events()
+    created, frames, _ = sockets(events, socket_url + str(tg))
+    equal("browser sockets for the TG", len(created), 1)
+    audio = [f for f in frames if f["opcode"] == 2]
+    texts = [json.loads(f["payloadData"]) for f in frames if f["opcode"] == 1]
+    if len(audio) < 10 or any(len(base64.b64decode(f["payloadData"])) != 480 for f in audio):
+        raise AssertionError(f"audio frames: {len(audio)} {[len(base64.b64decode(f['payloadData'])) for f in audio][:5]}")
+    equal("first relay events", texts[:2], [{"type": "listening", "tg": tg}, {"type": "start", "source": HOSELINE_SOURCE}])
+    if {"type": "end"} not in texts:
+        raise AssertionError(f"no call end event: {texts}")
+    equal("playback", "unavailable" in status(), False)
+    no_console_errors("playing")
+    # 4. Stop closes the browser socket and the relay closes its upstream connection
+    v.click('input[name="hoselineStop"]')
+    wait("stopped status", lambda: status() == "Stopped")
+    wait("upstream closed", lambda: [e["id"] for e in spotter("close", before)] == [opened[0]["id"]], timeout=10)
+    wait("browser socket closed", lambda: sockets(events + v.events(), socket_url + str(tg))[2])
+    # 5. with HOSELINE_MAX_LISTENERS other listeners, Play reports the limit and opens no relay
+    before = len(log())
+    v.js("window.qaHoseline = Array.from({length: arguments[1]}, () => new WebSocket(arguments[0]))",
+         socket_url + str(groups[0]), limit)
+    wait(f"{limit} listeners", lambda: len(spotter("subscribe", before)) == limit, timeout=10)
+    v.click('input[name="hoselinePlay"]')
+    wait("limit error", lambda: status() == f"Too many listeners: all {limit} Hoseline slots are in use. Try again later.",
+         timeout=10)
+    equal("no extra upstream connection", len(spotter("open", before)), limit)
+    v.js("window.qaHoseline.forEach(s => s.close())")
+    wait("listeners closed", lambda: len(spotter("close", before)) == limit, timeout=10)
+    no_console_errors("limit", refused=True)
+    same_pair("Hoseline leaves radio files", stand.pair(), original)
+    equal("Hoseline restarts", stand.restarts(), history)
+    print("PASS Chromium Hoseline: table under Local RF Activity lists HOSELINE_TALKGROUPS (TG91 default); Play opens "
+          f"one relay for TG{tg} (spotter saw the page token, Origin and the spotter subprotocol, then [1,[{tg}]]); "
+          f"480-byte μ-law frames and start/end events arrive, the status links caller {HOSELINE_SOURCE}; Stop closes "
+          f"the upstream; with {limit} listeners open Play shows the limit error without a new relay; no CSP errors; "
+          "radio files and services untouched", flush=True)
+
+
 def exercise_backup(v, stand, origin, folder, original):
     """Classic Backup/Restore through Chromium against the real helper."""
     import base64
@@ -992,6 +1098,7 @@ def main():
     parser.add_argument("--calibration", action="store_true")
     parser.add_argument("--jitter", action="store_true")
     parser.add_argument("--tgif", action="store_true")
+    parser.add_argument("--hoseline", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -1015,7 +1122,8 @@ def main():
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
             # /manage/ is the classic admin page; the station settings, DMR
             # services and backup pages live under their own sections.
-            if not (args.expert or args.backup or args.configure or args.css or args.factory or args.wifi or args.calibration or args.jitter or args.tgif):
+            if not (args.expert or args.backup or args.configure or args.css or args.factory or args.wifi or args.calibration or args.jitter or args.tgif
+                    or args.hoseline):
                 command("/url", {"url": args.origin + "/manage/#settings"})
                 wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
             try:
@@ -1048,6 +1156,8 @@ def run_scenario(args, v, stand, folder, original, changed):
         exercise_jitter(v, stand, args.origin, original)
     elif args.tgif:
         exercise_tgif(v, stand, args.origin, original)
+    elif args.hoseline:
+        exercise_hoseline(v, stand, args.origin, original)
     elif args.services:
         exercise_services(v, stand, original)
     else:

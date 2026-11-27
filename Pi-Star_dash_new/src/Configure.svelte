@@ -29,7 +29,14 @@
     }
     form = f;
   }
-  onMount(() => { void load(); });
+  const appliedKey = 'pistar-configure-applied';
+  onMount(() => {
+    if (sessionStorage.getItem(appliedKey)) {
+      sessionStorage.removeItem(appliedKey);
+      message = 'Your configuration has been applied.';
+    }
+    void load();
+  });
 
   async function apply(formName = 'config') {
     if (busy) return;
@@ -43,8 +50,13 @@
     }).catch(() => null);
     busy = false;
     if (!r || !r.ok) { error = r ? (await r.text()).trim() : 'No response from the board'; return; }
-    message = 'Your configuration has been applied.';
-    await load();
+    // Like configure.php: reload the whole page after a successful Apply, so
+    // every section is rebuilt from the files just written; the result is
+    // shown again after the reload.
+    message = 'Your configuration has been applied. Reloading...';
+    sessionStorage.setItem(appliedKey, '1');
+    window.scrollTo(0, 0);
+    setTimeout(() => location.reload(), 2000);
   }
 
   // configure.php factoryReset(): confirm, then pistar-factory-reset; Wi-Fi is kept.

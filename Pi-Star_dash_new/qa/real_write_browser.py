@@ -299,7 +299,14 @@ def exercise_configure(v, stand, origin, original):
         wait("configuration did not load", lambda: v.js("return document.querySelectorAll('.section h2').length > 3"))
 
     def apply_first():
-        v.js("document.querySelector('.section input[value=\"Apply Changes\"]').click()")
+        v.js("window.qaBeforeApply = 1; document.querySelector('.section input[value=\"Apply Changes\"]').click()")
+
+    def applied():
+        # A successful Apply reloads the whole page (like configure.php) and
+        # shows the result again; wait for the reloaded document.
+        wait("page reloaded after Apply", lambda: v.js(
+            "return !window.qaBeforeApply && document.body.innerText.includes('Your configuration has been applied.')"
+            " && !document.body.innerText.includes('Reloading') && document.querySelectorAll('.section h2').length > 3"), timeout=20)
 
     def message(fragment):
         wait("expected: " + fragment, lambda: fragment in v.js("return document.body.innerText"))
@@ -319,7 +326,7 @@ def exercise_configure(v, stand, origin, original):
     # 1. an untouched form writes nothing and restarts nothing
     print("configure step: 1. an untouched form writes nothing and restarts nothing", flush=True)
     apply_first()
-    message("Your configuration has been applied.")
+    applied()
     same_pair("untouched Configuration", stand.pair(), original)
     equal("untouched Configuration restarts", stand.restarts(), history)
     equal("untouched Configuration marker", stand.read(marker), marker_text)
@@ -328,7 +335,7 @@ def exercise_configure(v, stand, origin, original):
     load()
     v.js("const s=document.querySelector('select[aria-label=\"dmrColorCode\"]'); s.value='7'; s.dispatchEvent(new Event('change',{bubbles:true}))")
     apply_first()
-    message("Your configuration has been applied.")
+    applied()
     host7 = host.replace(b"ColorCode=1\n", b"ColorCode=7\n")
     assert host7 != host
     same_pair("Configuration Colour Code 1 -> 7", stand.pair(), (host7, gw))
@@ -361,8 +368,8 @@ def exercise_configure(v, stand, origin, original):
     message("entries do not match")
     equal("mismatched password not written", stand.exists("/etc/pistar-wizard/admin-password"), False)
     v.type_into('input[aria-label="Confirm Password"]', "qa-Secret-1")
-    v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Set Password').click()")
-    message("Your configuration has been applied.")
+    v.js("window.qaBeforeApply = 1; [...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Set Password').click()")
+    applied()
     equal("password file", stand.read("/etc/pistar-wizard/admin-password"), b"qa-Secret-1\n")
     equal("password file mode", stand.exec("stat", "-c", "%a", "/etc/pistar-wizard/admin-password").stdout.decode().strip(), "600")
     same_pair("password form leaves radio files", stand.pair(), (hostb, gw))
@@ -371,7 +378,7 @@ def exercise_configure(v, stand, origin, original):
           b"--quiet --collect --on-active=2 /usr/bin/systemctl restart pistar-wizard.service\n")
     stand.exec("rm", "-f", marker, "/etc/pistar-wizard/admin-password", "/usr/bin/systemd-run", "/run/pistar-qa/systemd-run")
     print("PASS Chromium Configuration: sections " + ", ".join(titles) + "; untouched Apply writes and restarts nothing; "
-          "Colour Code 1 -> 7 changes exactly that line and restarts DMRGateway then MMDVMHost, reread shows 7; "
+          "Colour Code 1 -> 7 changes exactly that line and restarts DMRGateway then MMDVMHost, the page reloads and shows 7; "
           "invalid value 422 and stale page 409 write nothing; Remote Access Password mismatch refused, "
           "then written 0600 without radio restarts", flush=True)
 

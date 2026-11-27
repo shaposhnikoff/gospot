@@ -13,6 +13,7 @@ scenario=()
 preview=false
 if [[ ${1:-} == --preview ]]; then preview=true; shift; fi
 if [[ ${1:-} == --services ]]; then scenario+=(--services); shift; fi
+if [[ ${1:-} == --expert ]]; then scenario+=(--expert); shift; fi
 if (($#)); then
   [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
@@ -75,7 +76,7 @@ docker cp "$dist/." "$name:/usr/local/share/pistar-native-ui/"
 echo "Admin UI source: $dist; verifying container files against source hashes"
 docker exec -i -w /usr/local/share/pistar-native-ui "$name" sha256sum -c - <"$work/ui.sha256"
 for f in MMDVM-Host.ini DMRGateway.ini; do docker cp "$work/$f" "$name:/etc/$f"; done
-for h in pistar-config pistar-archive; do
+for h in pistar-config pistar-archive pistar-configure; do
   docker cp "../panel/helper/$h" "$name:/usr/local/libexec/$h"
   test "$(sha256sum "../panel/helper/$h"|cut -d' ' -f1)" = "$(docker exec "$name" sha256sum "/usr/local/libexec/$h"|cut -d' ' -f1)"
 done

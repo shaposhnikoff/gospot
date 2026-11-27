@@ -36,7 +36,7 @@
     <div style="font-size: 8px; text-align: right; padding-right: 8px;">{versions}</div>
     <h1>Pi-Star Digital Voice - {title}</h1>
     <p style="padding-right: 5px; text-align: right; color: #ffffff;">
-      {#each links as label, i}{#if actions[label]}<a href="#top" style="color: #ffffff;" onclick={e => { e.preventDefault(); actions[label](); }}>{label}</a>{:else}<a href={label === 'Dashboard' ? operator : targets[label]} style="color: #ffffff;">{label}</a>{/if}{#if i < links.length - 1}{' | '}{/if}{/each}
+      {#each links as label, i}{#if actions[label]}<a href="#top" style="color: #ffffff;" onclick={e => { e.preventDefault(); actions[label](); }}>{label}</a>{:else}<a href={label === 'Dashboard' ? operator : targets[label]} style="color: #ffffff;">{label}</a>{/if}{' | '}{/each}<a href={operator + 'kiosk'} style="color: #ffffff;">Kiosk</a>
     </p>
     {#if menu}{@render menu()}{/if}
   </div>

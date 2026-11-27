@@ -155,11 +155,13 @@
         <a href="/manage/#logs" style="color: #ffffff;">Live Logs</a> |
         <a href="/manage/#power" style="color: #ffffff;">Power</a> |
         <a href="/manage/#update" style="color: #ffffff;">Update</a> |
-        <a href="/manage/#configuration" style="color: #ffffff;">Configuration</a>
+        <a href="/manage/#configuration" style="color: #ffffff;">Configuration</a> |
+        <a href={operator + 'kiosk'} style="color: #ffffff;">Kiosk</a>
       {:else}
         <a href="/" style="color: #ffffff;">Dashboard</a> |
         <a href="/admin/" style="color: #ffffff;">Admin</a> |
-        <a href="/admin/configure.php" style="color: #ffffff;">Configuration</a>
+        <a href="/admin/configure.php" style="color: #ffffff;">Configuration</a> |
+        <a href="/kiosk" style="color: #ffffff;">Kiosk</a>
       {/if}
     </p>
   </div>

@@ -4,6 +4,9 @@
   import PiStarFrame from './PiStarFrame.svelte';
   import QuickEdit from './QuickEdit.svelte';
   import FullEdit from './FullEdit.svelte';
+  import ApiKeys from './ApiKeys.svelte';
+  import Firmware from './Firmware.svelte';
+  import SshAccess from './SshAccess.svelte';
 
   let { page = '' }: { page?: string } = $props();
   const quick: [string, string][] = [
@@ -40,6 +43,12 @@
     {#key quickFile}<QuickEdit file={quickFile} />{/key}
   {:else if fullFile}
     {#key fullFile}<FullEdit file={fullFile} />{/key}
+  {:else if page === 'full-apikeys'}
+    <ApiKeys />
+  {:else if page === 'tool-fw'}
+    <Firmware />
+  {:else if page === 'tool-ssh'}
+    <SshAccess />
   {:else}
     <table width="100%">
       <tbody>

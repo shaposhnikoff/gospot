@@ -1,0 +1,21 @@
+#!/bin/bash
+# Privileged entry point for Expert > FW: list the firmware types Pi-Star's
+# pistar-modemupgrade knows, or flash one of them in a detached job that
+# writes MODEM_FLASH_LOG.
+set -euo pipefail
+. /etc/pistar-dashboard/pistar.conf
+tool=$PISTAR_SBIN_DIR/pistar-modemupgrade
+unit=pistar-modem-flash.service
+case "${1:-}" in
+  list) exec "$tool" list ;;
+  flash)
+    want=${2:-}
+    "$tool" list | grep -qxF -- "$want" || { echo "unknown modem type" >&2; exit 2; }
+    if /usr/bin/systemctl is-active --quiet "$unit"; then echo "already running" >&2; exit 3; fi
+    : >"$MODEM_FLASH_LOG"
+    chmod 0644 "$MODEM_FLASH_LOG"
+    /usr/bin/systemd-run --quiet --collect --unit="$unit" "$tool" "$want"
+    echo started
+    ;;
+  *) echo "usage: pistar-modem list|flash TYPE" >&2; exit 2 ;;
+esac

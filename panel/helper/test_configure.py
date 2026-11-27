@@ -13,10 +13,13 @@ lines = []
 for line in conf.splitlines():
     key = line.partition("=")[0]
     if key.startswith("CONF_") or key in ("DASHBOARD_STATE_DIR", "MARKER_MMDVMHOST", "MARKER_DSTARREPEATER", "HOSTNAME_FILE",
-                                          "WPA_SUPPLICANT_CONF", "CRONTAB_FILE", "PISTAR_HOSTS_DIR"):
+                                          "WPA_SUPPLICANT_CONF", "CRONTAB_FILE", "PISTAR_HOSTS_DIR",
+                                          "BM_API_KEY_FILE", "DAPNET_API_KEY_FILE", "TGIF_API_KEY_FILE"):
         line = f"{key}={TMP / key.lower()}"
     lines.append(line)
 settings = TMP / "pistar.conf"
+import pwd
+lines = [l if not l.startswith("DASHBOARD_ADMIN_USER=") else "DASHBOARD_ADMIN_USER=" + pwd.getpwuid(os.geteuid()).pw_name for l in lines]
 settings.write_text("\n".join(lines) + "\n")
 os.chmod(settings, 0o644)
 os.environ["PISTAR_SETTINGS"] = str(settings)
@@ -104,6 +107,23 @@ class ConfigureTest(unittest.TestCase):
         self.assertFalse(helper.MARKERS["mmdvmhost"].exists())
         self.assertEqual(helper.MARKERS["dstarrepeater"].read_text(), "[Modem]\nHardware=zumspotusb\n")
         helper.MARKERS["dstarrepeater"].unlink()
+
+
+class KeysTest(unittest.TestCase):
+    def test_seed_and_write(self):
+        for p in (helper.KEYS[k][0] for k in helper.KEYS):
+            p.unlink(missing_ok=True)
+        state = helper.keys_read()["targets"]
+        self.assertEqual([t["id"] for t in state], ["bm", "dapnet", "tgif"])
+        self.assertEqual(state[1]["sections"], [["DAPNETAPI", [["USER", ""], ["PASS", ""], ["TRXAREA", ""]]]])
+        helper.keys_write({"target": "dapnet", "values": {"DAPNETAPI": {"USER": "m0abc", "PASS": "", "TRXAREA": "uk-all"}}})
+        path = helper.KEYS["dapnet"][0]
+        self.assertEqual(path.read_text(), "[DAPNETAPI]\nUSER=m0abc\nPASS=none\nTRXAREA=uk-all\n\n")
+        self.assertEqual(oct(path.stat().st_mode & 0o777), "0o600")
+        with self.assertRaises(helper.Error):
+            helper.keys_write({"target": "dapnet", "values": {"X": {"a": "1\n[evil]"}}})
+        with self.assertRaises(helper.Error):
+            helper.keys_write({"target": "shadow", "values": {"X": {"a": "1"}}})
 
 
 class FullEditTest(unittest.TestCase):

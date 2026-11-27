@@ -119,6 +119,49 @@ def cron_blockers(text):
     return out
 
 
+# Expert > API Keys (fulledit_apikeys.php): id -> (file, title, seed text).
+KEYS = {
+    "bm": (setting_path(_SETTINGS, "BM_API_KEY_FILE"), "BrandMeister API Key", "[key]\napikey=None\n"),
+    "dapnet": (setting_path(_SETTINGS, "DAPNET_API_KEY_FILE"), "DAPNET API Credentials", "[DAPNETAPI]\nUSER=\nPASS=\nTRXAREA=\n"),
+    "tgif": (setting_path(_SETTINGS, "TGIF_API_KEY_FILE"), "TGIF Static Talkgroups API Key", "[key]\napikey=None\n"),
+}
+KEY_OWNER = _SETTINGS.get("DASHBOARD_ADMIN_USER", "")
+
+
+def keys_read():
+    out = []
+    for kid, (path, title, seed) in KEYS.items():
+        text, _ = read_file(path)
+        layout = Ini(text).layout() if text else []
+        if not any(keys for _, keys in layout):
+            layout = Ini(seed).layout()
+        out.append({"id": kid, "title": title, "sections": [[sec, keys] for sec, keys in layout if sec]})
+    return {"targets": out}
+
+
+def keys_write(request):
+    """apikey_install_ini(): rewrite the whole file, empty values as "none"."""
+    require(type(request) is dict and set(request) == {"target", "values"} and request["target"] in KEYS, "invalid request")
+    values = request["values"]
+    require(type(values) is dict and values, "invalid values")
+    lines = []
+    for section, keys in values.items():
+        require(type(section) is str and NAME.fullmatch(section) and type(keys) is dict, "invalid section")
+        lines.append(f"[{section}]")
+        for key, value in keys.items():
+            require(type(key) is str and NAME.fullmatch(key) and "=" not in key, "invalid key")
+            require(type(value) is str and VALUE.fullmatch(value), "invalid value")
+            lines.append(f"{key}={value if value != '' else 'none'}")
+        lines.append("")
+    import pwd
+    owner = pwd.getpwnam(KEY_OWNER)
+
+    class Private:
+        st_uid, st_gid, st_mode = owner.pw_uid, owner.pw_gid, 0o600
+    replace(KEYS[request["target"]][0], "\n".join(lines) + "\n", Private)
+    return {"ok": True}
+
+
 def full_read(name):
     path = FULL[name][0]
     text, _ = read_file(path)
@@ -385,6 +428,14 @@ def read():
 
 
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] in ("keys-read", "keys-write"):
+        if sys.argv[1] == "keys-read":
+            print(json.dumps(keys_read()))
+        else:
+            raw = sys.stdin.buffer.read(65537)
+            require(len(raw) <= 65536, "request too large")
+            print(json.dumps(keys_write(json.loads(raw.decode()))))
+        return
     if len(sys.argv) == 3 and sys.argv[1] in ("full-read", "full-write") and sys.argv[2] in FULL:
         if sys.argv[1] == "full-read":
             print(json.dumps(full_read(sys.argv[2])))

@@ -345,7 +345,12 @@ func serveWizardAsset(w http.ResponseWriter, r *http.Request, dir string) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	frames := ""
+	if port := shellPort(); port > 0 {
+		// Expert > SSH Access embeds the shellinabox client on this host.
+		frames = fmt.Sprintf(" frame-src http://*:%d https://*:%d;", port, port)
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self';"+frames+" form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 	w.Header().Set("Content-Type", contentType)
 	http.ServeContent(w, r, name, info.ModTime(), f)
 }

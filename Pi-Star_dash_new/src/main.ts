@@ -11,11 +11,13 @@ if (settings) {
     expert: () => import('./Expert.svelte'),
     configuration: () => import('./Configure.svelte'),
     backup: () => import('./BackupRestore.svelte'),
+    calibration: () => import('./Calibration.svelte'),
     workspace: () => import('./AdminWorkspace.svelte'),
   };
   const page = (): keyof typeof pages => {
     const h = location.hash.replace(/^#/, '');
     if (h === 'expert' || h.startsWith('expert-')) return 'expert';
+    if (h === 'calibration-debug') return 'calibration';
     return h === '' ? 'admin' : h in pages && h !== 'workspace' ? h as keyof typeof pages : 'workspace';
   };
   let shown: string | null = null;
@@ -23,13 +25,14 @@ if (settings) {
   let generation = 0;
   const route = async () => {
     const next = page();
-    if (shown === next && next !== 'expert') return;
+    if (shown === next && next !== 'expert' && next !== 'calibration') return;
     // Only the latest navigation may mount: earlier imports can resolve later.
     const mine = ++generation;
     shown = next;
     const component = (await pages[next]()).default;
     if (mine !== generation) return;
-    const props = next === 'admin' ? { admin: true } : next === 'expert' ? { page: location.hash.replace(/^#expert-?/, '') } : {};
+    const props = next === 'admin' ? { admin: true } : next === 'expert' ? { page: location.hash.replace(/^#expert-?/, '') }
+      : next === 'calibration' ? { debug: location.hash === '#calibration-debug' } : {};
     if (app) void unmount(app);
     target.replaceChildren();
     app = mount(component as never, { target, props });

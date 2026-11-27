@@ -85,7 +85,7 @@
   {/if}
 {/snippet}
 
-<PiStarFrame title="Configuration" links={['Dashboard', 'Admin', 'Expert', 'Power', 'Update', 'Backup/Restore']}>
+<PiStarFrame title="Configuration" links={['Dashboard', 'Admin', 'Expert', 'Calibrate', 'Power', 'Update', 'Backup/Restore']}>
   {#if message}<table><tbody><tr><td style="background:#1d1;">{message}</td></tr></tbody></table><br />{/if}
   {#if error}<table><tbody><tr><td style="background:#f33;">{error}</td></tr></tbody></table><br />{/if}
   {#if !sections}

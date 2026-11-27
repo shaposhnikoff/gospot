@@ -17,6 +17,8 @@ if [[ ${1:-} == --expert ]]; then scenario+=(--expert); shift; fi
 if [[ ${1:-} == --backup ]]; then scenario+=(--backup); shift; fi
 if [[ ${1:-} == --configure ]]; then scenario+=(--configure); shift; fi
 if [[ ${1:-} == --css ]]; then scenario+=(--css); shift; fi
+if [[ ${1:-} == --calibration ]]; then scenario+=(--calibration); shift; fi
+if [[ ${1:-} == --jitter ]]; then scenario+=(--jitter); shift; fi
 if (($#)); then
   [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
@@ -79,7 +81,7 @@ docker cp "$dist/." "$name:/usr/local/share/pistar-native-ui/"
 echo "Admin UI source: $dist; verifying container files against source hashes"
 docker exec -i -w /usr/local/share/pistar-native-ui "$name" sha256sum -c - <"$work/ui.sha256"
 for f in MMDVM-Host.ini DMRGateway.ini; do docker cp "$work/$f" "$name:/etc/$f"; done
-for h in pistar-config pistar-configure; do
+for h in pistar-config pistar-configure pistar-calibrate pistar-jitter; do
   docker cp "../panel/helper/$h" "$name:/usr/local/libexec/$h"
   test "$(sha256sum "../panel/helper/$h"|cut -d' ' -f1)" = "$(docker exec "$name" sha256sum "/usr/local/libexec/$h"|cut -d' ' -f1)"
 done

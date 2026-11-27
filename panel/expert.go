@@ -130,6 +130,10 @@ func serveExpert(w http.ResponseWriter, r *http.Request, run configHelperFunc) {
 		serveCSSTool(w, r, run)
 		return
 	}
+	if name == "jitter" {
+		serveJitter(w, r, jitterTest)
+		return
+	}
 	if name == "keys" || name == "fw" || name == "ssh" {
 		serveExpertTools(w, r, run, runSudo, name)
 		return

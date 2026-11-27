@@ -101,6 +101,7 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 	password, ready := wizardCredential()
 	slot := make(chan struct{}, 1)
 	bm := newBMManager(helper)
+	cal := newCalibrator(startCalibrationHelper, runSudo)
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Cache-Control", "no-store")
@@ -144,6 +145,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 			return
 		case "/manage/api/configure":
 			serveConfigure(w, r, runConfigureHelper)
+			return
+		case "/manage/api/calibration":
+			serveCalibration(w, r, cal, runConfigureHelper)
 			return
 		case "/manage/api/dashboard":
 			// The classic admin page shows the same tables as the dashboard.

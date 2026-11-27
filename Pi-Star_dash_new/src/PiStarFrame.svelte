@@ -9,6 +9,7 @@
   const targets: Record<string, string> = {
     Dashboard: '', Admin: '/manage/', 'Live Logs': '/manage/#logs', Power: '/manage/#power', Update: '/manage/#update',
     'Backup/Restore': '/manage/#backup', Configuration: '/manage/#configuration', Expert: '/manage/#expert',
+    Calibrate: '/manage/#calibration',
   };
   let operator = $state('/');
   let versions = $state('');

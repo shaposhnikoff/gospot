@@ -8,6 +8,7 @@
   import Firmware from './Firmware.svelte';
   import SshAccess from './SshAccess.svelte';
   import CssTool from './CssTool.svelte';
+  import Jitter from './Jitter.svelte';
 
   let { page = '' }: { page?: string } = $props();
   const quick: [string, string][] = [
@@ -21,6 +22,10 @@
   ];
   const tools: [string, string][] = [['tool-css', 'CSS Tool'], ['tool-fw', 'FW'], ['tool-ssh', 'SSH Access']];
   const quickFile = $derived(quick.some(([f]) => f === page) ? page : null);
+  // jitter_test.php has no menu entry in Pi-Star either; it is opened by its
+  // address: #expert-tool-jitter[-brandmeister|-dmrplus|-hblink].
+  const jitterGroup = $derived(page === 'tool-jitter' ? ''
+    : ['brandmeister', 'dmrplus', 'hblink'].find(g => page === 'tool-jitter-' + g) ?? null);
   const fullFile = $derived(full.some(([f]) => f === page) && page !== 'full-apikeys' ? page.slice(5) : null);
 </script>
 
@@ -52,6 +57,8 @@
     <SshAccess />
   {:else if page === 'tool-css'}
     <CssTool />
+  {:else if jitterGroup !== null}
+    {#key jitterGroup}<Jitter group={jitterGroup} />{/key}
   {:else}
     <table width="100%">
       <tbody>

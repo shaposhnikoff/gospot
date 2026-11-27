@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 from tempfile import TemporaryDirectory
 from urllib.parse import quote, urlsplit
 from zipfile import BadZipFile, ZipFile
@@ -439,6 +440,167 @@ def exercise_css(v, stand, origin, original):
           "keeps the newer file; Factory Reset refuses a wrong confirmation and RESET removes the file, restoring the palette", flush=True)
 
 
+FAKES = Path(__file__).resolve().parent / "fixtures"
+
+
+def stand_settings(stand):
+    lines = stand.read("/etc/pistar-dashboard/pistar.conf").decode().splitlines()
+    return dict(line.split("=", 1) for line in lines if line and not line.startswith("#"))
+
+
+def install_fake(stand, fake, path, text=None):
+    """Put a test double where pistar.conf says the real tool lives."""
+    body = fake.read_text() if text is None else text
+    stand.exec("sh", "-c", 'mkdir -p "$(dirname "$1")" && printf "%s" "$2" >"$1" && chown root:root "$1" && chmod 755 "$1"',
+               "sh", path, body)
+
+
+def edit_ini(stand, path, sed):
+    """sed -i on a radio INI, keeping the fixture's mmdvm:mmdvm 640."""
+    stand.exec("sh", "-c", 'sed -i "$2" "$1" && chown mmdvm:mmdvm "$1" && chmod 640 "$1"', "sh", path, sed)
+
+
+def exercise_calibration(v, stand, origin, original):
+    """Calibration (calibration.php) through Chromium: the real Go session and
+    pistar-calibrate with a fake MMDVMCal at PISTAR_BIN_DIR (no modem)."""
+    conf = stand_settings(stand)
+    ini = conf["CONF_MMDVMHOST"]
+    unit = conf["UNIT_MMDVMHOST"]
+    inputs = "/run/pistar-qa/mmdvmcal-input"
+    install_fake(stand, FAKES / "fake-mmdvmcal", conf["PISTAR_BIN_DIR"] + "/MMDVMCal")
+    stand.exec("rm", "-f", inputs, inputs + ".args")
+    edit_ini(stand, ini, "/^UARTSpeed=/a RXOffset=100")
+    host, gw = stand.pair()
+    equal("seeded RXOffset", host.splitlines().count(b"RXOffset=100"), 1)
+
+    # pistar-calibrate first runs MMDVMCal for CALIBRATION_WARMUP seconds and
+    # tells it to quit, as pistar-mmdvmcal does; that run's q comes first.
+    warm = "q" if int(conf["CALIBRATION_WARMUP"]) else ""
+
+    def keys():
+        return stand.read(inputs).decode().removeprefix(warm) if stand.exists(inputs) else ""
+
+    def text(selector):
+        return v.js("return document.querySelector(arguments[0])?.textContent ?? null", selector)
+
+    def led(name):
+        return v.js("return document.querySelector(arguments[0])?.getAttribute('src') ?? ''", "#led" + name)
+
+    def go(fragment):
+        v.command("/url", {"url": origin + "/manage/#power"})
+        v.command("/url", {"url": origin + "/manage/#" + fragment})
+        wait(fragment + " did not load", lambda: v.js("const b=document.querySelector('#btnStart'); return !!b && !b.disabled"))
+
+    def start_again():
+        return v.command('/execute/async', {'script': """const done=arguments[arguments.length-1];
+          fetch('/manage/api/calibration',{cache:'no-store'}).then(r=>r.json()).then(d=>fetch('/manage/api/calibration',
+          {method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':d.csrf},body:JSON.stringify({action:'start'})}))
+          .then(r=>done(r.status))""", 'args': []})
+
+    go("calibration-debug")
+    equal("Base Freq.", text("#lblBaseFreq"), "435000000 Hz")
+    equal("Frequency", text("#lblFrequency"), "435000100 Hz")
+    equal("Offset", text("#lblOffset"), "100")
+    history = stand.restarts()
+    # 1. Start: MMDVMHost held, MMDVMCal on the configured port, output on the page,
+    #    then the page sets the saved frequency (RXFrequency + RXOffset) with e.
+    v.click("#btnStart")
+    wait("MMDVMCal output on the page", lambda: "Version: 1" in (text("#tail") or ""), timeout=20)
+    equal("held for calibration", stand.restarts(), history + [unit + " stop"])
+    equal("MMDVMCal runs", stand.read(inputs + ".args").decode().splitlines(), ["115200 /dev/ttyAMA0"] * (2 if warm else 1))
+    wait("saved frequency sent", lambda: keys() == "e435000100\n", timeout=10)
+    wait("frequency shown", lambda: text("#lblFrequency") == "435000100 Hz")
+    time.sleep(1)  # the page ignores keys while the e request is still open (sendcmd_lock)
+    # 2. buttons reach MMDVMCal's stdin
+    v.click("#btnDStar")
+    wait("D-Star key", lambda: keys() == "e435000100\nk")
+    wait("D-Star LED", lambda: "20green" in led("DStar") and "20green" in led("Start"))
+    v.click("#btnFreqP")
+    wait("F key", lambda: keys() == "e435000100\nkF")
+    wait("offset 150 shown", lambda: text("#lblOffset") == "150" and text("#lblFrequency") == "435000150 Hz")
+    # 3. a second concurrent session is refused and changes nothing
+    equal("second start", start_again(), 409)
+    equal("second start restarts", stand.restarts(), history + [unit + " stop"])
+    # 4. Save Offset writes exactly [Modem] RXOffset, keeps owner and mode, restarts nothing
+    v.click("#btnSaveOffset")
+    saved = host.replace(b"RXOffset=100\n", b"RXOffset=150\n")
+    wait("RXOffset saved", lambda: stand.pair()[0] == saved)
+    same_pair("Save Offset", stand.pair(), (saved, gw))
+    equal("MMDVMHost owner and mode", stand.exec("stat", "-c", "%U:%G %a", ini).stdout.decode().strip(), "mmdvm:mmdvm 640")
+    equal("Save Offset restarts", stand.restarts(), history + [unit + " stop"])
+    # 5. a stale page is refused and keeps the newer file
+    edit_ini(stand, ini, "s/^RXOffset=150$/RXOffset=175/")
+    newer = stand.pair()[0]
+    v.click("#btnSaveOffset")
+    wait("stale save not refused", lambda: v.js("return document.body.innerText.includes('changed since this page was loaded')"))
+    same_pair("stale Save Offset", stand.pair(), (newer, gw))
+    # 6. Stop: MMDVMCal quits, MMDVMHost is restarted once
+    v.click("#btnStop")
+    wait("MMDVMHost restored", lambda: stand.restarts() == history + [unit + " stop", unit + " ok"], timeout=20)
+    equal("q reached MMDVMCal", keys(), "e435000100\nkFq")
+    wait("Finnished on the page", lambda: "Finnished..." in (text("#tail") or "") and "20red" in led("Start"))
+    wait("Start enabled again", lambda: v.js("return !document.querySelector('#btnStart').disabled"))
+    history = stand.restarts()
+    # 7. a page that goes away: the board stops the session and restores MMDVMHost
+    v.click("#btnStart")
+    wait("second session output", lambda: (text("#tail") or "").count("Version: 1") == 2, timeout=20)
+    v.command("/url", {"url": origin + "/manage/#power"})
+    idle = int(conf["CALIBRATION_IDLE_TIMEOUT"])
+    wait("idle session restored", lambda: stand.restarts() == history + [unit + " stop", unit + " ok"], timeout=idle + 30)
+    same_pair("calibration leaves the files", stand.pair(), (newer, gw))
+    print("PASS Chromium Calibration: Start holds MMDVMHost and runs MMDVMCal on the [Modem] port, output and the saved "
+          "frequency (e RXFrequency+RXOffset) shown; D-Star and + reach MMDVMCal's stdin; a second start 409; Save Offset "
+          "writes exactly [Modem] RXOffset (mmdvm:mmdvm 640, no restart); stale page 409 keeps the newer file; Stop and an "
+          "abandoned page both restart MMDVMHost once", flush=True)
+
+
+def exercise_jitter(v, stand, origin, original):
+    """Expert Jitter Test (jitter_test.php) through Chromium with a fake pistar-jittertest at PISTAR_SBIN_DIR."""
+    conf = stand_settings(stand)
+    log = conf["PISTAR_JITTER_LOG"]
+    # The fake answers at once, then stays running for a few seconds.
+    fake = (FAKES / "fake-jittertest").read_text().replace('sleep "${FAKE_JITTER_SLEEP:-0}"', "sleep 4")
+    install_fake(stand, FAKES / "fake-jittertest", conf["PISTAR_SBIN_DIR"] + "/pistar-jittertest", fake)
+    stand.exec("sh", "-c", 'mkdir -p "$(dirname "$1")" && printf "old run\\n" >"$1"', "sh", log)
+    history = stand.restarts()
+
+    def tail():
+        return v.js("return document.querySelector('#tail')?.textContent ?? ''")
+
+    def running():
+        return v.command('/execute/async', {'script': """const done=arguments[arguments.length-1];
+          fetch('/manage/api/expert/jitter',{cache:'no-store'}).then(r=>r.json()).then(d=>done(d.running))""", 'args': []})
+
+    def start_again(group):
+        return v.command('/execute/async', {'script': """const [group,done]=arguments;
+          fetch('/manage/api/expert/jitter',{cache:'no-store'}).then(r=>r.json()).then(d=>fetch('/manage/api/expert/jitter',
+          {method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':d.csrf},body:JSON.stringify({group})}))
+          .then(r=>done(r.status))""", 'args': [group]})
+
+    expected = lambda group: "".join(f"{group}_Host_{n}\t\t\tAvg RTT: 2{n}.00ms\tPeak Deviation: 0.{n}0ms\n" for n in (1, 2, 3))
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/#expert-tool-jitter-brandmeister"})
+    wait("BrandMeister results on the page", lambda: tail() == "Starting test, please wait...\n" + expected("BM"), timeout=15)
+    equal("log replaced by the BM run", stand.read(log).decode(), expected("BM"))
+    equal("log mode", stand.exec("stat", "-c", "%U:%G %a", log).stdout.decode().strip(), "root:root 644")
+    # one run at a time
+    equal("still running", running(), True)
+    equal("second run", start_again("hblink"), 409)
+    wait("run finished", lambda: running() is False, timeout=20)
+    equal("unknown group", start_again("bm;reboot"), 400)
+    # no group: DMR+, as jitter_test.php
+    v.command("/url", {"url": origin + "/manage/#power"})
+    v.command("/url", {"url": origin + "/manage/#expert-tool-jitter"})
+    wait("DMR+ results on the page", lambda: tail() == "Starting test, please wait...\n" + expected("DMR+"), timeout=15)
+    equal("log replaced by the DMR+ run", stand.read(log).decode(), expected("DMR+"))
+    wait("second run finished", lambda: running() is False, timeout=20)
+    equal("jitter restarts", stand.restarts(), history)
+    same_pair("jitter leaves the radio files", stand.pair(), original)
+    print("PASS Chromium Jitter Test: #expert-tool-jitter-brandmeister runs pistar-jittertest BM into a cleared log "
+          "(root:root 644) and shows it; a second run 409 while one runs; unknown group 400; no group runs DMR+; no restarts",
+          flush=True)
+
+
 def exercise_backup(v, stand, origin, folder, original):
     """Classic Backup/Restore through Chromium against the real helper."""
     import base64
@@ -499,6 +661,8 @@ def main():
     parser.add_argument("--backup", action="store_true")
     parser.add_argument("--configure", action="store_true")
     parser.add_argument("--css", action="store_true")
+    parser.add_argument("--calibration", action="store_true")
+    parser.add_argument("--jitter", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -521,7 +685,7 @@ def main():
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
             # /manage/ is the classic admin page; the station settings, DMR
             # services and backup pages live under their own sections.
-            if not (args.expert or args.backup or args.configure or args.css):
+            if not (args.expert or args.backup or args.configure or args.css or args.calibration or args.jitter):
                 command("/url", {"url": args.origin + "/manage/#settings"})
                 wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
             try:
@@ -544,6 +708,10 @@ def run_scenario(args, v, stand, folder, original, changed):
         exercise_configure(v, stand, args.origin, original)
     elif args.css:
         exercise_css(v, stand, args.origin, original)
+    elif args.calibration:
+        exercise_calibration(v, stand, args.origin, original)
+    elif args.jitter:
+        exercise_jitter(v, stand, args.origin, original)
     elif args.services:
         exercise_services(v, stand, original)
     else:

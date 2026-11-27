@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // settingsPath is the installed copy of Pi-Star_dash_new/pistar.conf, the
@@ -59,6 +60,14 @@ func (s settings) port(key string) (int, error) {
 	return n, nil
 }
 
+func (s settings) seconds(key string, low, high int) (time.Duration, error) {
+	n, err := strconv.Atoi(s[key])
+	if err != nil || n < low || n > high {
+		return 0, fmt.Errorf("%s must be %d to %d seconds", key, low, high)
+	}
+	return time.Duration(n) * time.Second, nil
+}
+
 func (s settings) unit(key string) (string, error) {
 	v := s[key]
 	if !regexp.MustCompile(`^[A-Za-z0-9@_.-]+\.service$`).MatchString(v) {
@@ -96,6 +105,13 @@ func applySettings(s settings) error {
 		}
 		return v
 	}
+	seconds := func(key string, low, high int) time.Duration {
+		v, err := s.seconds(key, low, high)
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+		return v
+	}
 	port := func(key string) int {
 		v, err := s.port(key)
 		if err != nil {
@@ -121,6 +137,8 @@ func applySettings(s settings) error {
 	cssFile := path("PISTAR_CSS_FILE")
 	update := path("PISTAR_UPDATE_LOG")
 	path("MODEM_FLASH_LOG")
+	jitter, jitterLimit := path("PISTAR_JITTER_LOG"), seconds("JITTER_TIMEOUT", 1, 9999)
+	calIdle := seconds("CALIBRATION_IDLE_TIMEOUT", 5, 3600)
 	path("SHELLINABOX_DEFAULTS")
 	bmKey := path("BM_API_KEY_FILE")
 	binDir, sbinDir := path("PISTAR_BIN_DIR"), path("PISTAR_SBIN_DIR")
@@ -145,6 +163,7 @@ func applySettings(s settings) error {
 	powerHelper, updateHelper, updateLog = filepath.Join(lib, "pistar-power"), filepath.Join(lib, "pistar-native-update"), update
 	setConfigHelper(lib)
 	setToolPaths(lib, s)
+	setCalibrationPaths(lib, calIdle, jitter, jitterLimit)
 	bmStateDir = bm
 	pistarLogDir, radioLogSource, pistarReleaseFile, pistarHostsDir = logDir, source, release, hosts
 	pistarBinDir, pistarSbinDir = binDir, sbinDir

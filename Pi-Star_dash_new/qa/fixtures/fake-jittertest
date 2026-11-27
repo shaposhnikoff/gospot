@@ -1,0 +1,8 @@
+#!/bin/bash
+# Test double of Pi-Star's pistar-jittertest: no network. Prints one result
+# line per host of the group given as its argument, like the real script.
+[[ $# == 1 ]] || { echo "This script takes a single argument"; exit 0; }
+for host in 1 2 3; do
+  printf '%s_Host_%s\t\t\tAvg RTT: 2%s.00ms\tPeak Deviation: 0.%s0ms\n' "$1" "$host" "$host" "$host"
+done
+sleep "${FAKE_JITTER_SLEEP:-0}"

@@ -1,0 +1,36 @@
+#!/bin/bash
+# Test double of MMDVMCal for the calibration helper tests and the QA stand:
+# no modem. Like the real tool it switches its terminal to raw mode, prints a
+# version line, answers the keys the Calibration page sends and quits on q.
+# Every byte it reads is appended to FAKE_MMDVMCAL_LOG; its arguments to
+# FAKE_MMDVMCAL_LOG.args.
+log=${FAKE_MMDVMCAL_LOG:-/run/pistar-qa/mmdvmcal-input}
+printf '%s\n' "$*" >>"$log.args"
+stty raw -echo
+freq=435000000
+printf 'MMDVMCal 20240101 (fake)\r\nVersion: 1, description: MMDVM_HS_Hat-v1.6.1 fake\r\n'
+while IFS= read -r -n1 -d '' c; do
+  printf '%s' "$c" >>"$log"
+  case $c in
+    q) printf 'Quit\r\n'; exit 0 ;;
+    k) printf 'BER Test Mode (FEC) for D-Star\r\nD-Star audio FEC BER %% (errs): 2.083%% (1/48)\r\n' ;;
+    b) printf 'BER Test Mode (FEC) for DMR Simplex\r\nDMR audio seq. 1, FEC BER %% (errs): 0.709%% (1/141)\r\n' ;;
+    J) printf 'BER Test Mode (FEC) for YSF\r\n' ;;
+    j) printf 'BER Test Mode (FEC) for P25\r\n' ;;
+    n) printf 'BER Test Mode (FEC) for NXDN\r\n' ;;
+    F) freq=$((freq + 50)); printf 'TX frequency: %s\r\n' "$freq" ;;
+    f) freq=$((freq - 50)); printf 'TX frequency: %s\r\n' "$freq" ;;
+    e | z)
+      printf 'Enter value: '
+      line=
+      while IFS= read -r -n1 -d '' d; do
+        printf '%s' "$d" >>"$log"
+        [[ $d == $'\n' || $d == $'\r' ]] && break
+        line+=$d
+      done
+      if [[ $c == e && $line =~ ^[0-9]+$ ]]; then freq=$line; printf '\r\nNew frequency: %s Hz\r\n' "$freq"
+      elif [[ $c == z ]]; then printf '\r\nNew frequency step: %s Hz\r\n' "$line"
+      else printf '\r\nNot valid frequency\r\n'; fi ;;
+    *) printf 'Unknown command - %s (H/h for help)\r\n' "$c" ;;
+  esac
+done

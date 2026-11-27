@@ -176,7 +176,8 @@ def keys_write(request):
         lines.append(f"[{section}]")
         for key, value in keys.items():
             require(type(key) is str and NAME.fullmatch(key) and "=" not in key, "invalid key")
-            require(type(value) is str and VALUE.fullmatch(value), "invalid value")
+            # BrandMeister API v2 keys are JWTs well beyond the 512-character INI limit.
+            require(type(value) is str and KEY_VALUE.fullmatch(value), "invalid value")
             lines.append(f"{key}={value if value != '' else 'none'}")
         lines.append("")
     import pwd
@@ -568,6 +569,7 @@ def system_state():
 
 
 VALUE = re.compile(r"[^\r\n\x00]{0,512}")
+KEY_VALUE = re.compile(r"[^\r\n\x00]{0,4096}")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _./+-]{0,63}")
 
 

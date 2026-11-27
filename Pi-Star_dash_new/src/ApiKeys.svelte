@@ -22,12 +22,14 @@
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf },
       body: JSON.stringify({ target: t.id, values: values[t.id] }),
     }).catch(() => null);
-    if (r?.ok) { saved = t.title; await load(); } else failed = t.title;
+    if (r?.ok) { saved = t.title; await load(); return; }
+    const reason = r ? (await r.text()).trim() : 'no response from the board';
+    failed = `${t.title} could not be saved` + (reason ? ` (${reason})` : '');
   }
 </script>
 
 {#if saved}<table><tbody><tr><td><b role="status">{saved} saved.</b></td></tr></tbody></table><br />{/if}
-{#if failed}<table><tbody><tr><td><b role="alert">{failed} could not be saved.</b></td></tr></tbody></table><br />{/if}
+{#if failed}<table><tbody><tr><td><b role="alert">{failed}.</b></td></tr></tbody></table><br />{/if}
 {#each targets as t (t.id)}
   <form onsubmit={e => save(t, e)}>
     <table>

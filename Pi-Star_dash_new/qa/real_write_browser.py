@@ -266,10 +266,21 @@ def exercise_expert(v, stand, origin, original):
     wait("blocked cron line not reported", lambda: v.js("return document.body.innerText.includes('pipes downloaded content directly into a shell')"))
     equal("System Cron unchanged", stand.read("/etc/crontab") if stand.exists("/etc/crontab") else None, cron_before)
     equal("System Cron restarts", stand.restarts(), history)
+    # 8. API Keys: a BrandMeister API v2 key is a long JWT (beyond the 512-character INI limit)
+    stand.exec("rm", "-f", "/etc/bmapi.key")
+    go("expert-full-apikeys", "return !!document.querySelector('[aria-label=\"BrandMeister API Key apikey\"]')")
+    jwt = "eyJhbGciOiJSUzUxMiJ9." + "Q" * 700 + "." + "s" * 342
+    v.type_into('[aria-label="BrandMeister API Key apikey"]', jwt)
+    v.js("document.querySelector('[aria-label=\"BrandMeister API Key apikey\"]').closest('form').querySelector('input[type=submit]').click()")
+    wait("API key save not acknowledged", lambda: v.js("return document.body.innerText.includes('BrandMeister API Key saved.')"))
+    equal("BM API key file", stand.read("/etc/bmapi.key").decode(), "[key]\napikey=" + jwt + "\n\n")
+    equal("BM API key owner and mode", stand.exec("stat", "-c", "%U %a", "/etc/bmapi.key").stdout.decode().strip(), "pistar-wizard 600")
+    equal("API key restarts", stand.restarts(), history)
+    stand.exec("rm", "-f", "/etc/bmapi.key")
     print("PASS Chromium Expert: Quick Edit ColorCode 1 -> 5 with exact file comparison and one MMDVMHost restart, "
           "reopen shows 5, unchanged form writes nothing, stale form 409 keeps the newer file, missing CSRF 403; "
           "Full Edit DMRGateway writes the whole text, keeps mmdvm:mmdvm 600 and restarts MMDVMHost then DMRGateway; "
-          "System Cron refuses a blocked pattern without writing", flush=True)
+          "System Cron refuses a blocked pattern without writing; API Keys saves a 1 KB BrandMeister JWT 0600 without restarts", flush=True)
 
 
 def exercise_configure(v, stand, origin, original):

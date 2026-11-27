@@ -119,7 +119,10 @@ func serveExpertTools(w http.ResponseWriter, r *http.Request, run configHelperFu
 		if out, err := run(r.Context(), "keys-write", body); err != nil {
 			var e struct{ Error string }
 			_ = json.Unmarshal(out, &e)
-			http.Error(w, strings.TrimSpace(e.Error+" could not be saved"), 422)
+			if e.Error == "" {
+				e.Error = "save failed"
+			}
+			http.Error(w, e.Error, 422)
 			return
 		}
 		writeJSON(w, 200, map[string]bool{"ok": true})

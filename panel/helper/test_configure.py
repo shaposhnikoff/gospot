@@ -307,6 +307,15 @@ def _settings_path(key):
 
 
 class KeysTest(unittest.TestCase):
+    def test_long_brandmeister_jwt(self):
+        jwt = "eyJ" + "a" * 900 + ".b" * 3
+        helper.keys_write({"target": "bm", "values": {"key": {"apikey": jwt}}})
+        self.assertEqual(helper.KEYS["bm"][0].read_text(), "[key]\napikey=" + jwt + "\n\n")
+        with self.assertRaises(helper.Error):
+            helper.keys_write({"target": "bm", "values": {"key": {"apikey": "a" * 5000}}})
+        with self.assertRaises(helper.Error):
+            helper.keys_write({"target": "bm", "values": {"key": {"apikey": "a\nb"}}})
+
     def test_seed_and_write(self):
         for p in (helper.KEYS[k][0] for k in helper.KEYS):
             p.unlink(missing_ok=True)

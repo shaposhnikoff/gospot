@@ -48,3 +48,9 @@ assert page['csrf'] and page['revision'] and {'Gateway Hardware Information', 'G
 assert not any(c.get('kind') == 'password' and c.get('value') for s in page['sections'] if s['id'] == 'adminpass'
                for r in s['rows'] for cell in r['cells'] for c in cell.get('controls') or [])
 print('PASS Configuration read:', len(titles), 'sections:', ', '.join(titles), '(no Apply submitted on the board)')
+css = json.load(req('api/expert/css'))
+assert css['csrf'] and css['revision'] and [s['name'] for s in css['sections']][:1] == ['Background'], css['sections'][:1]
+theme = json.load(req('api/dashboard'))['Theme']
+assert re.fullmatch(r'[0-9a-f]{3}([0-9a-f]{3})?', theme['Banners']) and theme['Lookup'] in ('RadioID', 'QRZ'), theme
+print('PASS CSS Tool read (file present: %s) and dashboard theme: banners #%s, lookup %s (nothing saved on the board)'
+      % (css['exists'], theme['Banners'], theme['Lookup']))

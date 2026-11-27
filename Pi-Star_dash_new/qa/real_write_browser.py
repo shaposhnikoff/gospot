@@ -363,6 +363,82 @@ def exercise_configure(v, stand, origin, original):
           "then written 0600 without radio restarts", flush=True)
 
 
+def exercise_css(v, stand, origin, original):
+    """Expert > CSS Tool and the theme it applies, through Chromium against the real helper."""
+    css = "/etc/pistar-css.ini"
+    stand.exec("rm", "-f", css)
+
+    def go(fragment, ready):
+        v.command("/url", {"url": origin + "/manage/#power"})
+        v.command("/url", {"url": origin + "/manage/#" + fragment})
+        wait(fragment + " did not load", lambda: v.js(ready))
+
+    def header_colour():
+        return v.js("return getComputedStyle(document.querySelector('.header')).backgroundColor")
+
+    def set_field(label, value):
+        v.js("const e=document.querySelector(`[aria-label=\"${arguments[0]}\"]`); e.value=arguments[1];"
+             "e.dispatchEvent(new Event(e.tagName==='SELECT'?'change':'input',{bubbles:true}))", label, value)
+
+    tables = "return document.querySelectorAll('.contentwide form table').length === 7"
+    go("expert-tool-css", tables)
+    wait("default banner colour", lambda: header_colour() == "rgb(221, 75, 57)")
+    equal("Lookup default", v.js("return document.querySelector('[aria-label=\"Lookup Service\"]').value"), "RadioID")
+    equal("CSS file absent before save", stand.exists(css), False)
+    history = stand.restarts()
+    # 1. save: every shown key written in classic format, root:root 0644, no restarts
+    set_field("Background Banners", "0000ff")
+    set_field("BannerH1 Enabled", "1")
+    set_field("BannerH1 Text", "QA Banner")
+    set_field("BannerExtText Text", "")
+    set_field("Lookup Service", "QRZ")
+    v.click(".contentwide form input[type=submit]")
+    wait("CSS save not acknowledged", lambda: v.js("return document.body.innerText.includes('Changes applied.')"))
+    expected = ("[Background]\nPage=edf0f5\nContent=ffffff\nBanners=0000ff\n\n[Text]\nBanners=ffffff\nBannersDrop=303030\n\n"
+                "[Tables]\nHeadDrop=8b0000\nBgEven=f7f7f7\nBgOdd=d0d0d0\n\n[Content]\nText=000000\n\n"
+                "[BannerH1]\nEnabled=1\nText=QA Banner\n\n[BannerExtText]\nEnabled=0\nText=none\n\n[Lookup]\nService=QRZ\n\n")
+    equal("CSS file", stand.read(css).decode(), expected)
+    equal("CSS file owner and mode", stand.exec("stat", "-c", "%U:%G %a", css).stdout.decode().strip(), "root:root 644")
+    equal("CSS save restarts", stand.restarts(), history)
+    same_pair("CSS save leaves radio files", stand.pair(), original)
+    # 2. the theme applies to the admin pages and the dashboard banner
+    go("expert-tool-css", tables)
+    wait("saved banner colour", lambda: header_colour() == "rgb(0, 0, 255)")
+    equal("Lookup reread", v.js("return document.querySelector('[aria-label=\"Lookup Service\"]').value"), "QRZ")
+    v.command("/url", {"url": origin + "/manage/"})
+    wait("dashboard BannerH1", lambda: v.js("return [...document.querySelectorAll('.header h1')].some(h => h.textContent === 'QA Banner')"))
+    equal("dashboard banner colour", header_colour(), "rgb(0, 0, 255)")
+    # 3. a stale page is refused and keeps the newer file
+    go("expert-tool-css", tables)
+    stand.exec("sed", "-i", "s/^Page=edf0f5$/Page=eeeeee/", css)
+    newer = stand.read(css)
+    set_field("Background Content", "fafafa")
+    v.click(".contentwide form input[type=submit]")
+    wait("stale CSS save not refused", lambda: v.js("return document.body.innerText.includes('changed since this page was loaded')"))
+    equal("stale CSS file", stand.read(css), newer)
+    # 4. Factory Reset: a wrong confirmation sends nothing, RESET removes the file
+    go("expert-tool-css", tables)
+    v.js("window.prompt = () => 'reset'; window.alert = m => { window.__alert = m; }")
+    v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Factory Reset').click()")
+    wait("wrong confirmation not reported", lambda: v.js("return window.__alert === 'Confirmation text did not match. Factory reset cancelled.'"))
+    equal("wrong confirmation keeps the file", stand.read(css), newer)
+    v.js("window.prompt = () => 'RESET'")
+    v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Factory Reset').click()")
+    wait("reset not acknowledged", lambda: v.js("return document.body.innerText.includes('Loading fresh configuration file(s)...')"))
+    equal("CSS file removed", stand.exists(css), False)
+    go("expert-tool-css", tables)
+    try:
+        wait("default colour after reset", lambda: header_colour() == "rgb(221, 75, 57)")
+    except AssertionError:
+        print("DEBUG css:", header_colour(), stand.exists(css), v.command('/execute/async', {'script':
+              "fetch('/manage/api/dashboard',{cache:'no-store'}).then(async r=>arguments[0]([r.status,(await r.text()).slice(-400)]))", 'args': []}), flush=True)
+        raise
+    equal("CSS restarts", stand.restarts(), history)
+    print("PASS Chromium CSS Tool: defaults shown without a file; save writes the classic file (root:root 644, empty value as none) "
+          "without restarts; banner colour and BannerH1 applied on admin pages and the dashboard, QRZ lookup saved and reread; stale page 409 "
+          "keeps the newer file; Factory Reset refuses a wrong confirmation and RESET removes the file, restoring the palette", flush=True)
+
+
 def exercise_backup(v, stand, origin, folder, original):
     """Classic Backup/Restore through Chromium against the real helper."""
     import base64
@@ -422,6 +498,7 @@ def main():
     parser.add_argument("--expert", action="store_true")
     parser.add_argument("--backup", action="store_true")
     parser.add_argument("--configure", action="store_true")
+    parser.add_argument("--css", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -444,7 +521,7 @@ def main():
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
             # /manage/ is the classic admin page; the station settings, DMR
             # services and backup pages live under their own sections.
-            if not (args.expert or args.backup or args.configure):
+            if not (args.expert or args.backup or args.configure or args.css):
                 command("/url", {"url": args.origin + "/manage/#settings"})
                 wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
             try:
@@ -465,6 +542,8 @@ def run_scenario(args, v, stand, folder, original, changed):
         exercise_backup(v, stand, args.origin, Path(folder), original)
     elif args.configure:
         exercise_configure(v, stand, args.origin, original)
+    elif args.css:
+        exercise_css(v, stand, args.origin, original)
     elif args.services:
         exercise_services(v, stand, original)
     else:

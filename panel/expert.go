@@ -126,6 +126,10 @@ func serveFullEdit(w http.ResponseWriter, r *http.Request, run configHelperFunc,
 
 func serveExpert(w http.ResponseWriter, r *http.Request, run configHelperFunc) {
 	name := strings.TrimPrefix(r.URL.EscapedPath(), "/manage/api/expert/")
+	if name == "css" {
+		serveCSSTool(w, r, run)
+		return
+	}
 	if name == "keys" || name == "fw" || name == "ssh" {
 		serveExpertTools(w, r, run, runSudo, name)
 		return

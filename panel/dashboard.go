@@ -99,6 +99,7 @@ type dashboard struct {
 	HeardReady bool
 	TimeZone   string
 	Now        time.Time
+	Theme      themeData
 }
 
 func runningProcesses() map[string]bool {
@@ -464,7 +465,7 @@ func gatherDashboard(now time.Time) dashboard {
 			linked = append(linked, mode)
 		}
 	}
-	return buildDashboard(dashInputs{links: gatewayLinks(now, linked),
+	d := buildDashboard(dashInputs{links: gatewayLinks(now, linked),
 		host: mmdvm, gw: dmrGWINI.load(), dapnet: dapnetINI.load(), ircddb: ircddbINI.load(), dstar: dstarRptINI.load(),
 		ysf2dmr: ysf2dmrINI.load(), ysf2nxdn: ysf2nxdnINI.load(), ysf2p25: ysf2p25INI.load(),
 		dmr2ysf: dmr2ysfINI.load(), dmr2nxdn: dmr2nxdnINI.load(),
@@ -472,24 +473,31 @@ func gatherDashboard(now time.Time) dashboard {
 		rows: rows, active: active, heardOK: ok, hostname: strings.TrimSpace(string(host)),
 		controller: controllerMode(), now: now,
 	})
+	d.Theme = currentTheme()
+	return d
 }
 
 // dashboardHandler serves one shared snapshot rebuilt at most every 500 ms,
 // so several open browsers polling each second cost one build.
 func dashboardHandler() http.HandlerFunc {
 	var mu sync.Mutex
-	var body []byte
+	var snap dashboard
 	var built time.Time
 	return func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		if time.Since(built) > 500*time.Millisecond || body == nil {
-			b, err := json.Marshal(gatherDashboard(time.Now()))
-			if err == nil {
-				body, built = b, time.Now()
-			}
+		if time.Since(built) > 500*time.Millisecond || built.IsZero() {
+			snap, built = gatherDashboard(time.Now()), time.Now()
 		}
-		out := body
+		d := snap
 		mu.Unlock()
+		// The CSS Tool theme is read per request (one stat) so a page opened
+		// right after a save or reset never shows the previous colours.
+		d.Theme = currentTheme()
+		out, err := json.Marshal(d)
+		if err != nil {
+			http.Error(w, "dashboard unavailable", 500)
+			return
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Type", "application/json")

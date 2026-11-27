@@ -20,7 +20,29 @@ export type Dashboard = {
   M17: { Code: string; Link: string } | null;
   POCSAG: { TX: string; Master: string } | null;
   Heard: Row[] | null; Local: Row[] | null; HeardReady: boolean; TimeZone: string; Now: string;
+  Theme?: Theme;
 };
+
+// /etc/pistar-css.ini as css/pistar-css.php applies it (colours are validated
+// hex values from the server); BannerH1/BannerExt are shown as plain text.
+export type Theme = {
+  Page: string; Content: string; Banners: string; BannerText: string; BannerDrop: string; HeadDrop: string;
+  Text: string; Even: string; Odd: string; BannerH1: string; BannerExt: string; Lookup: string;
+};
+
+const themeVars: [keyof Theme, string][] = [
+  ['Page', 'page'], ['Content', 'content'], ['Banners', 'banners'], ['BannerText', 'banner-text'], ['BannerDrop', 'banner-drop'],
+  ['HeadDrop', 'head-drop'], ['Text', 'text'], ['Even', 'even'], ['Odd', 'odd'],
+];
+
+export function themeStyle(t: Theme | undefined): [string, string][] {
+  if (!t) return [];
+  return themeVars.filter(([k]) => /^[0-9a-f]{3}([0-9a-f]{3})?$/.test(t[k])).map(([k, v]) => ['--ps-' + v, '#' + t[k]]);
+}
+
+export function applyTheme(t: Theme | undefined, root: HTMLElement = document.documentElement): void {
+  for (const [name, value] of themeStyle(t)) root.style.setProperty(name, value);
+}
 
 export const red = 'background:#f33;';
 export const green = 'background:#1d1;';
@@ -60,7 +82,7 @@ export type CallsignView =
   | { kind: 'id'; text: string; href: string }
   | { kind: 'call'; text: string; href: string; gps: string };
 
-export function callsign(raw: string): CallsignView {
+export function callsign(raw: string, lookup = 'RadioID'): CallsignView {
   if (/^[0-9]+(\.[0-9]+)?$/.test(raw)) {
     return Number(raw) > 9999
       ? { kind: 'id', text: raw, href: 'https://database.radioid.net/database/view?id=' + encodeURIComponent(raw) }
@@ -70,7 +92,9 @@ export function callsign(raw: string): CallsignView {
   const dash = raw.indexOf('-');
   const trimmed = dash > 0 ? raw.slice(0, dash) : raw;
   const url = encodeURIComponent(trimmed);
-  return { kind: 'call', text: trimmed, href: 'https://database.radioid.net/database/view?callsign=' + url, gps: 'https://aprs.fi/#!call=' + url + '*' };
+  // lh.php: RadioID or QRZ, chosen in Expert > CSS Tool > Lookup Service.
+  const href = (lookup === 'QRZ' ? 'https://www.qrz.com/db/' : 'https://database.radioid.net/database/view?callsign=') + url;
+  return { kind: 'call', text: trimmed, href, gps: 'https://aprs.fi/#!call=' + url + '*' };
 }
 
 export function liveSeconds(row: Row, now: string): string {

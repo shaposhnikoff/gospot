@@ -362,6 +362,84 @@ def full_write(name, request, run=None):
     return {"ok": True}
 
 
+CSS_FILE = setting_path(_SETTINGS, "PISTAR_CSS_FILE")
+# admin/expert/edit_dashboard.php shows these when /etc/pistar-css.ini is missing.
+CSS_DEFAULT = ("[Background]\nPage=edf0f5\nContent=ffffff\nBanners=dd4b39\n\n"
+               "[Text]\nBanners=ffffff\nBannersDrop=303030\n\n"
+               "[Tables]\nHeadDrop=8b0000\nBgEven=f7f7f7\nBgOdd=d0d0d0\n\n"
+               "[Content]\nText=000000\n\n"
+               "[BannerH1]\nEnabled=0\nText=\"Some Text\"\n\n"
+               "[BannerExtText]\nEnabled=0\nText=\"Some long text entry\"\n\n"
+               "[Lookup]\nService=\"RadioID\"\n")
+
+
+def css_layout(text):
+    """Sections and keys in file order, values unquoted like parse_ini_file;
+    Lookup popupWidth/popupHeight are hidden by the classic editor."""
+    out = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            out.append((line[1:-1], []))
+        elif out and "=" in line:
+            key, _, value = line.partition("=")
+            key, value = key.strip(), value.strip()
+            if len(value) >= 2 and value[0] == value[-1] == '"':
+                value = value[1:-1]
+            if out[-1][0] == "Lookup" and key in ("popupWidth", "popupHeight"):
+                continue
+            out[-1][1].append([key, value])
+    return out
+
+
+def css_current():
+    old, st = read_file(CSS_FILE)
+    revision = hashlib.sha256((old if old is not None else "\0missing").encode()).hexdigest()
+    return old, st, revision
+
+
+def css_write(request):
+    """Save the CSS Tool form: every shown key, "" stored as none (update_ini_file)."""
+    require(type(request) is dict and set(request) <= {"revision", "values"} and type(request.get("values")) is dict,
+            "invalid request")
+    old, st, revision = css_current()
+    if request.get("revision") != revision:
+        raise Stale("file changed since it was read")
+    layout = css_layout(old if old is not None else CSS_DEFAULT)
+    known = {name: {k for k, _ in keys} for name, keys in layout}
+    for section, keys in request["values"].items():
+        require(section in known and type(keys) is dict, "unknown section")
+        for key, value in keys.items():
+            require(key in known[section] and type(value) is str and VALUE.fullmatch(value) and len(value) <= 256,
+                    "invalid value")
+    out = []
+    for name, keys in layout:
+        out.append(f"[{name}]")
+        for key, value in keys:
+            value = request["values"].get(name, {}).get(key, value)
+            out.append(f"{key}={value if value != '' else 'none'}")
+        out.append("")
+    if st is None:
+        class New:  # root:root under sudo; the running user in unprivileged tests
+            st_uid, st_gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+            st_mode = 0o644
+        st = New
+    replace(CSS_FILE, "\n".join(out) + "\n", st)
+    return {"ok": True}
+
+
+def css_reset(request):
+    """Factory Reset of the CSS Tool: remove the file; the classic palette applies."""
+    require(type(request) is dict, "invalid request")
+    _, _, revision = css_current()
+    if request.get("revision") != revision:
+        raise Stale("file changed since it was read")
+    CSS_FILE.unlink(missing_ok=True)
+    return {"ok": True}
+
+
 class Error(Exception):
     pass
 
@@ -747,6 +825,12 @@ def main():
     if len(sys.argv) == 2 and sys.argv[1] == "restore":
         blob = sys.stdin.buffer.read(ZIP_MAX + 1)
         print(json.dumps(restore(blob)))
+        return
+    if len(sys.argv) == 2 and sys.argv[1] in ("css-write", "css-reset"):
+        raw = sys.stdin.buffer.read(65537)
+        require(len(raw) <= 65536, "request too large")
+        request = json.loads(raw.decode())
+        print(json.dumps(css_write(request) if sys.argv[1] == "css-write" else css_reset(request)))
         return
     if len(sys.argv) == 2 and sys.argv[1] in ("keys-read", "keys-write"):
         if sys.argv[1] == "keys-read":

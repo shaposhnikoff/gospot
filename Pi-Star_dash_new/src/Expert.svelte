@@ -7,6 +7,7 @@
   import ApiKeys from './ApiKeys.svelte';
   import Firmware from './Firmware.svelte';
   import SshAccess from './SshAccess.svelte';
+  import CssTool from './CssTool.svelte';
 
   let { page = '' }: { page?: string } = $props();
   const quick: [string, string][] = [
@@ -49,6 +50,8 @@
     <Firmware />
   {:else if page === 'tool-ssh'}
     <SshAccess />
+  {:else if page === 'tool-css'}
+    <CssTool />
   {:else}
     <table width="100%">
       <tbody>

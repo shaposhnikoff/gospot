@@ -121,7 +121,7 @@
 </PiStarFrame>
 
 <style>
-  .section :global(h2) { color: #000000; font: 1em verdana, arial, sans-serif; text-align: center; font-weight: bold; padding: 0; margin: 8px 0 0 0; }
+  .section :global(h2) { color: var(--ps-text, #000000); font: 1em verdana, arial, sans-serif; text-align: center; font-weight: bold; padding: 0; margin: 8px 0 0 0; }
   .static { white-space: pre-line; }
   /* pistar-css.php "CSS Toggle Code" */
   .toggle { position: absolute; margin-left: -9999px; visibility: hidden; }
@@ -130,8 +130,8 @@
   input.toggle-round-flat + label:before, input.toggle-round-flat + label:after { display: block; position: absolute; content: ""; }
   input.toggle-round-flat + label:before { top: 1px; left: 1px; bottom: 1px; right: 1px; background-color: #fff; border-radius: 10px; transition: background 0.4s; }
   input.toggle-round-flat + label:after { top: 2px; left: 2px; bottom: 2px; width: 16px; background-color: #dddddd; border-radius: 12px; transition: margin 0.4s, background 0.4s; }
-  input.toggle-round-flat:checked + label { background-color: #dd4b39; }
-  input.toggle-round-flat:checked + label:after { margin-left: 14px; background-color: #dd4b39; }
+  input.toggle-round-flat:checked + label { background-color: var(--ps-banners, #dd4b39); }
+  input.toggle-round-flat:checked + label:after { margin-left: 14px; background-color: var(--ps-banners, #dd4b39); }
   .switch { display: inline-block; vertical-align: middle; }
   :global(a.tooltip2) { position: relative; font-weight: bold; color: #000000 !important; text-decoration: none; }
   :global(a.tooltip2 span) { display: none; }

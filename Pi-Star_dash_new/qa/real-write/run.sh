@@ -16,6 +16,7 @@ if [[ ${1:-} == --services ]]; then scenario+=(--services); shift; fi
 if [[ ${1:-} == --expert ]]; then scenario+=(--expert); shift; fi
 if [[ ${1:-} == --backup ]]; then scenario+=(--backup); shift; fi
 if [[ ${1:-} == --configure ]]; then scenario+=(--configure); shift; fi
+if [[ ${1:-} == --css ]]; then scenario+=(--css); shift; fi
 if (($#)); then
   [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
@@ -97,6 +98,8 @@ docker exec "$name" sh -eu -c '
   chmod 0440 /etc/sudoers.d/pistar-wizard; visudo -c
   touch /run/pistar-qa/events
 '
+# The status panel feeds /manage/api/dashboard (theme, versions); it listens on PANEL_PORT from pistar.conf.
+docker exec -d --user pistar-wizard "$name" sh -c 'exec /usr/local/bin/pistar-wizard 2>>/tmp/pistar-panel.log'
 docker exec -d --user pistar-wizard -e CREDENTIALS_DIRECTORY=/run/credentials "$name" \
   sh -c 'exec /usr/local/bin/pistar-wizard -admin-listen :8443 -tls-cert /run/credentials/cert.pem -tls-key /run/credentials/key.pem 2>>/tmp/pistar-wizard.log'
 ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name")

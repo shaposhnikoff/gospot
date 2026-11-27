@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import stat
 import tempfile
 import unittest
 
@@ -264,6 +265,39 @@ class BackupTest(unittest.TestCase):
             self.assertFalse(helper.restore(b.getvalue(), run=lambda *a: None, is_loaded=lambda u: False)["ok"])
         self.assertFalse(helper.restore(b"not a zip", run=lambda *a: None)["ok"])
         self.assertFalse(helper.restore(b"", run=lambda *a: None)["ok"])
+
+
+class CssToolTest(unittest.TestCase):
+    def setUp(self):
+        helper.CSS_FILE.unlink(missing_ok=True)
+
+    def rev(self):
+        return helper.css_current()[2]
+
+    def test_first_save_writes_defaults_with_edits(self):
+        out = helper.css_write({"revision": self.rev(), "values": {"Background": {"Banners": "0000ff"}, "BannerH1": {"Enabled": "1", "Text": ""}}})
+        self.assertEqual(out, {"ok": True})
+        text = helper.CSS_FILE.read_text()
+        self.assertTrue(text.startswith("[Background]\nPage=edf0f5\nContent=ffffff\nBanners=0000ff\n\n[Text]\n"), text)
+        self.assertIn("[BannerH1]\nEnabled=1\nText=none\n", text)
+        self.assertIn("[BannerExtText]\nEnabled=0\nText=Some long text entry\n", text)
+        self.assertTrue(text.endswith("[Lookup]\nService=RadioID\n\n"))
+        self.assertEqual(stat.S_IMODE(helper.CSS_FILE.stat().st_mode), 0o644)
+
+    def test_known_keys_only_stale_and_reset(self):
+        helper.CSS_FILE.write_text("[Background]\nPage=111111\n[Lookup]\nService=QRZ\npopupWidth=500\n")
+        for bad in ({"Evil": {"x": "1"}}, {"Background": {"Script": "x"}}, {"Background": {"Page": "a\nb"}}):
+            with self.assertRaises(helper.Error, msg=str(bad)):
+                helper.css_write({"revision": self.rev(), "values": bad})
+        with self.assertRaises(helper.Stale):
+            helper.css_write({"revision": "0" * 64, "values": {}})
+        helper.css_write({"revision": self.rev(), "values": {"Lookup": {"Service": "RadioID"}}})
+        self.assertEqual(helper.CSS_FILE.read_text(), "[Background]\nPage=111111\n\n[Lookup]\nService=RadioID\n\n")
+        with self.assertRaises(helper.Stale):
+            helper.css_reset({"revision": "0" * 64})
+        self.assertTrue(helper.CSS_FILE.exists())
+        helper.css_reset({"revision": self.rev()})
+        self.assertFalse(helper.CSS_FILE.exists())
 
 
 def _settings_path(key):

@@ -4,7 +4,7 @@
   import { onMount } from 'svelte';
   import {
     type Dashboard, type Row, cellStyle, trxStyle, modeLabel, target, callsign, liveSeconds,
-    duration, loss, ber, lossStyle, berStyle, rssi, red, green, dataNote,
+    duration, loss, ber, lossStyle, berStyle, rssi, red, green, dataNote, applyTheme,
   } from './classic';
   import { readJSON, serviceOrigin } from './runtime';
   import LinkManagers from './LinkManagers.svelte';
@@ -37,6 +37,7 @@
         const r = await fetch(admin ? '/manage/api/dashboard' : '/api/dashboard', { cache: 'no-store' });
         if (!r.ok) throw new Error(String(r.status));
         d = await r.json();
+        applyTheme(d?.Theme);
         failed = false;
       } catch {
         failed = true;
@@ -105,7 +106,7 @@
 {/snippet}
 
 {#snippet row(r: Row, local: boolean)}
-  {@const cs = callsign(r.callsign)}
+  {@const cs = callsign(r.callsign, d?.Theme?.Lookup)}
   <tr>
     <td align="left">{r.clock}</td>
     <td align="left">{modeLabel(r.mode)}</td>
@@ -140,6 +141,8 @@
     <div style="font-size: 8px; text-align: left; padding-left: 8px; float: left;">Hostname: {d?.Hostname ?? ''}</div>
     <div style="font-size: 8px; text-align: right; padding-right: 8px;">Pi-Star:{d?.PiStar || 'native'} / Dashboard: {d?.Version ?? ''}</div>
     <h1>Pi-Star Digital Voice Dashboard for {d?.Callsign ?? ''}</h1>
+    {#if d?.Theme?.BannerH1}<h1>{d.Theme.BannerH1}</h1>{/if}
+    {#if d?.Theme?.BannerExt}<p style="text-align: center; color: #ffffff;">{d.Theme.BannerExt}</p>{/if}
     <p style="padding-right: 5px; text-align: right; color: #ffffff;">
       {#if admin}
         <a href={operator} style="color: #ffffff;">Dashboard</a> |
@@ -325,21 +328,21 @@
 <style>
   /* css/pistar-css.php with its built-in palette */
   .container { width: 820px; text-align: left; margin: auto; border-radius: 10px; box-shadow: 3px 3px 3px #707070; background: #ffffff; }
-  :global(body.pistar-classic) { margin: 8px; font: 12px verdana, arial, sans-serif; background: #edf0f5; color: #000000; }
-  .header { background: #dd4b39; text-decoration: none; color: #ffffff; font-family: verdana, arial, sans-serif; text-align: left; padding: 5px 0; border-radius: 10px 10px 0 0; }
+  :global(body.pistar-classic) { margin: 8px; font: 12px verdana, arial, sans-serif; background: var(--ps-page, #edf0f5); color: #000000; }
+  .header { background: var(--ps-banners, #dd4b39); text-decoration: none; color: var(--ps-banner-text, #ffffff); font-family: verdana, arial, sans-serif; text-align: left; padding: 5px 0; border-radius: 10px 10px 0 0; }
   .header p { margin: 12px 0; }
   .nav { float: left; margin: 0; padding: 3px; width: 160px; background: #242d31; font-weight: normal; min-height: 100%; }
-  .content { margin: 0 0 0 166px; padding: 1px 5px 5px 5px; color: #000000; background: #ffffff; text-align: center; }
-  .contentwide { padding: 5px; color: #000000; background: #ffffff; text-align: center; }
-  .footer { background: #dd4b39; text-decoration: none; color: #ffffff; font-family: verdana, arial, sans-serif; font-size: 9px; text-align: center; padding: 10px 0; border-radius: 0 0 10px 10px; clear: both; }
+  .content { margin: 0 0 0 166px; padding: 1px 5px 5px 5px; color: var(--ps-text, #000000); background: var(--ps-content, #ffffff); text-align: center; }
+  .contentwide { padding: 5px; color: var(--ps-text, #000000); background: var(--ps-content, #ffffff); text-align: center; }
+  .footer { background: var(--ps-banners, #dd4b39); text-decoration: none; color: var(--ps-banner-text, #ffffff); font-family: verdana, arial, sans-serif; font-size: 9px; text-align: center; padding: 10px 0; border-radius: 0 0 10px 10px; clear: both; }
   .container :global(table) { vertical-align: middle; text-align: center; empty-cells: show; padding: 0; border-collapse: collapse; border-color: #000000; border-style: solid; border-spacing: 4px; border-width: 2px; text-decoration: none; color: #ffffff; background: #000000; font-family: verdana, arial, sans-serif; width: 100%; white-space: nowrap; }
-  .container :global(th) { font-family: "Lucidia Console", Monaco, monospace; text-shadow: 1px 1px #8b0000; text-decoration: none; background: #dd4b39; border: 1px solid #c0c0c0; }
-  .container :global(tr:nth-child(even)) { background: #f7f7f7; }
-  .container :global(tr:nth-child(odd)) { background: #d0d0d0; }
+  .container :global(th) { font-family: "Lucidia Console", Monaco, monospace; text-shadow: 1px 1px var(--ps-head-drop, #8b0000); text-decoration: none; background: var(--ps-banners, #dd4b39); border: 1px solid #c0c0c0; }
+  .container :global(tr:nth-child(even)) { background: var(--ps-even, #f7f7f7); }
+  .container :global(tr:nth-child(odd)) { background: var(--ps-odd, #d0d0d0); }
   .container :global(td) { color: #000000; font-family: "Lucidia Console", Monaco, monospace; text-decoration: none; border: 1px solid #000000; }
   .container :global(a) { text-decoration: none; }
   .container :global(a:link), .container :global(a:visited) { text-decoration: none; color: #0000e0; font-weight: normal; }
-  h1 { text-shadow: 2px 2px #303030; text-align: center; font-size: 2em; margin: 0.67em 0; }
+  h1 { text-shadow: 2px 2px var(--ps-banner-drop, #303030); text-align: center; font-size: 2em; margin: 0.67em 0; }
   .container :global(a.tooltip), .container :global(a.tooltip:link), .container :global(a.tooltip:visited), .container :global(a.tooltip:active) { text-decoration: none; position: relative; color: #ffffff; }
   .container :global(a.tooltip:hover) { text-shadow: none; color: #ffffff; background: transparent; }
   .container :global(a.tooltip span) { text-shadow: none; display: none; }

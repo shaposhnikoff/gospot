@@ -3,6 +3,7 @@
   // power.php, update.php, ...): banner, menu, content, web-config footer.
   import { onMount, type Snippet } from 'svelte';
   import { operatorOrigin } from './runtime';
+  import { applyTheme } from './classic';
 
   let { title, links, children, menu, footer = 'config' }: { title: string; links: string[]; children: Snippet; menu?: Snippet; footer?: 'config' | 'dashboard' } = $props();
   const targets: Record<string, string> = {
@@ -18,6 +19,7 @@
     void operatorOrigin().then(o => { if (o) operator = o + '/'; });
     void fetch('/manage/api/dashboard', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(d => {
       if (d) versions = `Pi-Star:${d.PiStar || 'native'} / Dashboard: ${d.Version}`;
+      applyTheme(d?.Theme);
     }).catch(() => {});
     return () => document.body.classList.remove('pistar-classic');
   });
@@ -47,17 +49,17 @@
 
 <style>
   /* css/pistar-css.php (built-in palette), applied to the page's own content too. */
-  :global(body.pistar-classic) { margin: 8px; font: 12px verdana, arial, sans-serif; background: #edf0f5; color: #000000; }
-  .container { width: 820px; text-align: left; margin: auto; border-radius: 10px; box-shadow: 3px 3px 3px #707070; background: #ffffff; }
-  .header { background: #dd4b39; color: #ffffff; font-family: verdana, arial, sans-serif; text-align: left; padding: 5px 0; border-radius: 10px 10px 0 0; }
+  :global(body.pistar-classic) { margin: 8px; font: 12px verdana, arial, sans-serif; background: var(--ps-page, #edf0f5); color: #000000; }
+  .container { width: 820px; text-align: left; margin: auto; border-radius: 10px; box-shadow: 3px 3px 3px #707070; background: var(--ps-content, #ffffff); }
+  .header { background: var(--ps-banners, #dd4b39); color: var(--ps-banner-text, #ffffff); font-family: verdana, arial, sans-serif; text-align: left; padding: 5px 0; border-radius: 10px 10px 0 0; }
   .header p { margin: 12px 0; }
-  .contentwide { padding: 5px; color: #000000; background: #ffffff; text-align: center; }
-  .footer { background: #dd4b39; color: #ffffff; font-family: verdana, arial, sans-serif; font-size: 9px; text-align: center; padding: 10px 0; border-radius: 0 0 10px 10px; clear: both; }
-  h1 { text-shadow: 2px 2px #303030; text-align: center; font-size: 2em; margin: 0.67em 0; }
+  .contentwide { padding: 5px; color: var(--ps-text, #000000); background: var(--ps-content, #ffffff); text-align: center; }
+  .footer { background: var(--ps-banners, #dd4b39); color: var(--ps-banner-text, #ffffff); font-family: verdana, arial, sans-serif; font-size: 9px; text-align: center; padding: 10px 0; border-radius: 0 0 10px 10px; clear: both; }
+  h1 { text-shadow: 2px 2px var(--ps-banner-drop, #303030); text-align: center; font-size: 2em; margin: 0.67em 0; }
   .pistar-frame :global(table) { vertical-align: middle; text-align: center; empty-cells: show; padding: 0; border-collapse: collapse; border: 2px solid #000000; color: #ffffff; background: #000000; font-family: verdana, arial, sans-serif; width: 100%; white-space: nowrap; }
-  .pistar-frame :global(th) { font-family: "Lucidia Console", Monaco, monospace; text-shadow: 1px 1px #8b0000; background: #dd4b39; border: 1px solid #c0c0c0; }
-  .pistar-frame :global(tr:nth-child(even)) { background: #f7f7f7; }
-  .pistar-frame :global(tr:nth-child(odd)) { background: #d0d0d0; }
+  .pistar-frame :global(th) { font-family: "Lucidia Console", Monaco, monospace; text-shadow: 1px 1px var(--ps-head-drop, #8b0000); background: var(--ps-banners, #dd4b39); border: 1px solid #c0c0c0; }
+  .pistar-frame :global(tr:nth-child(even)) { background: var(--ps-even, #f7f7f7); }
+  .pistar-frame :global(tr:nth-child(odd)) { background: var(--ps-odd, #d0d0d0); }
   .pistar-frame :global(td) { color: #000000; font-family: "Lucidia Console", Monaco, monospace; border: 1px solid #000000; }
   .pistar-frame :global(a:link), .pistar-frame :global(a:visited) { text-decoration: none; color: #0000e0; }
   .pistar-frame :global(#tail) { height: 450px; width: 805px; max-width: 100%; overflow-y: scroll; overflow-x: scroll; color: #00ff00; background: #000000; white-space: pre-line; text-align: left; }

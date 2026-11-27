@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { callsign, target, rssi, lossStyle, berStyle, loss, ber, duration, liveSeconds, modeLabel, cellStyle, type Row } from './classic';
+import { callsign, target, rssi, lossStyle, berStyle, loss, ber, duration, liveSeconds, modeLabel, cellStyle, themeStyle, type Row } from './classic';
 
 const row = (x: Partial<Row>): Row => ({ time: '2026-11-27T06:00:00Z', clock: '', mode: 'DMR Slot 2', callsign: 'UT3UDX', target: 'TG 91', source: 'Net', duration: 1.2, loss: 0, ber: 0, rssi: null, live: false, ...x });
 
@@ -46,4 +46,18 @@ test('timeouts and data transfers follow lh.php', () => {
   assert.equal(duration(row({ duration: null, note: 'TOut' })), 'TOut');
   assert.equal(ber(row({ ber: null, note: 'TOut' })), '??%');
   assert.equal(ber(row({ ber: null })), '');
+});
+
+test('CSS Tool theme and lookup service follow pistar-css.php and lh.php', () => {
+  const t = { Page: 'edf0f5', Content: 'ffffff', Banners: '0000ff', BannerText: 'fff', BannerDrop: '303030', HeadDrop: 'bad;}x{', Text: '000000',
+    Even: 'f7f7f7', Odd: 'd0d0d0', BannerH1: '', BannerExt: '', Lookup: 'QRZ' };
+  const vars = new Map(themeStyle(t));
+  assert.equal(vars.get('--ps-banners'), '#0000ff');
+  assert.equal(vars.get('--ps-banner-text'), '#fff');
+  assert.equal(vars.has('--ps-head-drop'), false); // never emit an unchecked value
+  assert.equal(themeStyle(undefined).length, 0);
+  const q = callsign('UT3UDX', 'QRZ');
+  assert.ok(q.kind === 'call' && q.href === 'https://www.qrz.com/db/UT3UDX');
+  const r = callsign('UT3UDX');
+  assert.ok(r.kind === 'call' && r.href === 'https://database.radioid.net/database/view?callsign=UT3UDX');
 });

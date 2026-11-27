@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { groups, isOperatorPath, searchGroups, stockOrigin } from './routes';
 
-  let { pi = false, classicPort = null }: { pi?: boolean, classicPort?: number|null } = $props();
+  let { pi = false, management = null, preview = false }: { pi?: boolean; management?: string | null; preview?: boolean } = $props();
   const storageKey = 'pistar.console.stock-origin.v1';
   let here = $state('');
   let operatorPath = $state(false);
@@ -13,15 +13,12 @@
   let query = $state('');
   let groupId = $state('');
   const integrated = $derived(!pi && operatorPath && !!here);
-  const target = $derived(integrated ? here : saved && saved !== here ? saved : null);
-  const wizard = $derived(here ? `https://${new URL(here).hostname}:8788/` : '');
+  const target = $derived(integrated ? here : !pi && saved && saved !== here ? saved : null);
+  const wizard = $derived(management ? management + '/' : '');
   const results = $derived(searchGroups(query, groupId));
   const count = $derived(results.reduce((sum, group) => sum + group.routes.length, 0));
-  function nativeLink(id:string, path?:string): string | undefined {
-    if (!pi || !here) return;
-    if (classicPort && path?.startsWith('/admin/')) {
-      return `https://${new URL(here).hostname}:${classicPort}${path}`;
-    }
+  function nativeLink(id:string): string | undefined {
+    if (!pi || !here || !wizard) return;
     const destinations:Record<string,string> = {
       dashboard: '#overview', heard: '/mmdvmhost/lh.php', 'last-heard-api':'/api/last_heard.php',
       admin:'/admin/', hardware:'/admin/sysinfo.php', sysinfo:'/admin/sysinfo.php', log:'/admin/live_modem_log.php',
@@ -89,15 +86,15 @@
       <div class="device-links">
         <a href="#overview" data-testid="console-link-overview">Обзор узла <span aria-hidden="true">→</span></a>
         {#if wizard}
-          <a href={wizard + 'manage/'} target="_blank" rel="noopener noreferrer" data-testid="console-link-native">Параметры станции · новый интерфейс ↗</a>
+          <a href={wizard + 'manage/'} data-testid="console-link-native">Параметры станции · новый интерфейс →</a>
           <a href={wizard + 'manage/#services'}>Сервисы · Настройка DMR ↗</a>
-          <a href={wizard} target="_blank" rel="noopener noreferrer" data-testid="console-link-wizard">Мастер настройки <span aria-hidden="true">↗</span></a>
+          <a href={preview ? '/wizard/' : wizard} data-testid="console-link-wizard">Мастер настройки <span aria-hidden="true">→</span></a>
         {/if}
       </div>
     </section>
   {/if}
 
-  <section class="backend" aria-labelledby="backend-title">
+  {#if !pi}<section class="backend" aria-labelledby="backend-title">
     <div>
       <p class="kicker">ШТАТНАЯ ПАНЕЛЬ PI-STAR</p>
       <h2 id="backend-title">{integrated ? 'Этот сервер' : 'Адрес устройства'}</h2>
@@ -124,7 +121,7 @@
         <p id="origin-message" class:error={invalid} role="status">{message}</p>
       </form>
     {/if}
-  </section>
+  </section>{/if}
 
   <section class="catalog" aria-labelledby="catalog-title">
     <div class="catalog-head">
@@ -153,8 +150,8 @@
           {#each group.routes as route (route.id)}
             {@const path = integrated ? route.path : route.externalPath ?? route.path}
             <li data-testid={'console-item-' + route.id}>
-               {#if nativeLink(route.id, route.externalPath ?? route.path)}
-                 <a href={nativeLink(route.id, route.externalPath ?? route.path)} class="route-title" data-testid={'console-native-'+route.id}>{route.title} <span aria-hidden="true">→</span></a>
+               {#if nativeLink(route.id)}
+                 <a href={nativeLink(route.id)} class="route-title" data-testid={'console-native-'+route.id}>{route.title} <span aria-hidden="true">→</span></a>
                {:else if target && path}
                 <a href={target + path} class="route-title" target="_blank" rel="noopener noreferrer"
                   data-testid={'console-link-' + route.id}>{route.title} <span aria-hidden="true">↗</span></a>
@@ -164,8 +161,8 @@
               <p>{pi && route.id==='dmr-config' ? 'MMDVMHost: Color Code и таймслоты. DMRGateway: мастер сети 1 и существующие правила TG.' : route.description}</p>
               {#if !path}
                 <small>Только на устройстве</small>
-              {:else if !target && !nativeLink(route.id, route.externalPath ?? route.path)}
-                <small>Нужна штатная панель Pi-Star</small>
+              {:else if !target && !nativeLink(route.id)}
+                <small>{pi ? 'Пока недоступно' : 'Нужна штатная панель Pi-Star'}</small>
               {/if}
             </li>
           {/each}

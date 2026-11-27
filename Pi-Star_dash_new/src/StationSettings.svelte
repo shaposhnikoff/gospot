@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { readJSON } from './runtime';
 
   const fields = [
     { key: 'callsign', label: 'Позывной', hint: '1–10 заглавных латинских букв и цифр.' },
@@ -103,7 +104,11 @@
     busy = true;
     csrf = ''; error = ''; notice = 'Читаем настройки станции…';
     try {
-      if (location.protocol !== 'https:') throw new Error();
+      if (location.protocol !== 'https:') {
+        const runtime = await readJSON('/runtime.json');
+        if (!['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) || !object(runtime) || runtime.preview !== true)
+          throw new Error();
+      }
       await readConfig();
       notice = 'Получены текущие настройки станции.';
     } catch (e) {

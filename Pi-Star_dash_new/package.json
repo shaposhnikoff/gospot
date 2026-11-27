@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "tsx --test src/*.test.ts && node --test scripts/build-classic.test.mjs",
-    "package:stock": "npm run build && node scripts/package-overlay.mjs",
+    "test": "tsx --test src/*.test.ts && node --test scripts/package-native.test.mjs",
+    "package:native": "npm run build && node scripts/package-native.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort"
   },

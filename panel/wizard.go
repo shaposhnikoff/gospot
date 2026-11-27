@@ -95,6 +95,7 @@ const wizardConfigPath = "/manage/api/config"
 func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 	password, ready := wizardCredential()
 	slot := make(chan struct{}, 1)
+	bm := newBMManager(helper)
 	return func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Cache-Control", "no-store")
@@ -114,6 +115,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		}
 		path := r.URL.EscapedPath()
 		switch path {
+		case "/manage/api/bm/master", "/manage/api/bm/talkgroup", "/manage/api/bm/peer", "/manage/api/bm/profile", "/manage/api/bm/key", "/manage/api/bm/subscription":
+			bm.serve(w, r)
+			return
 		case "/manage/api/services", "/manage/api/protocols":
 			serveDMRServices(w, r, helper, slot)
 			return

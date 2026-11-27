@@ -10,11 +10,13 @@ export DOCKER_HOST=unix:///var/run/docker.sock
 unset DOCKER_CONTEXT
 dist=
 scenario=()
+preview=false
+if [[ ${1:-} == --preview ]]; then preview=true; shift; fi
 if [[ ${1:-} == --services ]]; then scenario+=(--services); shift; fi
 if (($#)); then
-  [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../docroot/operator]" >&2; exit 2; }
+  [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
-  [[ $dist == "$here"/build/release-*/docroot/operator && -f $dist/index.html && -d $dist/assets ]] || exit 2
+  [[ $dist == "$here"/build/release-*/ui && -f $dist/index.html && -d $dist/assets ]] || exit 2
 fi
 base=/tmp/opencode
 [[ -d $base ]] || base=/tmp
@@ -22,7 +24,9 @@ work=$(mktemp -d "$base/write.XXXXXXXX")
 name=pstar-write-qa-$(openssl rand -hex 5)
 bridge=
 relay=
+gateway=
 cleanup() {
+  [[ -z $gateway ]] || kill "$gateway" 2>/dev/null || :
   [[ -z $relay ]] || kill "$relay" 2>/dev/null || :
   [[ -z $bridge ]] || kill "$bridge" 2>/dev/null || :
   docker rm -f "$name" >/dev/null 2>&1 || :
@@ -54,7 +58,7 @@ sed -e 's/^Address=master.invalid$/Address=192.0.2.11/' -e 's/^Id=1$/Id=10001/' 
 openssl rand -hex 20 >"$work/admin-password"
 openssl req -x509 -nodes -newkey rsa:2048 -days 1 -keyout "$work/key.pem" -out "$work/cert.pem" \
   -subj /CN=127.0.0.1 -addext 'subjectAltName=IP:127.0.0.1' 2>/dev/null
-sed -n '/^pistar-wizard ALL=/p' ../panel/deploy-wizard.sh >"$work/sudoers"
+sed 's|/usr/lib/pistar-dashboard/|/usr/local/libexec/|g' debian/sudoers >"$work/sudoers"
 test -s "$work/sudoers"
 docker network create --internal "$name" >/dev/null
 docker run -d --name "$name" --network "$name" \
@@ -101,6 +105,15 @@ done
 origin=https://127.0.0.1:$port
 curl --noproxy '*' --retry 5 --retry-connrefused --retry-delay 1 --max-time 8 -sS --cacert "$work/cert.pem" \
   -o /dev/null -w 'HTTPS /manage/ without credentials: %{http_code}\n' "$origin/manage/"
+if $preview; then
+  go build -o "$work/preview-gateway" "$fixture/preview.go"
+  "$work/preview-gateway" -listen "127.0.0.1:${PREVIEW_PORT:-8790}" -upstream "$origin" -assets "$dist" -credentials "$work" &
+  gateway=$!
+  echo "Preview: http://127.0.0.1:${PREVIEW_PORT:-8790}/#console"
+  echo "Isolated fixture: $name; state: $work; no hardware access"
+  wait "$gateway"
+  exit $?
+fi
 python3 qa/real_write_browser.py "${scenario[@]}" --origin "$origin" --work "$work" --key "$work/key.pem" --container "$name" || {
   cat "$work/service-results"; exit 1;
 }

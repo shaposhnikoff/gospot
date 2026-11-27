@@ -1,4 +1,5 @@
 pistar-wizard ALL=(root) NOPASSWD: /usr/lib/pistar-dashboard/pistar-config read, /usr/lib/pistar-dashboard/pistar-config apply, /usr/lib/pistar-dashboard/pistar-config rollback
 pistar-wizard ALL=(root) NOPASSWD: /usr/lib/pistar-dashboard/pistar-config services-read, /usr/lib/pistar-dashboard/pistar-config services-apply
 pistar-wizard ALL=(root) NOPASSWD: /usr/lib/pistar-dashboard/pistar-config protocols-read, /usr/lib/pistar-dashboard/pistar-config protocols-apply
+pistar-wizard ALL=(root) NOPASSWD: /usr/lib/pistar-dashboard/pistar-config bm-peer
 pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: /usr/lib/pistar-dashboard/pistar-archive backup, /usr/lib/pistar-dashboard/pistar-archive preview, /usr/lib/pistar-dashboard/pistar-archive apply

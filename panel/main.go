@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"sync/atomic"
@@ -29,12 +30,30 @@ type Status struct {
 func main() {
 	listen := flag.String("listen", ":8787", "HTTP listen address")
 	admin := flag.String("admin-listen", "", "serve only the HTTPS settings wizard at this address")
+	operator := flag.String("operator-listen", "", "serve the native operator UI at this address")
+	assets := flag.String("operator-assets", operatorAssets, "native operator asset directory")
+	managementAssets := flag.String("admin-assets", adminAssets, "native management asset directory")
+	managementPort := flag.Int("management-port", 8788, "HTTPS management port advertised by the operator UI")
+	operatorPort := flag.Int("operator-port", 8789, "HTTP operator port advertised by the management UI")
 	cert := flag.String("tls-cert", "", "wizard TLS certificate")
 	key := flag.String("tls-key", "", "wizard TLS private key")
 	flag.Parse()
+	if *managementPort < 1 || *managementPort > 65535 || *operatorPort < 1 || *operatorPort > 65535 {
+		log.Fatal("Navigation ports must be between 1 and 65535")
+	}
+	if *operator != "" {
+		server := &http.Server{Addr: *operator, Handler: operatorHandler(*assets, "http://127.0.0.1:8787", *managementPort),
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+			WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+		log.Fatal(server.ListenAndServe())
+	}
 	if *admin != "" {
 		mux := http.NewServeMux()
-		registerWizard(mux)
+		registerWizardRoutes(mux, runWizardHelper, *managementAssets)
+		mux.HandleFunc("GET /runtime.json", func(writer http.ResponseWriter, request *http.Request) {
+			writer.Header().Set("Cache-Control", "no-store")
+			operatorReply(writer, request, 200, "application/json", []byte(fmt.Sprintf(`{"operatorPort":%d}`, *operatorPort)))
+		})
 		srv := &http.Server{
 			Addr: *admin, Handler: mux,
 			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,

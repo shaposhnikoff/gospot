@@ -281,6 +281,11 @@ def transaction(command, settings, run):
         return service_config(originals)
     if command == "protocols-read":
         return protocol_config(originals)
+    if command == "bm-peer":
+        host, gw = map(Ini, originals)
+        peer = int(gw.field(NETWORK, "Id") if (NETWORK,"Id") in gw.index else gw.field("General","Id"))
+        require(0 < peer <= 4294967295, "invalid configured DMR peer")
+        return {"id":peer,"simplex":host.field("DMR Network","Slot1")=="0"}
     backup = STATE / "previous.json"
     if command == "rollback":
         require(backup.exists(), "no rollback available")
@@ -342,7 +347,7 @@ def transaction(command, settings, run):
 
 
 def execute(command, settings=None, run=restart):
-    require(command in ("read", "apply", "rollback", "services-read", "services-apply","protocols-read","protocols-apply"), "unknown command")
+    require(command in ("read", "apply", "rollback", "services-read", "services-apply","protocols-read","protocols-apply","bm-peer"), "unknown command")
     if command == "apply":
         validate(settings, check_device=True)
     STATE.mkdir(mode=0o700, exist_ok=True)

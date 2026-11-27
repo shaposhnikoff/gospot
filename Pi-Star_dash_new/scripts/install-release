@@ -24,7 +24,7 @@ ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes pistar3 "set -eu
   dpkg-query -W pistar-dashboard; sudo -n dpkg -V pistar-dashboard
   for unit in psdash-stage pistar-wizard pistar-panel mmdvmhost dmrgateway; do systemctl is-active \"\$unit\"; done
   test \"\$(curl --noproxy '*' --retry 5 --retry-connrefused --cacert /etc/pistar-wizard/tls-cert.pem -sS -o /dev/null -w '%{http_code}' https://192.168.210.194:8788/manage/)\" = 401
-  curl --retry 5 --retry-connrefused --noproxy '*' -fsS http://192.168.210.194:8789/ | cmp - /usr/share/pistar-dashboard/classic/operator/index.html
+  curl --retry 5 --retry-connrefused --noproxy '*' -fsS http://192.168.210.194:8789/ | cmp - /usr/share/pistar-dashboard/ui/index.html
   after=\$(state); test \"\$before\" = \"\$after\"
   echo 'PASS package installed: operator bytes match; both radio INIs, ownership, modes and InvocationIDs unchanged'
 " < "$deb"

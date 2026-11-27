@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"io/fs"
 	"math"
+	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +43,11 @@ type systemSnapshot struct {
 	Swap     *systemUsage    `json:"swap"`
 	RootDisk *systemUsage    `json:"rootDisk"`
 	Services []systemService `json:"services"`
+	// Classic system.php fields: addresses (hostname -I), platformDetect.sh
+	// output and the six process-based service cells.
+	Addresses []string        `json:"addresses"`
+	Platform  string          `json:"platform"`
+	Classic   []systemService `json:"classicServices"`
 }
 
 // systemUnits is built on use: the radio unit names come from pistar.conf.
@@ -209,6 +216,7 @@ func serveSystemInfo(w http.ResponseWriter, r *http.Request) {
 	systemCache.Lock()
 	if time.Since(systemCache.snapshot.At) >= 5*time.Second && r.Context().Err() == nil {
 		next := readSystem(r.Context(), os.DirFS("/"), syscall.Statfs, runDiagnostic)
+		next.Addresses, next.Platform, next.Classic = systemAddresses(), systemPlatform(r.Context()), classicServices(runningCommands())
 		if r.Context().Err() == nil {
 			systemCache.snapshot = next
 		}
@@ -220,4 +228,79 @@ func serveSystemInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(s)
+}
+
+func systemAddresses() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		ip, ok := a.(*net.IPNet)
+		if ok && !ip.IP.IsLoopback() && !ip.IP.IsLinkLocalUnicast() {
+			out = append(out, ip.IP.String())
+		}
+	}
+	return out
+}
+
+var platform struct {
+	sync.Once
+	text string
+}
+
+// systemPlatform runs Pi-Star's platformDetect.sh once; the board does not change.
+func systemPlatform(ctx context.Context) string {
+	platform.Do(func() {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		out, err := runDiagnostic(ctx, filepath.Join(pistarBinDir, "platformDetect.sh"))
+		if err == nil {
+			platform.text = strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+		}
+	})
+	return platform.text
+}
+
+// runningCommands lists process names (comm) and command lines.
+func runningCommands() (names map[string]bool, cmdlines []string) {
+	names = runningProcesses()
+	entries, _ := os.ReadDir("/proc")
+	for _, e := range entries {
+		if _, err := strconv.Atoi(e.Name()); err != nil {
+			continue
+		}
+		if b, err := os.ReadFile(filepath.Join("/proc", e.Name(), "cmdline")); err == nil && len(b) > 0 {
+			cmdlines = append(cmdlines, strings.ReplaceAll(string(b), "\x00", " "))
+		}
+	}
+	return names, cmdlines
+}
+
+// classicServices mirrors the Service Status row of system.php.
+func classicServices(names map[string]bool, cmdlines []string) []systemService {
+	state := func(ok bool) string {
+		if ok {
+			return "running"
+		}
+		return "stopped"
+	}
+	script := func(path string) bool {
+		for _, c := range cmdlines {
+			if strings.Contains(c, path) {
+				return true
+			}
+		}
+		return false
+	}
+	in := dashInputs{procs: names}
+	return []systemService{
+		{"MMDVMHost", state(in.running("MMDVMHost"))},
+		{"DStarRepeater", state(names["dstarrepeaterd"])},
+		{"ircDDBGateway", state(names["ircddbgatewayd"])},
+		{"TimeServer", state(names["timeserverd"])},
+		{"PiStar-Watchdog", state(script(filepath.Join(pistarSbinDir, "pistar-watchdog")))},
+		{"PiStar-Remote", state(script(filepath.Join(pistarSbinDir, "pistar-remote")))},
+	}
 }

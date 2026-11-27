@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"net/http"
@@ -91,6 +92,8 @@ func wizardCredential() ([32]byte, bool) {
 // wizardUser is the classic Pi-Star administrator login.
 const wizardUser = "pi-star"
 
+var dashboardClient = &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
 const wizardCookie = "__Host-pistar-csrf"
 const wizardConfigPath = "/manage/api/config"
 
@@ -125,6 +128,15 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 			return
 		case "/manage/api/system":
 			serveSystemInfo(w, r)
+			return
+		case "/manage/api/dashboard":
+			// The classic admin page shows the same tables as the dashboard.
+			if r.Method != http.MethodGet {
+				h.Set("Allow", "GET")
+				http.Error(w, "Метод не поддерживается", 405)
+				return
+			}
+			operatorProxy(w, r, dashboardClient, fmt.Sprintf("http://127.0.0.1:%d", cfgPanelPort), "/api/dashboard", true)
 			return
 		case "/manage/api/log", "/manage/api/log/download":
 			serveRadioLog(w, r)

@@ -75,6 +75,7 @@ var (
 	bmStateDir                                       string
 	pistarLogDir, radioLogSource, pistarReleaseFile  string
 	pistarHostsDir                                   string
+	pistarBinDir, pistarSbinDir                      string
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort int
 )
 
@@ -116,6 +117,7 @@ func applySettings(s settings) error {
 	mm, ds, host := path("MARKER_MMDVMHOST"), path("MARKER_DSTARREPEATER"), path("HOSTNAME_FILE")
 	lib, ui, bm := path("DASHBOARD_LIB_DIR"), path("DASHBOARD_UI_DIR"), path("DASHBOARD_BM_STATE_DIR")
 	logDir, release, hosts := path("PISTAR_LOG_DIR"), path("PISTAR_RELEASE_FILE"), path("PISTAR_HOSTS_DIR")
+	binDir, sbinDir := path("PISTAR_BIN_DIR"), path("PISTAR_SBIN_DIR")
 	source := s["RADIO_LOG_SOURCE"]
 	if source != "files" && source != "journal" {
 		errs = append(errs, "RADIO_LOG_SOURCE must be files or journal")
@@ -133,6 +135,7 @@ func applySettings(s settings) error {
 	configHelper, archiveHelperPath = filepath.Join(lib, "pistar-config"), filepath.Join(lib, "pistar-archive")
 	bmStateDir = bm
 	pistarLogDir, radioLogSource, pistarReleaseFile, pistarHostsDir = logDir, source, release, hosts
+	pistarBinDir, pistarSbinDir = binDir, sbinDir
 	cfgPanelPort, cfgManagementPort, cfgOperatorPort = pp, mp, op
 	modemDiagnostic, masterDiagnostic = diagnosticFor(modem, modemRules), diagnosticFor(master, masterRules)
 	return nil

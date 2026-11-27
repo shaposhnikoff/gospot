@@ -6,7 +6,16 @@
     type Dashboard, type Row, cellStyle, trxStyle, modeLabel, target, callsign, liveSeconds,
     duration, loss, ber, lossStyle, berStyle, rssi, red, green, dataNote,
   } from './classic';
+  import { readJSON, serviceOrigin } from './runtime';
 
+  // admin: the /admin/ variant of index.php, served by the HTTPS management UI.
+  let { admin = false }: { admin?: boolean } = $props();
+  type SystemInfo = {
+    hostname: string; kernel: string; uptimeSeconds: number | null; loadAverage: [number, number, number] | null;
+    cpuTempC: number | null; addresses: string[] | null; platform: string; classicServices: { name: string; state: string }[] | null;
+  };
+  let sys = $state<SystemInfo | null>(null);
+  let operator = $state('/');
   let d = $state<Dashboard | null>(null);
   let failed = $state(false);
   const year = new Date().getFullYear();
@@ -17,11 +26,14 @@
   };
 
   onMount(() => {
+    // Workspace pages share this document; the class gives the classic body
+    // rules precedence while this page is mounted.
+    document.body.classList.add('pistar-classic');
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
       try {
-        const r = await fetch('/api/dashboard', { cache: 'no-store' });
+        const r = await fetch(admin ? '/manage/api/dashboard' : '/api/dashboard', { cache: 'no-store' });
         if (!r.ok) throw new Error(String(r.status));
         d = await r.json();
         failed = false;
@@ -31,8 +43,37 @@
       if (!stop) timer = setTimeout(poll, 1000);
     }
     void poll();
-    return () => { stop = true; clearTimeout(timer); };
+    // system.php is refreshed every 15 s on the classic admin page.
+    let sysTimer: ReturnType<typeof setTimeout>;
+    async function pollSystem() {
+      try { sys = await readJSON('/manage/api/system') as SystemInfo; } catch { /* keep the last values */ }
+      if (!stop) sysTimer = setTimeout(pollSystem, 15000);
+    }
+    if (admin) {
+      void pollSystem();
+      void readJSON('/runtime.json').then(c => {
+        const port = c && typeof c === 'object' && 'operatorPort' in c ? c.operatorPort : null;
+        const origin = serviceOrigin(location.origin, 'http:', port);
+        if (origin) operator = origin + '/';
+      }).catch(() => {});
+    }
+    return () => { stop = true; clearTimeout(timer); clearTimeout(sysTimer); document.body.classList.remove('pistar-classic'); };
   });
+
+  // system.php: CPU temperature colours and `uptime -p` wording.
+  const tempStyle = (c: number) => c >= 69 ? 'background: #f00' : c >= 50 ? 'background: #fa0' : 'background: #1d1';
+  const shortHost = (h: string) => h.length >= 16 ? h.slice(0, 14) + '..' : h;
+  function uptime(seconds: number | null): string {
+    if (seconds == null) return '';
+    const parts: string[] = [];
+    const units: [string, number][] = [['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60]];
+    let rest = Math.floor(seconds);
+    for (const [name, size] of units) {
+      const n = Math.floor(rest / size); rest -= n * size;
+      if (n) parts.push(`${n} ${name}${n === 1 ? '' : 's'}`);
+    }
+    return 'up ' + (parts.join(', ') || '0 minutes');
+  }
 
   $effect(() => {
     if (d?.Controller === 'none') {
@@ -99,11 +140,49 @@
     <div style="font-size: 8px; text-align: right; padding-right: 8px;">Pi-Star:{d?.PiStar || 'native'} / Dashboard: {d?.Version ?? ''}</div>
     <h1>Pi-Star Digital Voice Dashboard for {d?.Callsign ?? ''}</h1>
     <p style="padding-right: 5px; text-align: right; color: #ffffff;">
-      <a href="/" style="color: #ffffff;">Dashboard</a> |
-      <a href="/admin/" style="color: #ffffff;">Admin</a> |
-      <a href="/admin/configure.php" style="color: #ffffff;">Configuration</a>
+      {#if admin}
+        <a href={operator} style="color: #ffffff;">Dashboard</a> |
+        <a href="/manage/" style="color: #ffffff;">Admin</a> |
+        <a href="/manage/#logs" style="color: #ffffff;">Live Logs</a> |
+        <a href="/manage/#configuration" style="color: #ffffff;">Configuration</a>
+      {:else}
+        <a href="/" style="color: #ffffff;">Dashboard</a> |
+        <a href="/admin/" style="color: #ffffff;">Admin</a> |
+        <a href="/admin/configure.php" style="color: #ffffff;">Configuration</a>
+      {/if}
     </p>
   </div>
+
+  {#if admin}
+    <div class="contentwide" id="sysInfo">
+      <b>Gateway Hardware Information</b>
+      <table style="table-layout: fixed;">
+        <tbody>
+          <tr>
+            <th><a class="tooltip" href="#top">Hostname<br /><span><b>System IP Address:<br />{#each sys?.addresses ?? [] as ip, i}{ip}{#if i < (sys?.addresses?.length ?? 0) - 1},<br />{/if}{/each}</b></span></a></th>
+            <th><a class="tooltip" href="#top">Kernel<span><b>Release</b></span></a></th>
+            <th colspan="2"><a class="tooltip" href="#top">Platform<span><b>Uptime:<br />{uptime(sys?.uptimeSeconds ?? null)}</b></span></a></th>
+            <th><a class="tooltip" href="#top">CPU Load<span><b>CPU Load</b></span></a></th>
+            <th><a class="tooltip" href="#top">CPU Temp<span><b>CPU Temp</b></span></a></th>
+          </tr>
+          <tr>
+            <td>{shortHost(sys?.hostname ?? '')}</td>
+            <td>{sys?.kernel ?? ''}</td>
+            <td colspan="2">{sys?.platform ?? ''}</td>
+            <td>{sys?.loadAverage ? sys.loadAverage.map(n => n.toFixed(2)).join(' / ') : ''}</td>
+            {#if sys?.cpuTempC != null}
+              <td style={tempStyle(sys.cpuTempC)}>{sys.cpuTempC.toFixed(1)}&deg;C / {(sys.cpuTempC * 9 / 5 + 32).toFixed(1)}&deg;F</td>
+            {:else}<td></td>{/if}
+          </tr>
+          <tr><th colspan="6">Service Status</th></tr>
+          <tr>
+            {#each sys?.classicServices ?? [] as s}<td style={'background: #' + (s.state === 'running' ? '1d1' : 'b55')}>{s.name}</td>{/each}
+          </tr>
+        </tbody>
+      </table>
+      <br />
+    </div>
+  {/if}
 
   {#if !d}
     <div class="contentwide">{failed ? 'Dashboard data unavailable, retrying…' : 'Loading…'}</div>
@@ -242,7 +321,7 @@
 <style>
   /* css/pistar-css.php with its built-in palette */
   .container { width: 820px; text-align: left; margin: auto; border-radius: 10px; box-shadow: 3px 3px 3px #707070; background: #ffffff; }
-  :global(body) { margin: 8px; font: 12px verdana, arial, sans-serif; background: #edf0f5; color: #000000; }
+  :global(body.pistar-classic) { margin: 8px; font: 12px verdana, arial, sans-serif; background: #edf0f5; color: #000000; }
   .header { background: #dd4b39; text-decoration: none; color: #ffffff; font-family: verdana, arial, sans-serif; text-align: left; padding: 5px 0; border-radius: 10px 10px 0 0; }
   .header p { margin: 12px 0; }
   .nav { float: left; margin: 0; padding: 3px; width: 160px; background: #242d31; font-weight: normal; min-height: 100%; }

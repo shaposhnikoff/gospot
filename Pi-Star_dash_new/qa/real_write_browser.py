@@ -780,7 +780,10 @@ def exercise_jitter(v, stand, origin, original):
           .then(r=>done(r.status))""", 'args': [group]})
 
     expected = lambda group: "".join(f"{group}_Host_{n}\t\t\tAvg RTT: 2{n}.00ms\tPeak Deviation: 0.{n}0ms\n" for n in (1, 2, 3))
+    # Let the authenticated admin page finish loading before the hash route
+    # (an immediate navigation occasionally raced the Basic auth and got 401).
     v.command("/url", {"url": origin + "/manage/#power"})
+    wait("admin page did not load", lambda: v.js("return !!document.querySelector('.container')"), timeout=15)
     v.command("/url", {"url": origin + "/manage/#expert-tool-jitter-brandmeister"})
     wait("BrandMeister results on the page", lambda: tail() == "Starting test, please wait...\n" + expected("BM"), timeout=15)
     equal("log replaced by the BM run", stand.read(log).decode(), expected("BM"))

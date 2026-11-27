@@ -114,6 +114,9 @@
 - В образе — **полный набор радиосервисов Pi-Star** (MMDVMHost, DMRGateway, YSF/P25/NXDN/DAPNET Gateway, ircDDBGateway, D-StarRepeater и др.), каждый отдельным `.deb` из закреплённых ревизий исходников.
 - Сборка образа **пока только локально** (Docker + pi-gen). В GitHub Actions образ не собирать; CI продолжает собирать только `.deb`.
 - Запрет «не собирать образ ОС для проверки дашборда» остаётся: образ — отдельный продукт, проверки дашборда выполняются на фикстурах.
+- Решения пользователя от 2026-11-27 по конвейеру (`image/README.md`): pi-gen закреплён коммитом (`IMAGE_PIGEN_REV_<ARCH>` в `pistar.conf`), стадии `stage0..stage2` и `stage-local`, которая ставит `pistar-radio` и `pistar-dashboard` через `apt-get install ./…deb` внутри образа. Хост `pi-star`, первый пользователь `pi-star` с паролем Pi-Star `raspberry`, `DISABLE_FIRST_BOOT_USER_RENAME=1`, SSH включён. Сборки — только вне репозитория (`IMAGE_BUILD_PARENT`, по умолчанию `/var/tmp`).
+- Секреты не должны совпадать между платами: созданные при сборке TLS-ключ, сертификат и пароль управления удаляются из образа и создаются заново при первой загрузке тем же помощником, что и в `postinst` пакета (`pistar-wizard-secrets`). Вход в веб-админку после прошивки — `pi-star` / `raspberry`, как в классическом Pi-Star; смена — Configuration > Remote Access Password. SSH host keys генерируются на каждой плате. Радиоюниты в образе выключены, их включает оператор.
+- Образ закрывается только зелёными проверками: `image/stage-local/01-firstboot/tests/test_firstboot.sh`, `image/verify-artifact.sh` (офлайн-проверка rootfs) и `image/qemu-boot.sh` (загрузка в QEMU `raspi2b`, проверка `:8789` и `:8788/manage/`); протоколы — `qa/evidence/image-*.txt`.
 
 ## Как проверять
 

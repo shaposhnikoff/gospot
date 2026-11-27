@@ -13,26 +13,10 @@ done
 # A locally edited conffile keeps its values but gains settings added by
 # newer packages; otherwise the services would refuse to start.
 @DASHBOARD_LIB_DIR@/gospot-conf-merge /etc/gospot/gospot.conf @DASHBOARD_LIB_DIR@/gospot.conf.default
-# Paths come from the package conffile (Pi-Star_dash_new/gospot.conf).
-. /etc/gospot/gospot.conf
-cfg=$WIZARD_CONFIG_DIR
-install -d -m755 "$cfg"
-umask 077
-if [ ! -e "$cfg/admin-password" ]; then openssl rand -hex 32 >"$cfg/admin-password"; fi
-if [ ! -e "$cfg/tls-key.pem" ] && [ ! -e "$cfg/tls-cert.pem" ]; then
-    host=$(hostname -s)
-    san="DNS:$host,DNS:$host.local"
-    for ip in $(hostname -I 2>/dev/null); do san="$san,IP:$ip"; done
-    openssl req -x509 -nodes -newkey rsa:3072 -days 825 -subj "/CN=$host" \
-        -addext "subjectAltName=$san" \
-        -keyout "$cfg/tls-key.pem" -out "$cfg/tls-cert.pem" 2>/dev/null
-    chmod 644 "$cfg/tls-cert.pem"
-fi
-test -s "$cfg/admin-password"
-test -s "$cfg/tls-key.pem"
-openssl x509 -in "$cfg/tls-cert.pem" -noout -checkend 0
+# The HTTPS management credentials: kept when present (the OS image removes
+# the build-time ones and creates them again on each board's first boot).
+@WIZARD_SECRETS_HELPER@
 /usr/sbin/visudo -cf /etc/sudoers.d/gospot
-umask 022
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
     for unit in gospot-panel gospot-wizard gospot-stage; do

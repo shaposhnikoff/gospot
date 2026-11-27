@@ -23,6 +23,9 @@ docker run --rm --platform linux/arm/v7 -v "$out:/out" \
     fetch /src/oled https://github.com/hallard/ArduiPi_OLED.git "$OLED_REV"
     make -s -C /src/wiringpi/wiringPi install >/dev/null
     make -s -C /src/wiringpi/devLib install >/dev/null
+    # The i2c_smbus_* helpers moved from linux/i2c-dev.h to i2c/smbus.h
+    # (libi2c, linked with -li2c); GCC 14 (Trixie) rejects implicit declarations.
+    sed -i "s|^#include <linux/i2c-dev.h>|&\n#include <i2c/smbus.h>|" /src/oled/bcm2835.c
     # Upstream flags omit -marm; Debian armhf compilers default to Thumb.
     make -s -C /src/oled CCFLAGS="-O2 -marm -march=armv6zk -mfpu=vfp -mfloat-abi=hard" >/dev/null
     ldconfig

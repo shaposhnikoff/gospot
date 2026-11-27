@@ -27,7 +27,8 @@ version=${DEB_VERSION:-$base}
 dpkg --validate-version "$version"
 sed "s/^Version: .*/Version: $version/" debian/control >"$p/DEBIAN/control"
 install -m755 debian/{prerm,postrm} "$p/DEBIAN/"
-sed "s|@DASHBOARD_LIB_DIR@|$lib|g" debian/postinst >"$p/DEBIAN/postinst"
+sed -e "s|@DASHBOARD_LIB_DIR@|$lib|g" -e "s|@WIZARD_SECRETS_HELPER@|$WIZARD_SECRETS_HELPER|g" debian/postinst >"$p/DEBIAN/postinst"
+if grep -q @ "$p/DEBIAN/postinst"; then echo "unresolved postinst placeholder" >&2; exit 1; fi
 chmod 755 "$p/DEBIAN/postinst"
 install -d -m755 "$p/etc/sudoers.d" "$p/etc/gospot"
 sed "s|@DASHBOARD_LIB_DIR@|$lib|g" debian/sudoers >"$p/etc/sudoers.d/gospot"
@@ -37,6 +38,8 @@ install -m644 gospot.conf "$p/etc/gospot/gospot.conf"
 install -d -m755 "$p$lib"
 install -m644 gospot.conf "$p$lib/gospot.conf.default"
 install -m755 debian/gospot-conf-merge "$p$lib/gospot-conf-merge"
+# Creates missing management credentials (postinst and the OS image first boot).
+install -D -m755 debian/gospot-wizard-secrets "$p$WIZARD_SECRETS_HELPER"
 # One-time takeover of a pistar-dashboard installation (run by postinst).
 install -m755 debian/gospot-migrate "$p$lib/gospot-migrate"
 install -m644 debian/migrate/pistar-dashboard.conf "$p$lib/pistar-dashboard.conf.default"

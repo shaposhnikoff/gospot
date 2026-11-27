@@ -10,8 +10,9 @@
 !/panel/
 !/radio/
 !/image/
-/image/*
-!/image/stage-mmdvm/
+# The OS image pipeline (build.sh, verify-artifact.sh, stage-local/) is tracked;
+# builds live under IMAGE_BUILD_PARENT (/var/tmp), outside the repository.
+# Only the package inputs in stage-mmdvm/00-install/files/ remain of the old pipeline.
 /image/stage-mmdvm/*
 !/image/stage-mmdvm/00-install/
 /image/stage-mmdvm/00-install/*

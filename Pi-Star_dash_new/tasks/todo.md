@@ -52,4 +52,6 @@ Decisions recorded in [AGENTS.md](../AGENTS.md#образ-ос). Existing `image
 5. Verify the image offline: mount rootfs, check packages, units enabled, no PHP, firstboot/TLS/password flow; then boot in QEMU and probe `:8789` and `:8788/manage/`.
 6. Optionally flash a spare card for a hardware smoke test — only with explicit user approval; never touch the working Raspberry Pi boards.
 
+Status 2026-11-27 (branch `mod-image`): armhf steps 4–5 implemented in `image/` (`build.sh`, `stage-local/`, `verify-artifact.sh`, `qemu-boot.sh`, see [image/README.md](../../image/README.md)); pi-gen pinned to `291c62c1` (tag `2026-10-06-raspios-trixie-armhf`). Radio services ship as one `pistar-radio` package for now, not one `.deb` per service (step 3 remains open). Evidence: `qa/evidence/image-*.txt`.
+
 Existing BrandMeister, helper, wizard and browser-test edits predate this slice and must be preserved. Do not infer full migration or pilot deployment from package checks.

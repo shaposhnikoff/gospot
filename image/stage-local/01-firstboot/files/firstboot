@@ -1,0 +1,25 @@
+#!/bin/sh
+# First boot of the image: no credential of the management service may
+# be shared between boards flashed from the same image. Remove whatever the
+# image carries, then create this board's TLS key and certificate with the
+# dashboard package's own helper (the code path of its postinst) and reset the
+# admin web password to IMAGE_DEFAULT_PASSWORD (Pi-Star: raspberry). The marker
+# is written last, so an interrupted first boot runs again on the next boot.
+set -eu
+# Paths come from the dashboard settings conffile (its installed path is
+# substituted when the image is built). Only unprivileged runs (tests) may
+# name another file.
+conf=@SETTINGS_FILE@
+if [ "$(id -u)" -ne 0 ]; then conf=${GOSPOT_SETTINGS:-$conf}; fi
+# shellcheck source=/dev/null
+. "$conf"
+done=$IMAGE_FIRSTBOOT_DONE
+if [ -e "$done" ]; then exit 0; fi
+cfg=$WIZARD_CONFIG_DIR
+rm -f "$cfg/admin-password" "$cfg/tls-key.pem" "$cfg/tls-cert.pem"
+printf '%s\n' "$IMAGE_DEFAULT_PASSWORD" | "$WIZARD_SECRETS_HELPER" --password-stdin
+sync
+install -d -m 0755 "$(dirname "$done")"
+: >"$done"
+sync
+echo "$(basename "$0"): created this board's management TLS key and certificate; admin password reset to the factory default"

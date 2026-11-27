@@ -1,0 +1,17 @@
+#!/bin/sh
+# seed-configs SEED_LIST ZIP: create each missing target from its member of the
+# Pi-Star default configuration zip (lines "member target"); existing files
+# are never changed. New files are 0644, like the Pi-Star image.
+set -eu
+seed=$1 zip=$2
+while read -r member target; do
+    [ -n "$member" ] && [ ! -e "$target" ] || continue
+    tmp=$(mktemp "$(dirname "$target")/.pistar-seed.XXXXXX")
+    if unzip -p "$zip" "$member" >"$tmp" && [ -s "$tmp" ]; then
+        chmod 0644 "$tmp"
+        mv "$tmp" "$target"
+        echo "pistar-radio: created $target from the Pi-Star defaults"
+    else
+        rm -f "$tmp"
+    fi
+done <"$seed"

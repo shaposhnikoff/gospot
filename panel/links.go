@@ -58,13 +58,13 @@ type linksReply struct {
 
 // hostsFile reads whitespace- or semicolon-separated host lists, skipping comments.
 func hostsFile(name, sep string) [][]string {
-	f, err := os.Open(filepath.Join(pistarHostsDir, name))
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
+	rows, _ := cachedHostFile("hosts"+sep, filepath.Join(pistarHostsDir, name), func(f io.Reader) [][]string { return parseHostRows(f, sep) })
+	return cloneRows(rows)
+}
+
+func parseHostRows(f io.Reader, sep string) [][]string {
 	var rows [][]string
-	s := bufio.NewScanner(io.LimitReader(f, 8<<20))
+	s := bufio.NewScanner(f)
 	for s.Scan() {
 		line := s.Text()
 		var fields []string

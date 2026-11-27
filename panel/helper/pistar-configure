@@ -18,9 +18,22 @@ import os
 from pathlib import Path
 import re
 import stat
-import subprocess
 import sys
-import tempfile
+
+
+class _Lazy:
+    """Import a module on first use: read, the common call, needs neither."""
+
+    def __init__(self, name):
+        self._name = name
+
+    def __getattr__(self, attr):
+        import importlib
+        return getattr(importlib.import_module(self._name), attr)
+
+
+subprocess = _Lazy("subprocess")
+tempfile = _Lazy("tempfile")
 
 SETTINGS = "/etc/pistar-dashboard/pistar.conf"
 
@@ -481,12 +494,13 @@ class Ini:
 
     def layout(self):
         """Sections and keys in file order: [[section, [[key, value], ...]], ...]."""
-        out, seen = [], {}
+        out, seen, keys = [], {}, {}
         for i, section, key in self._scan():
             if section not in seen:
-                seen[section] = []
+                seen[section], keys[section] = [], set()
                 out.append([section, seen[section]])
-            if key is not None and all(k != key for k, _ in seen[section]):
+            if key is not None and key not in keys[section]:
+                keys[section].add(key)
                 seen[section].append([key, self.lines[i].partition("=")[2].strip()])
         return out
 

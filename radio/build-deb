@@ -102,8 +102,21 @@ PISTAR_LOG_DIR=$PISTAR_LOG_DIR
 PISTAR_HOSTS_DIR=$PISTAR_HOSTS_DIR
 PISTAR_RELEASE_FILE=$PISTAR_RELEASE_FILE
 RADIO_USER=$RADIO_USER
+RADIO_SHARE_DIR=$RADIO_SHARE_DIR
 EOF
 chmod 644 "$p$RADIO_SHARE_DIR/paths"
+
+# Default Pi-Star configurations (config_clean.zip) and where each one lives;
+# postinst creates only the files that are missing.
+: >"$p$RADIO_SHARE_DIR/config-seed"
+for member in $(unzip -Z1 "$bin_src/config_clean.zip"); do
+  key=CONF_$(printf '%s' "$member" | tr 'a-z-' 'A-Z_')
+  target=${!key:-}
+  if [[ -z $target ]]; then echo "pistar.conf has no $key for config_clean.zip member $member" >&2; exit 1; fi
+  printf '%s %s\n' "$member" "$target" >>"$p$RADIO_SHARE_DIR/config-seed"
+done
+chmod 644 "$p$RADIO_SHARE_DIR/config-seed"
+install -m755 seed-configs "$p$RADIO_SHARE_DIR/seed-configs"
 
 if find "$p" -name '*.php' | grep -q .; then echo "PHP in package" >&2; exit 1; fi
 (cd "$p" && find usr lib -type f -print0 | LC_ALL=C sort -z | xargs -0 md5sum >DEBIAN/md5sums)

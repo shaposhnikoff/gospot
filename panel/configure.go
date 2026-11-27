@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -46,11 +48,66 @@ type configHelperFunc func(ctx context.Context, verb string, input []byte) ([]by
 
 var errConfigStale = errors.New("stale")
 
+// The helper's read is cached while every file it reports keeps its stat
+// signature; any other helper command drops the cache. A stale entry cannot
+// cause a wrong write: apply and the editors check the revision themselves.
+var configReadCache struct {
+	sync.Mutex
+	sig  string
+	body []byte
+}
+
+// configWatch lists the files behind "read" (CONF_*, MARKER_*, FLAG_*,
+// HOSTNAME_FILE from pistar.conf) plus the system time zone link.
+var configWatch []string
+
+var configureSudo = "/usr/bin/sudo" // replaced in tests
+
+func configSignature() string {
+	var b strings.Builder
+	for _, p := range configWatch {
+		st, err := os.Lstat(p)
+		if err != nil {
+			fmt.Fprintf(&b, "%s:-\n", p)
+			continue
+		}
+		link, _ := os.Readlink(p)
+		fmt.Fprintf(&b, "%s:%d:%d:%o:%s\n", p, st.ModTime().UnixNano(), st.Size(), st.Mode(), link)
+	}
+	return b.String()
+}
+
 func runConfigureHelper(ctx context.Context, verb string, input []byte) ([]byte, error) {
+	if verb != "read" {
+		configReadCache.Lock()
+		configReadCache.sig, configReadCache.body = "", nil
+		configReadCache.Unlock()
+		// Writes must finish even if the browser goes away mid-restart.
+		ctx = context.WithoutCancel(ctx)
+		return execConfigureHelper(ctx, verb, input)
+	}
+	sig := configSignature()
+	configReadCache.Lock()
+	if configReadCache.body != nil && configReadCache.sig == sig {
+		body := configReadCache.body
+		configReadCache.Unlock()
+		return body, nil
+	}
+	configReadCache.Unlock()
+	out, err := execConfigureHelper(ctx, verb, input)
+	if err == nil {
+		configReadCache.Lock()
+		configReadCache.sig, configReadCache.body = sig, out
+		configReadCache.Unlock()
+	}
+	return out, err
+}
+
+func execConfigureHelper(ctx context.Context, verb string, input []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	// verb is an internal constant such as "read" or "full-write cron".
-	cmd := exec.CommandContext(ctx, "/usr/bin/sudo", append([]string{"-n", configureHelper}, strings.Fields(verb)...)...)
+	cmd := exec.CommandContext(ctx, configureSudo, append([]string{"-n", configureHelper}, strings.Fields(verb)...)...)
 	cmd.Stdin = bytes.NewReader(input)
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -98,7 +155,22 @@ func readConfigState(ctx context.Context, run configHelperFunc) (configState, er
 	return s, nil
 }
 
-func setConfigHelper(lib string) { configureHelper = filepath.Join(lib, "pistar-configure") }
+func setConfigHelper(lib string, s settings) {
+	configureHelper = filepath.Join(lib, "pistar-configure")
+	var watch []string
+	for k := range s {
+		if strings.HasPrefix(k, "CONF_") || strings.HasPrefix(k, "MARKER_") || strings.HasPrefix(k, "FLAG_") || k == "HOSTNAME_FILE" {
+			if p, err := s.abs(k); err == nil {
+				watch = append(watch, p)
+			}
+		}
+	}
+	sort.Strings(watch)
+	configWatch = append(watch, "/etc/localtime") // the OS time zone link (timedatectl)
+	configReadCache.Lock()
+	configReadCache.sig, configReadCache.body = "", nil
+	configReadCache.Unlock()
+}
 
 // Backup/Restore (admin/config_backup.php) through the helper's backup and
 // restore commands; archives are classic Pi-Star compatible zip files.

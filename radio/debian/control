@@ -1,5 +1,5 @@
 Package: pistar-radio
-Version: 0.1.0-1
+Version: 0.1.0-2
 Architecture: armhf
 Section: hamradio
 Priority: optional

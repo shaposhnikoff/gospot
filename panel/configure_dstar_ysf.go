@@ -179,17 +179,15 @@ func dsyLetters() []linkOption {
 
 // dsyLines reads a host list line by line (the classic fgets loops).
 func dsyLines(name string) []string {
-	f, err := os.Open(filepath.Join(pistarHostsDir, name))
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	var out []string
-	s := bufio.NewScanner(io.LimitReader(f, 8<<20))
-	for s.Scan() {
-		out = append(out, s.Text())
-	}
-	return out
+	lines, _ := cachedHostFile("lines", filepath.Join(pistarHostsDir, name), func(f io.Reader) []string {
+		var out []string
+		s := bufio.NewScanner(f)
+		for s.Scan() {
+			out = append(out, s.Text())
+		}
+		return out
+	})
+	return cloneRows(lines)
 }
 
 func dsyHeader() cfgRow {

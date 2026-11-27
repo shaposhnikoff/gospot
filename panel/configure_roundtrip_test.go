@@ -141,3 +141,27 @@ func TestConfigureEditKeepsOnlyItsEffects(t *testing.T) {
 		t.Fatalf("password: %v %+v", err, req)
 	}
 }
+
+// Without /etc/ircddbgateway the Node Callsign shows MMDVMHost's callsign, and
+// a new callsign is written to MMDVMHost and shown again after saving.
+func TestConfigureCallsignWithoutIrcDDBGateway(t *testing.T) {
+	all := cfgSections
+	ctlEnv(t)
+	cfgSections = all
+	host, _ := os.ReadFile(filepath.Join("..", "image", "stage-mmdvm", "00-install", "files", "MMDVM-Host.ini"))
+	text := strings.Replace(string(host), "Callsign=NOCALL\n", "Callsign=UT3UDX\n", 1)
+	st := ctlState(map[string]string{"mmdvmhost": text}, map[string]*string{"mmdvmhost": ctlMarker("zumspotgpio"), "dstarrepeater": nil})
+	c := &cfgContext{St: st}
+	form := ctlForm(c)
+	if form["confCallsign"] != "UT3UDX" {
+		t.Fatalf("shown %q", form["confCallsign"])
+	}
+	form["confCallsign"] = "M0XYZ"
+	req, err := planCfgApply(c, "r1", form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := req.Changes["mmdvmhost"]["General"]["Callsign"]; v == nil || *v != "M0XYZ" {
+		t.Fatalf("%+v", req.Changes)
+	}
+}

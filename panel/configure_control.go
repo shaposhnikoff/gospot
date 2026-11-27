@@ -733,7 +733,7 @@ func buildCtlGeneral(c *cfgContext) *cfgSection {
 		}},
 		{ID: "confCallsign", Cells: []cfgCell{
 			ctlLabel("Node Callsign:", "Gateway Callsign", `This is your licenced callsign for use on this gateway, do not append the "G"`),
-			ctlSpan(td(ctlText("confCallsign", c.get(ctlIRC, "", "gatewayCallsign"), "13", "7"))),
+			ctlSpan(td(ctlText("confCallsign", ctlStoredCallsign(c), "13", "7"))),
 		}},
 	}
 	if ctlDMRIdVisible(c) {
@@ -1175,6 +1175,17 @@ func ctlApplyLocation(w ctlWriter, f cfgForm) error {
 	return nil
 }
 
+// ctlStoredCallsign is the Node Callsign the page shows: ircDDBGateway's
+// gatewayCallsign as in the reference, or MMDVMHost's [General] Callsign
+// when /etc/ircddbgateway is missing (otherwise a saved callsign could never
+// be shown again and looked unsaved).
+func ctlStoredCallsign(c *cfgContext) string {
+	if c.has(ctlIRC) {
+		return c.get(ctlIRC, "", "gatewayCallsign")
+	}
+	return c.get(ctlMM, "General", "Callsign")
+}
+
 // ctlCallsign is the callsign used by the URL and RPT1/RPT2 rules: the
 // posted one, or the stored one when the field is blank.
 // Deviation: the reference uses the raw POST (escapeshellcmd only), so a
@@ -1183,7 +1194,7 @@ func ctlCallsign(w ctlWriter, f cfgForm) string {
 	if v := ctlPost(f, "confCallsign"); ctlCallRe.MatchString(v) {
 		return strings.ToUpper(v)
 	}
-	return strings.ToUpper(w.c.get(ctlIRC, "", "gatewayCallsign"))
+	return strings.ToUpper(ctlStoredCallsign(w.c))
 }
 
 // selectedAPRSHost (l.816-872).

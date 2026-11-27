@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"os"
+	"io"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -33,11 +33,11 @@ var dmrHostSplit = regexp.MustCompile(`\s+`)
 // columns read as "". File order is kept. hostsFile() is not used because it
 // trims leading whitespace and drops short lines, which the page does not.
 func dmrHostList() []dmrHost {
-	f, err := os.Open(filepath.Join(pistarHostsDir, "DMR_Hosts.txt"))
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
+	rows, _ := cachedHostFile("dmr-hosts", filepath.Join(pistarHostsDir, "DMR_Hosts.txt"), parseDMRHosts)
+	return cloneRows(rows)
+}
+
+func parseDMRHosts(f io.Reader) []dmrHost {
 	var out []dmrHost
 	s := bufio.NewScanner(f)
 	s.Buffer(make([]byte, 64<<10), 1<<20)

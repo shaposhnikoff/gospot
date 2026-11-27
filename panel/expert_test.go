@@ -61,14 +61,14 @@ func TestQuickEditApplyRules(t *testing.T) {
 		return "<unchanged>"
 	}
 	if val("mmdvmhost", "General", "Callsign") != "<unchanged>" || val("mmdvmhost", "General", "Display") != "none" ||
-		val("mmdvmhost", "DMR Network", "Password") != `"newpw"` || val("mmdvmhost", "DMR Network", "Options") != " " ||
+		val("mmdvmhost", "DMR Network", "Password") != `"newpw"` || val("mmdvmhost", "DMR Network", "Options") != "<unchanged>" ||
 		strings.Join(got.Restart, ",") != "mmdvmhost.service" || got.Revision != "r1" {
 		t.Fatalf("%+v", got)
 	}
 	got = configChange{}
 	w = httptest.NewRecorder()
 	serveExpert(w, maintenanceRequest("POST", "/manage/api/expert/ircddbgateway", `{"revision":"r1","values":{"ircddbgateway":{"gatewayCallsign":"M0XYZ","ircddbPassword":""}}}`, true), fakeConfigure(t, &got, false))
-	if w.Code != 200 || val("ircddbgateway", "", "gatewayCallsign") != "M0XYZ" || val("ircddbgateway", "", "ircddbPassword") != " " || got.Restart[0] != "ircddbgateway.service" {
+	if w.Code != 200 || val("ircddbgateway", "", "gatewayCallsign") != "M0XYZ" || val("ircddbgateway", "", "ircddbPassword") != "<unchanged>" || got.Restart[0] != "ircddbgateway.service" {
 		t.Fatalf("flat: %d %+v", w.Code, got)
 	}
 	w = httptest.NewRecorder()
@@ -117,5 +117,25 @@ func TestFullEdit(t *testing.T) {
 	serveExpert(w, maintenanceRequest("GET", "/manage/api/expert/full/shadow", "", false), run)
 	if w.Code != 404 || strings.Join(verbs, "|") != "full-read cron|full-write cron|full-write rssidat" {
 		t.Fatalf("%d %v", w.Code, verbs)
+	}
+}
+
+func TestQuickEditUnchangedFormWritesNothing(t *testing.T) {
+	var got configChange
+	body := `{"revision":"r1","values":{"General":{"Callsign":"M0ABC","Display":"None"},"DMR Network":{"Password":"pw","Options":""}}}`
+	w := httptest.NewRecorder()
+	serveExpert(w, maintenanceRequest("POST", "/manage/api/expert/mmdvmhost", body, true), fakeConfigure(t, &got, false))
+	if w.Code != 200 || got.Changes != nil || got.Restart != nil {
+		t.Fatalf("an unchanged form must not write or restart: %d %+v", w.Code, got)
+	}
+}
+
+func TestQuickEditClearedFlatValue(t *testing.T) {
+	var got configChange
+	w := httptest.NewRecorder()
+	serveExpert(w, maintenanceRequest("POST", "/manage/api/expert/ircddbgateway", `{"revision":"r1","values":{"ircddbgateway":{"gatewayCallsign":"","ircddbPassword":""}}}`, true), fakeConfigure(t, &got, false))
+	v := got.Changes["ircddbgateway"][""]["gatewayCallsign"]
+	if w.Code != 200 || v == nil || *v != " " || len(got.Changes["ircddbgateway"][""]) != 1 {
+		t.Fatalf("%d %+v", w.Code, got)
 	}
 }

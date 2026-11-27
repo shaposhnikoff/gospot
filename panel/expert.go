@@ -180,7 +180,9 @@ func serveExpert(w http.ResponseWriter, r *http.Request, run configHelperFunc) {
 			}
 			for _, kv := range s.Keys {
 				value, sent := form[kv[0]]
-				if !sent {
+				// Untouched fields never change the file: the classic write
+				// rules apply only to values the operator edited.
+				if !sent || value == unquote(kv[1]) {
 					continue
 				}
 				v := quickValue(name, section, kv[0], value)

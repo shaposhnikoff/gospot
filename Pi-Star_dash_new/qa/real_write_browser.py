@@ -272,6 +272,97 @@ def exercise_expert(v, stand, origin, original):
           "System Cron refuses a blocked pattern without writing", flush=True)
 
 
+def exercise_configure(v, stand, origin, original):
+    """Configuration page (admin/configure.php) through Chromium against the real helper."""
+    host, gw = original
+    marker = "/etc/dstar-radio.mmdvmhost"
+    stand.exec("sh", "-c", f"printf '[Modem]\\nHardware=zumspotgpio\\n' > {marker}; mkdir -p /etc/pistar-wizard; "
+               "printf '#!/bin/sh\\necho \"$*\" >> /run/pistar-qa/systemd-run\\n' > /usr/bin/systemd-run; chmod 755 /usr/bin/systemd-run")
+    marker_text = stand.read(marker)
+
+    def load():
+        v.command("/url", {"url": origin + "/manage/#expert"})
+        v.command("/url", {"url": origin + "/manage/#configuration"})
+        wait("configuration did not load", lambda: v.js("return document.querySelectorAll('.section h2').length > 3"))
+
+    def apply_first():
+        v.js("document.querySelector('.section input[value=\"Apply Changes\"]').click()")
+
+    def message(fragment):
+        wait("expected: " + fragment, lambda: fragment in v.js("return document.body.innerText"))
+
+    def post(body):
+        return v.command('/execute/async', {'script': """const [body,done]=arguments;
+          fetch('/manage/api/configure').then(r=>r.json()).then(s=>fetch('/manage/api/configure',{method:'POST',
+          headers:{'Content-Type':'application/json','X-PiStar-CSRF':s.csrf},body:JSON.stringify({revision:s.revision,form:body})}))
+          .then(async r=>done([r.status, await r.text()]))""", 'args': [body]})
+
+    load()
+    titles = v.js("return [...document.querySelectorAll('.section h2')].map(h => h.textContent)")
+    for t in ("Gateway Hardware Information", "Control Software", "MMDVMHost Configuration", "General Configuration",
+              "DMR Configuration", "Firewall Configuration", "Remote Access Password"):
+        assert t in titles, (t, titles)
+    history = stand.restarts()
+    # 1. an untouched form writes nothing and restarts nothing
+    print("configure step: 1. an untouched form writes nothing and restarts nothing", flush=True)
+    apply_first()
+    message("Your configuration has been applied.")
+    same_pair("untouched Configuration", stand.pair(), original)
+    equal("untouched Configuration restarts", stand.restarts(), history)
+    equal("untouched Configuration marker", stand.read(marker), marker_text)
+    # 2. one field: DMR Colour Code 1 -> 7 changes exactly that line and restarts the radio services
+    print("configure step: 2. one field: DMR Colour Code 1 -> 7 changes exactly that line and restarts the radio services", flush=True)
+    load()
+    v.js("const s=document.querySelector('select[aria-label=\"dmrColorCode\"]'); s.value='7'; s.dispatchEvent(new Event('change',{bubbles:true}))")
+    apply_first()
+    message("Your configuration has been applied.")
+    host7 = host.replace(b"ColorCode=1\n", b"ColorCode=7\n")
+    assert host7 != host
+    same_pair("Configuration Colour Code 1 -> 7", stand.pair(), (host7, gw))
+    history += ["dmrgateway.service ok", "mmdvmhost.service ok"]
+    equal("Configuration restarts", stand.restarts(), history)
+    load()
+    equal("Colour Code reread", v.js("return document.querySelector('select[aria-label=\"dmrColorCode\"]').value"), "7")
+    # 3. invalid input is refused (422) without writes
+    print("configure step: 3. invalid input is refused (422) without writes", flush=True)
+    status, body = post({"dmrColorCode": "99"})
+    equal("invalid Colour Code status", status, 422)
+    same_pair("invalid Colour Code", stand.pair(), (host7, gw))
+    equal("invalid Colour Code restarts", stand.restarts(), history)
+    # 4. a stale page is refused (409) and keeps the newer file
+    print("configure step: 4. a stale page is refused (409) and keeps the newer file", flush=True)
+    load()
+    stand.exec("sed", "-i", "s/^Beacons=0$/Beacons=1/", "/etc/MMDVM-Host.ini")
+    hostb = host7.replace(b"Beacons=0\n", b"Beacons=1\n")
+    v.js("const s=document.querySelector('select[aria-label=\"dmrColorCode\"]'); s.value='3'; s.dispatchEvent(new Event('change',{bubbles:true}))")
+    apply_first()
+    message("changed since this page was loaded")
+    same_pair("stale Configuration", stand.pair(), (hostb, gw))
+    equal("stale Configuration restarts", stand.restarts(), history)
+    # 5. Remote Access Password: its own form, written 0600, no radio restart, mismatch refused
+    print("configure step: 5. Remote Access Password: its own form, written 0600, no radio restart, mismatch refused", flush=True)
+    load()
+    v.type_into('input[aria-label="Password"]', "qa-Secret-1")
+    v.type_into('input[aria-label="Confirm Password"]', "qa-Secret-2")
+    v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Set Password').click()")
+    message("entries do not match")
+    equal("mismatched password not written", stand.exists("/etc/pistar-wizard/admin-password"), False)
+    v.type_into('input[aria-label="Confirm Password"]', "qa-Secret-1")
+    v.js("[...document.querySelectorAll('input[type=button]')].find(b => b.value === 'Set Password').click()")
+    message("Your configuration has been applied.")
+    equal("password file", stand.read("/etc/pistar-wizard/admin-password"), b"qa-Secret-1\n")
+    equal("password file mode", stand.exec("stat", "-c", "%a", "/etc/pistar-wizard/admin-password").stdout.decode().strip(), "600")
+    same_pair("password form leaves radio files", stand.pair(), (hostb, gw))
+    equal("password form restarts", stand.restarts(), history)
+    equal("HTTPS service restart scheduled", stand.read("/run/pistar-qa/systemd-run"),
+          b"--quiet --collect --on-active=2 /usr/bin/systemctl restart pistar-wizard.service\n")
+    stand.exec("rm", "-f", marker, "/etc/pistar-wizard/admin-password", "/usr/bin/systemd-run", "/run/pistar-qa/systemd-run")
+    print("PASS Chromium Configuration: sections " + ", ".join(titles) + "; untouched Apply writes and restarts nothing; "
+          "Colour Code 1 -> 7 changes exactly that line and restarts DMRGateway then MMDVMHost, reread shows 7; "
+          "invalid value 422 and stale page 409 write nothing; Remote Access Password mismatch refused, "
+          "then written 0600 without radio restarts", flush=True)
+
+
 def exercise_backup(v, stand, origin, folder, original):
     """Classic Backup/Restore through Chromium against the real helper."""
     import base64
@@ -330,6 +421,7 @@ def main():
     parser.add_argument("--services", action="store_true")
     parser.add_argument("--expert", action="store_true")
     parser.add_argument("--backup", action="store_true")
+    parser.add_argument("--configure", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -352,7 +444,7 @@ def main():
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
             # /manage/ is the classic admin page; the station settings, DMR
             # services and backup pages live under their own sections.
-            if not (args.expert or args.backup):
+            if not (args.expert or args.backup or args.configure):
                 command("/url", {"url": args.origin + "/manage/#settings"})
                 wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
             try:
@@ -371,6 +463,8 @@ def run_scenario(args, v, stand, folder, original, changed):
         exercise_expert(v, stand, args.origin, original)
     elif args.backup:
         exercise_backup(v, stand, args.origin, Path(folder), original)
+    elif args.configure:
+        exercise_configure(v, stand, args.origin, original)
     elif args.services:
         exercise_services(v, stand, original)
     else:

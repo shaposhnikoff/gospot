@@ -131,6 +131,9 @@ func applySettings(s settings) error {
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid settings: %s", strings.Join(errs, "; "))
 	}
+	if err := setCfgSystemPaths(s); err != nil {
+		return err
+	}
 	for f, p := range files {
 		f.setPath(p)
 	}

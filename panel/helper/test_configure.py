@@ -12,7 +12,7 @@ conf = (ROOT / "Pi-Star_dash_new" / "pistar.conf").read_text()
 lines = []
 for line in conf.splitlines():
     key = line.partition("=")[0]
-    if key.startswith("CONF_") or key in ("DASHBOARD_STATE_DIR", "MARKER_MMDVMHOST", "MARKER_DSTARREPEATER", "HOSTNAME_FILE",
+    if key.startswith(("CONF_", "FLAG_")) or key in ("DASHBOARD_STATE_DIR", "MARKER_MMDVMHOST", "MARKER_DSTARREPEATER", "HOSTNAME_FILE",
                                           "WPA_SUPPLICANT_CONF", "CRONTAB_FILE", "PISTAR_HOSTS_DIR",
                                           "BM_API_KEY_FILE", "DAPNET_API_KEY_FILE", "TGIF_API_KEY_FILE",
                                           "HOSTS_FILE", "HOSTAPD_CONF", "HOSTAP_OFF_FLAG", "PISTAR_UPNP_SCRIPT",
@@ -139,6 +139,32 @@ class SystemOpsTest(unittest.TestCase):
         self.assertFalse(helper.HOSTAP_OFF.exists())
         self.assertTrue(helper.CRONTAB.read_text().startswith("*/5"))
         self.assertNotIn("#\t$DAEMON", helper.UPNP.read_text())
+        helper.MARKERS["mmdvmhost"].unlink()
+
+    def test_modem_ini_flags_and_every_matching_line(self):
+        helper.MARKERS["mmdvmhost"].write_text("[Modem]\nHardware=zum\n[BrandMeister]\nPassword=\"old\"\n[TGIF]\nPassword=\"t\"\n")
+        helper.MARKERS["dstarrepeater"].unlink(missing_ok=True)
+        self.apply({"modem_ini": {"BrandMeister": {"Password": '"n3w"'}, "TGIF": {"Password": None}}})
+        self.assertEqual(helper.MARKERS["mmdvmhost"].read_text(), '[Modem]\nHardware=zum\n[BrandMeister]\nPassword="n3w"\n[TGIF]\n')
+        for f in helper.FLAGS.values():
+            f.unlink(missing_ok=True)
+        helper.FLAGS["hostfiles-ysfupper"].write_text("")
+        self.apply({"timeserver_announce": "off", "hostfiles_nodextra": "on", "hostfiles_ysfupper": "off"})
+        self.assertTrue(helper.FLAGS["timeserver-disable"].exists())
+        self.assertTrue(helper.FLAGS["hostfiles-nodextra"].exists())
+        self.assertFalse(helper.FLAGS["hostfiles-ysfupper"].exists())
+        self.assertEqual(helper.read()["system"]["markers"]["timeserver-disable"], "")
+        self.assertIsNone(helper.read()["system"]["markers"]["hostfiles-ysfupper"])
+        self.apply({"timeserver_announce": "on", "hostfiles_nodextra": "off"})
+        self.assertFalse(helper.FLAGS["timeserver-disable"].exists() or helper.FLAGS["hostfiles-nodextra"].exists())
+        # the classic sed toggles every matching line, not only the first
+        helper.UPNP.write_text("\t$DAEMON -a $ipVar 22 22 TCP\n\t$DAEMON -a $ipVar 22 22 UDP\n")
+        self.apply({"upnp_ports": {"22": "off"}})
+        self.assertEqual(helper.UPNP.read_text(), "#\t$DAEMON -a $ipVar 22 22 TCP\n#\t$DAEMON -a $ipVar 22 22 UDP\n")
+        for system in ({"modem_ini": {"Modem": {"Hardware": "x"}}}, {"modem_ini": {"TGIF": {"Password": "a\nb"}}},
+                       {"timeserver_announce": "maybe"}, {"hostfiles_ysfupper": "on"}):
+            with self.assertRaises(helper.Error, msg=str(system)):
+                self.apply(system)
         helper.MARKERS["mmdvmhost"].unlink()
 
     def test_rejects_unknown_or_bad_ops(self):

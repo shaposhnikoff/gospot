@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -84,7 +85,6 @@ func (f cfgForm) has(name string) bool { _, ok := f[name]; return ok }
 type cfgPlan struct {
 	ctx    *cfgContext
 	change configChange
-	units  map[string]bool
 }
 
 func (p *cfgPlan) set(file, section, key, value string) {
@@ -123,13 +123,19 @@ func (p *cfgPlan) system(op string, value any) {
 	p.change.System[op] = value
 }
 
-func (p *cfgPlan) restart(units ...string) {
-	if p.units == nil {
-		p.units = map[string]bool{}
+// modemSet stages a change of the active controller marker's INI (the
+// [BrandMeister]/[TGIF] passwords) as system op "modem_ini"; nil removes the
+// key. Sections merge their changes into one operation.
+func (p *cfgPlan) modemSet(section, key string, value *string) {
+	ops, _ := p.change.System["modem_ini"].(map[string]map[string]*string)
+	if ops == nil {
+		ops = map[string]map[string]*string{}
 	}
-	for _, u := range units {
-		p.units[u] = true
+	if ops[section] == nil {
+		ops[section] = map[string]*string{}
 	}
+	ops[section][key] = value
+	p.system("modem_ini", ops)
 }
 
 // cfgError is shown to the operator; the whole Apply is refused.
@@ -164,6 +170,10 @@ var cfgRadioUnits = []string{
 	"mmdvmhost.service", "dstarrepeater.service",
 }
 
+// System operations that touch no radio configuration: the classic password
+// and Auto AP PSK forms restart nothing.
+var cfgQuietOps = map[string]bool{"password": true, "autoap_psk": true}
+
 type cfgPage struct {
 	CSRF     string       `json:"csrf"`
 	Revision string       `json:"revision"`
@@ -180,8 +190,8 @@ func buildCfgPage(c *cfgContext) []cfgSection {
 	return out
 }
 
-// planCfgApply runs every visible section's applier and returns the helper request.
-func planCfgApply(c *cfgContext, revision string, form cfgForm) (configChange, error) {
+// runCfgAppliers runs every visible section's applier on form.
+func runCfgAppliers(c *cfgContext, revision string, form cfgForm) (*cfgPlan, error) {
 	p := &cfgPlan{ctx: c}
 	p.change.Revision = revision
 	for _, s := range cfgSections {
@@ -189,11 +199,97 @@ func planCfgApply(c *cfgContext, revision string, form cfgForm) (configChange, e
 			continue
 		}
 		if err := s.Apply(c, form, p); err != nil {
-			return configChange{}, err
+			return nil, err
 		}
 	}
-	// Drop no-op changes so an untouched form writes nothing.
+	return p, nil
+}
+
+// cfgDisplayed is the value every named control shows on the page (the first
+// control wins, as in Configure.svelte).
+func cfgDisplayed(c *cfgContext) map[string]string {
+	out := map[string]string{}
+	for _, s := range buildCfgPage(c) {
+		for _, row := range s.Rows {
+			for _, cell := range row.Cells {
+				for _, ctl := range cell.Controls {
+					switch ctl.Kind {
+					case "static", "button", "link":
+						continue
+					}
+					if _, seen := out[ctl.Name]; ctl.Name != "" && !seen {
+						out[ctl.Name] = ctl.Value
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// planCfgRaw is what the appliers stage for form, minus anything already
+// stored, with the restart decision; section tests exercise it directly.
+func planCfgRaw(c *cfgContext, revision string, form cfgForm) (configChange, error) {
+	p, err := runCfgAppliers(c, revision, form)
+	if err != nil {
+		return configChange{}, err
+	}
+	dropStored(c, &p.change)
+	finishCfgPlan(&p.change)
+	return p.change, nil
+}
+
+// planCfgApply returns the helper request for a posted form. Only what the
+// operator's edits cause is kept: a change the same form would also plan with
+// every field left as displayed (classic defaults and normalisation the
+// appliers stage on any save) is dropped, as is anything already stored, so
+// an untouched form writes and restarts nothing.
+func planCfgApply(c *cfgContext, revision string, form cfgForm) (configChange, error) {
+	p, err := runCfgAppliers(c, revision, form)
+	if err != nil {
+		return configChange{}, err
+	}
+	shown := cfgDisplayed(c)
+	baseForm := cfgForm{}
+	for k, v := range form {
+		if d, ok := shown[k]; ok {
+			v = d
+		}
+		baseForm[k] = v
+	}
+	base, err := runCfgAppliers(c, revision, baseForm)
+	if err != nil {
+		base = &cfgPlan{ctx: c}
+	}
+	dropStored(c, &p.change)
+	same := func(a, b *string) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
 	for file, sections := range p.change.Changes {
+		for section, keys := range sections {
+			for key, v := range keys {
+				if bv, staged := base.change.Changes[file][section][key]; staged && same(v, bv) {
+					delete(keys, key)
+				}
+			}
+			if len(keys) == 0 {
+				delete(sections, section)
+			}
+		}
+		if len(sections) == 0 {
+			delete(p.change.Changes, file)
+		}
+	}
+	for op, v := range p.change.System {
+		if bv, staged := base.change.System[op]; staged && reflect.DeepEqual(v, bv) {
+			delete(p.change.System, op)
+		}
+	}
+	finishCfgPlan(&p.change)
+	return p.change, nil
+}
+
+// dropStored removes changes that match the files already.
+func dropStored(c *cfgContext, ch *configChange) {
+	for file, sections := range ch.Changes {
 		for section, keys := range sections {
 			for key, v := range keys {
 				stored, present := c.St.Files[file][section][key]
@@ -206,13 +302,28 @@ func planCfgApply(c *cfgContext, revision string, form cfgForm) (configChange, e
 			}
 		}
 		if len(sections) == 0 {
-			delete(p.change.Changes, file)
+			delete(ch.Changes, file)
 		}
 	}
-	if len(p.change.Changes) > 0 || len(p.change.System) > 0 || len(p.units) > 0 {
-		p.change.Restart = append([]string{}, cfgRadioUnits...)
+}
+
+// finishCfgPlan normalises empty maps and decides the restart: any file
+// change or a system operation other than the quiet ones restarts the radio.
+func finishCfgPlan(ch *configChange) {
+	if len(ch.Changes) == 0 {
+		ch.Changes = nil
 	}
-	return p.change, nil
+	if len(ch.System) == 0 {
+		ch.System = nil
+	}
+	restart := len(ch.Changes) > 0
+	for op := range ch.System {
+		restart = restart || !cfgQuietOps[op]
+	}
+	ch.Restart = nil
+	if restart {
+		ch.Restart = append([]string{}, cfgRadioUnits...)
+	}
 }
 
 func serveConfigure(w http.ResponseWriter, r *http.Request, run configHelperFunc) {

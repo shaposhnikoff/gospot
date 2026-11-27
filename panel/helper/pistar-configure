@@ -64,10 +64,14 @@ FILES = {name: setting_path(_SETTINGS, "CONF_" + name.upper().replace("-", "_"))
     "mmdvmhost", "dmrgateway", "ysfgateway", "p25gateway", "nxdngateway", "m17gateway",
     "dapnetgateway", "dgidgateway", "aprsgateway", "ircddbgateway", "dstarrepeater",
     "timeserver", "starnetserver", "ysf2dmr", "ysf2nxdn", "ysf2p25", "dmr2ysf", "dmr2nxdn",
-    "pistar-remote")}
+    "pistar-remote", "mobilegps")}
 STATE = setting_path(_SETTINGS, "DASHBOARD_STATE_DIR")
 MARKERS = {"mmdvmhost": setting_path(_SETTINGS, "MARKER_MMDVMHOST"),
            "dstarrepeater": setting_path(_SETTINGS, "MARKER_DSTARREPEATER")}
+# Flag files reported with the markers and toggled by system operations.
+FLAGS = {"timeserver-disable": setting_path(_SETTINGS, "FLAG_TIMESERVER_DISABLE"),
+         "hostfiles-nodextra": setting_path(_SETTINGS, "FLAG_HOSTFILES_NODEXTRA"),
+         "hostfiles-ysfupper": setting_path(_SETTINGS, "FLAG_HOSTFILES_YSFUPPER")}
 HOSTNAME = setting_path(_SETTINGS, "HOSTNAME_FILE")
 HOSTS = setting_path(_SETTINGS, "HOSTS_FILE")
 HOSTAPD = setting_path(_SETTINGS, "HOSTAPD_CONF")
@@ -76,6 +80,7 @@ UPNP = setting_path(_SETTINGS, "PISTAR_UPNP_SCRIPT")
 CRONTAB = setting_path(_SETTINGS, "CRONTAB_FILE")
 WIZARD_DIR = setting_path(_SETTINGS, "WIZARD_CONFIG_DIR")
 LINUX_USER = _SETTINGS.get("PISTAR_LINUX_USER", "")
+WIZARD_UNIT = _SETTINGS["UNIT_WIZARD"]
 # Services the page may restart: the Pi-Star radio daemons and helpers.
 UNITS = {u + ".service" for u in (
     "mmdvmhost", "dmrgateway", "ysfgateway", "ysfparrot", "p25gateway", "p25parrot", "nxdngateway",
@@ -293,7 +298,9 @@ def restore(blob, run=None, is_loaded=None):
         for unit in RESTORE_UNITS:
             if is_loaded(unit):
                 run("restart", unit)
-    except Exception:
+    except Exception as exc:
+        # The reason goes to the caller's log; it never includes values.
+        print(f"pistar-configure: apply failed: {type(exc).__name__}", file=sys.stderr)
         for name in reversed(written):
             text, st = before[name]
             path = allowed[name][0]
@@ -463,7 +470,7 @@ def system_state():
         pass
     host = HOSTNAME.read_text().strip() if HOSTNAME.exists() else ""
     markers = {}
-    for name, path in MARKERS.items():
+    for name, path in {**MARKERS, **FLAGS}.items():
         markers[name] = path.read_text(errors="replace") if path.exists() else None
     return {"hostname": host, "timezone": tz, "markers": markers}
 
@@ -529,6 +536,15 @@ def plan(request, texts):
     if "modem" in system:
         require(type(system["modem"]) is dict and all(NAME.fullmatch(k) and type(v) is str and VALUE.fullmatch(v)
                                                        for k, v in system["modem"].items()), "invalid modem settings")
+    if "modem_ini" in system:
+        ops = system["modem_ini"]
+        require(type(ops) is dict and set(ops) <= MODEM_INI_SECTIONS and all(
+            type(keys) is dict and all(NAME.fullmatch(k) and (v is None or (type(v) is str and VALUE.fullmatch(v)))
+                                       for k, v in keys.items()) for keys in ops.values()), "invalid modem settings")
+    for flag, states in (("timeserver_announce", ("on", "off")), ("hostfiles_nodextra", ("on", "off")),
+                         ("hostfiles_ysfupper", ("off",))):
+        if flag in system:
+            require(system[flag] in states, "invalid " + flag)
     if "password" in system:
         pw = system["password"]
         require(type(pw) is str and 1 <= len(pw) <= 128 and VALUE.fullmatch(pw) and ":" not in pw, "invalid password")
@@ -552,15 +568,20 @@ def plan(request, texts):
     return targets, list(dict.fromkeys(units)), system
 
 
-SYSTEM_OPS = {"hostname", "timezone", "controller", "modem", "password", "autoap", "autoap_psk", "upnp", "upnp_ports"}
+SYSTEM_OPS = {"hostname", "timezone", "controller", "modem", "modem_ini", "password", "autoap", "autoap_psk",
+              "upnp", "upnp_ports", "timeserver_announce", "hostfiles_nodextra", "hostfiles_ysfupper"}
+# modem_ini may change only the network passwords kept in the controller marker.
+MODEM_INI_SECTIONS = {"BrandMeister", "TGIF"}
 
 
 def set_line(path, pattern, line, comment=None):
-    """Replace the first line matching pattern (or append it); with comment=True/False toggle a leading #."""
+    """Replace every line matching pattern (or append one), like the classic sed;
+    with comment=True/False toggle a leading # instead."""
     if not path.exists():
         return
     text, st = read_file(path)
     lines = text.split("\n")
+    found = False
     for i, l in enumerate(lines):
         if re.search(pattern, l):
             if comment is None:
@@ -569,8 +590,8 @@ def set_line(path, pattern, line, comment=None):
                 lines[i] = "#" + l.lstrip("#")
             else:
                 lines[i] = l.lstrip("#")
-            break
-    else:
+            found = True
+    if not found:
         if comment is None:
             lines.insert(len(lines) - 1 if lines and lines[-1] == "" else len(lines), line)
     new = "\n".join(lines)
@@ -610,6 +631,25 @@ def system_ops(system, run):
         for key, value in system["modem"].items():
             ini.set("Modem", key, value)
         replace(marker, ini.text(), st)
+    if "modem_ini" in system:
+        marker = next((p for p in MARKERS.values() if p.exists()), None)
+        require(marker is not None, "no controller configured")
+        text, st = read_file(marker)
+        ini = Ini(text or "")
+        for section, keys in system["modem_ini"].items():
+            for key, value in keys.items():
+                ini.set(section, key, value)
+        replace(marker, ini.text(), st)
+    flag_files = {"timeserver_announce": (FLAGS["timeserver-disable"], "off"),
+                  "hostfiles_nodextra": (FLAGS["hostfiles-nodextra"], "on"),
+                  "hostfiles_ysfupper": (FLAGS["hostfiles-ysfupper"], "on")}
+    for op, (path, present_when) in flag_files.items():
+        if op in system:
+            if system[op] == present_when:
+                if not path.exists():
+                    path.touch(0o644)
+            else:
+                path.unlink(missing_ok=True)
     if "autoap_psk" in system:
         set_line(HOSTAPD, r"^wpa_passphrase=", "wpa_passphrase=" + system["autoap_psk"])
     if "autoap" in system:
@@ -643,7 +683,7 @@ def system_ops(system, run):
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # The HTTPS service loads its credential at start; answer the request first.
         subprocess.run(["/usr/bin/systemd-run", "--quiet", "--collect", "--on-active=2", "/usr/bin/systemctl",
-                        "restart", "pistar-wizard.service"], check=True, timeout=30,
+                        "restart", WIZARD_UNIT], check=True, timeout=30,
                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -674,7 +714,9 @@ def apply(request, run=systemctl, is_loaded=None):
         system_ops(system, run)
         for unit in units:
             run("restart", unit)
-    except Exception:
+    except Exception as exc:
+        # The reason goes to the caller's log; it never includes values.
+        print(f"pistar-configure: apply failed: {type(exc).__name__}", file=sys.stderr)
         for name in reversed(written):
             try:
                 replace(FILES[name], texts[name], stats[name])

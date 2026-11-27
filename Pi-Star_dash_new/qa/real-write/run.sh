@@ -15,6 +15,7 @@ if [[ ${1:-} == --preview ]]; then preview=true; shift; fi
 if [[ ${1:-} == --services ]]; then scenario+=(--services); shift; fi
 if [[ ${1:-} == --expert ]]; then scenario+=(--expert); shift; fi
 if [[ ${1:-} == --backup ]]; then scenario+=(--backup); shift; fi
+if [[ ${1:-} == --configure ]]; then scenario+=(--configure); shift; fi
 if (($#)); then
   [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
@@ -97,7 +98,7 @@ docker exec "$name" sh -eu -c '
   touch /run/pistar-qa/events
 '
 docker exec -d --user pistar-wizard -e CREDENTIALS_DIRECTORY=/run/credentials "$name" \
-  /usr/local/bin/pistar-wizard -admin-listen :8443 -tls-cert /run/credentials/cert.pem -tls-key /run/credentials/key.pem
+  sh -c 'exec /usr/local/bin/pistar-wizard -admin-listen :8443 -tls-cert /run/credentials/cert.pem -tls-key /run/credentials/key.pem 2>>/tmp/pistar-wizard.log'
 ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name")
 [[ $ip =~ ^([0-9]+\.){3}[0-9]+$ ]]
 # An internal-only Docker network deliberately has no published ports. Relay
@@ -123,7 +124,7 @@ if $preview; then
   exit $?
 fi
 python3 qa/real_write_browser.py "${scenario[@]}" --origin "$origin" --work "$work" --key "$work/key.pem" --container "$name" || {
-  cat "$work/service-results"; exit 1;
+  cat "$work/service-results"; echo "wizard log:"; docker exec "$name" tail -n 20 /tmp/pistar-wizard.log; exit 1;
 }
 cat "$work/service-results"
 for role in dmrgateway mmdvmhost; do

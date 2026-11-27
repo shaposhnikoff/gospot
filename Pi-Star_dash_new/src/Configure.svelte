@@ -25,7 +25,7 @@
     csrf = d.csrf; revision = d.revision; sections = d.sections;
     const f: Record<string, string> = {};
     for (const s of d.sections) for (const row of s.rows) for (const c of row.cells) for (const ctl of c.controls ?? []) {
-      if (ctl.name && ctl.kind !== 'static' && ctl.kind !== 'button' && !(ctl.name in f)) f[ctl.name] = ctl.value ?? '';
+      if (ctl.name && !['static', 'button', 'link'].includes(ctl.kind) && !(ctl.name in f)) f[ctl.name] = ctl.value ?? '';
     }
     form = f;
   }
@@ -60,14 +60,15 @@
   {#if ctl.kind === 'text' || ctl.kind === 'password'}
     <input type={ctl.kind} bind:value={form[ctl.name!]} size={ctl.attrs?.size ? Number(ctl.attrs.size) : undefined}
       maxlength={ctl.attrs?.maxlength ? Number(ctl.attrs.maxlength) : undefined} placeholder={ctl.attrs?.placeholder}
-      style={ctl.attrs?.style} aria-label={ctl.attrs?.label ?? ctl.name} autocomplete="off" />
+      style={ctl.attrs?.style} id={ctl.attrs?.id} aria-label={ctl.attrs?.label ?? ctl.name} autocomplete="off" />
   {:else if ctl.kind === 'select'}
     <select bind:value={form[ctl.name!]} style={ctl.attrs?.style} aria-label={ctl.attrs?.label ?? ctl.name}>
       {#each ctl.options ?? [] as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
     </select>
   {:else if ctl.kind === 'radio'}
     {#each ctl.options ?? [] as o (o.value)}
-      <label><input type="radio" name={ctl.name} value={o.value} bind:group={form[ctl.name!]} />{o.label}</label>
+      <label><input type="radio" name={ctl.name} value={o.value} bind:group={form[ctl.name!]}
+        onchange={() => { if (ctl.attrs?.alert && o.value === ctl.attrs.alertValue) alert(ctl.attrs.alert); }} />{o.label}</label>
     {/each}
   {:else if ctl.kind === 'toggle'}
     <div class="switch">
@@ -75,6 +76,8 @@
       <label for={'toggle-' + ctl.name}></label>
     </div>
     {#if ctl.text}{ctl.text}{/if}
+  {:else if ctl.kind === 'link' || (ctl.kind === 'static' && ctl.attrs?.href)}
+    <a href={ctl.attrs?.href} target={ctl.attrs?.target} rel={ctl.attrs?.target ? 'noopener noreferrer' : undefined} style={ctl.attrs?.style}>{ctl.text}</a>
   {:else if ctl.kind === 'static'}
     <span class="static">{ctl.text}</span>
   {:else if ctl.kind === 'button'}

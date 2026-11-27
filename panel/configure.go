@@ -54,6 +54,7 @@ func runConfigureHelper(ctx context.Context, verb string, input []byte) ([]byte,
 	cmd.Stdin = bytes.NewReader(input)
 	var out bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = os.Stderr // the helper prints only reasons, never values
 	cmd.WaitDelay = time.Second
 	err := cmd.Run()
 	var exit *exec.ExitError

@@ -42,3 +42,9 @@ with req('api/backup/classic') as r:
 with zipfile.ZipFile(io.BytesIO(archive)) as z:
     assert {'mmdvmhost','dmrgateway'} <= set(z.namelist()) and not any(n.endswith('.php') for n in z.namelist())
 print('PASS classic Backup download (archive kept only in memory; restore not called on the board)')
+page = json.load(req('api/configure'))
+titles = [s['title'] for s in page['sections']]
+assert page['csrf'] and page['revision'] and {'Gateway Hardware Information', 'General Configuration', 'DMR Configuration'} <= set(titles), titles
+assert not any(c.get('kind') == 'password' and c.get('value') for s in page['sections'] if s['id'] == 'adminpass'
+               for r in s['rows'] for cell in r['cells'] for c in cell.get('controls') or [])
+print('PASS Configuration read:', len(titles), 'sections:', ', '.join(titles), '(no Apply submitted on the board)')

@@ -30,6 +30,8 @@ jobs:
           npm test
           go -C ../panel test ./...
           python3 -B -m unittest discover -s ../panel/helper
+          debian/test-pistar-conf-merge.sh
+          ../radio/test_seed_configs.sh
       - name: Build and check armhf package
         working-directory: Pi-Star_dash_new
         run: |

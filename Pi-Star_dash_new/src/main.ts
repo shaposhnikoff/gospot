@@ -11,11 +11,14 @@ if (settings) {
     expert: () => import('./Expert.svelte'),
     configuration: () => import('./Configure.svelte'),
     backup: () => import('./BackupRestore.svelte'),
+    wifi: () => import('./Wifi.svelte'),
     workspace: () => import('./AdminWorkspace.svelte'),
   };
   const page = (): keyof typeof pages => {
     const h = location.hash.replace(/^#/, '');
     if (h === 'expert' || h.startsWith('expert-')) return 'expert';
+    // #wifi and #wifi-conf: Wifi.svelte follows the hash itself.
+    if (h === 'wifi-conf') return 'wifi';
     return h === '' ? 'admin' : h in pages && h !== 'workspace' ? h as keyof typeof pages : 'workspace';
   };
   let shown: string | null = null;

@@ -41,6 +41,14 @@
 - Скрипты из `../Pi-Star_Binaries_sbin` использовать как есть, если они не трогают PHP и старый дашборд (`HostFilesUpdate.sh`, `pistar-*link`, `pistar-bmapi`/`dapnetapi`/`tgifapi`, `pistar-findmodem`, `pistar-mmdvmcal`, `pistar-modemupgrade`, `pistar-jittertest`, `pistar-factory-reset`, `pistar-firewall`, `pistar-watchdog`, `pistar-remote`, `pistar-keeper`, обработчики `*.service`). `pistar-update`, `pistar-upgrade`, `pistar-daily.cron` и другие скрипты с обращениями к `/var/www/dashboard`, PHP, nginx и `.htpasswd` не ставить; их функции переписать в Go или в собственные скрипты без PHP.
 - Пользователь оставляет за собой право переделать любое решение; работать без лишних вопросов и показывать результат на `pistar3`.
 
+## Wi-Fi: два бэкенда
+
+- Решение от 2026-11-27: на `pistar3` (Bookworm) и в целевом образе Trixie сетью управляет NetworkManager, классический `wpa_supplicant.conf` там не действует. Страница Wi-Fi повторяет `wifi.php`, а запись идёт через бэкенд из `pistar.conf`: `WIFI_BACKEND=networkmanager` (профили `nmcli`, PSK передаётся только WPA-хешем) или `wpa_supplicant` (правка блоков файла, root:root 0600). Стенд `qa/real-write --wifi` проверяет бэкенд `wpa_supplicant`.
+
+## Обновление `pistar.conf` на плате
+
+- `pistar.conf` — conffile. Новые ключи из пакета `postinst` дописывает в изменённую вручную копию (`pistar-conf-merge`), существующие строки не трогает; иначе службы не стартуют на неизвестной им конфигурации.
+
 ## Бэклог проекта
 
 - Основной бэклог — [GitHub Issues](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues). Когда пользователь просит добавить задачу в бэклог, сначала найти существующую issue; дополнить её или создать новую с ожидаемым результатом и критериями приёмки. Пользователю вернуть ссылку на issue.

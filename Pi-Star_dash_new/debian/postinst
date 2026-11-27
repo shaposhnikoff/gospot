@@ -7,6 +7,9 @@ for account in psdash-stage pistar-wizard pistar-panel; do
     fi
     test "$(id -u "$account")" -ne 0
 done
+# A locally edited conffile keeps its values but gains settings added by
+# newer packages; otherwise the services would refuse to start.
+@DASHBOARD_LIB_DIR@/pistar-conf-merge /etc/pistar-dashboard/pistar.conf @DASHBOARD_LIB_DIR@/pistar.conf.default
 # Paths come from the package conffile (Pi-Star_dash_new/pistar.conf).
 . /etc/pistar-dashboard/pistar.conf
 cfg=$WIZARD_CONFIG_DIR

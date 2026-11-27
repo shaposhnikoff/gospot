@@ -4,6 +4,8 @@
 read   -> JSON {revision, files: {name: {section: {key: value}}}, system: {...}}
 apply  <- JSON {revision, changes: {name: {section: {key: value|null}}},
                 restart: [unit, ...], system: {hostname?, timezone?, controller?}}
+wifi-read, wifi-write, wifi-scan, wifi-action up|down|reset
+       -> the Wi-Fi page (admin/wifi.php); see the Wi-Fi section below
 
 Only the configuration files named in pistar.conf are read or written; values
 are single-line strings; comments, ordering, ownership and modes are kept.
@@ -500,6 +502,542 @@ def css_reset(request):
     return {"ok": True}
 
 
+# --- Wi-Fi page (admin/wifi.php) ---------------------------------------------
+# Two backends behind one page: classic network blocks in wpa_supplicant.conf,
+# or NetworkManager wifi profiles through nmcli. Nothing returned, printed or
+# put in an error ever contains a PSK; NetworkManager gets only the WPA hash.
+
+# ISO 3166-1 alpha-2 (wifi.php reads the regulatory database instead).
+WIFI_COUNTRIES = tuple((
+    "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW "
+    "BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI "
+    "FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN "
+    "IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME "
+    "MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF "
+    "PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV "
+    "SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE "
+    "YT ZA ZM ZW").split())
+WIFI_DEFAULT_COUNTRY = "JP"  # wifi.php shows JP when the file names no country
+WIFI_MAX_NETWORKS = 32
+# Seconds wifi.php waits between scan and scan_results, and between down and up.
+WIFI_SLEEP = {"scan": 8, "reset": 3}
+NM_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+MAC = re.compile(r"[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}")
+
+
+class Wifi:
+    """Wi-Fi settings from pistar.conf, resolved per command so a missing key
+    breaks only this page."""
+
+    def __init__(self):
+        s = _SETTINGS
+        self.backend = s.get("WIFI_BACKEND", "")
+        require(self.backend in ("networkmanager", "wpa_supplicant"),
+                "WIFI_BACKEND in pistar.conf must be networkmanager or wpa_supplicant")
+        self.iface = s.get("WIFI_INTERFACE", "")
+        require(re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", self.iface) is not None,
+                "WIFI_INTERFACE in pistar.conf is not an interface name")
+
+        def path(key):
+            try:
+                return setting_path(s, key)
+            except SystemExit as exc:
+                raise Error(f"{exc} (pistar.conf)") from None
+        self.conf, self.sysfs = path("WPA_SUPPLICANT_CONF"), path("SYSFS_NET_DIR")
+        self.ctrl, self.regdom = path("WPA_CTRL_DIR"), path("WIFI_REGDOM_CONF")
+        self.nmcli, self.wpa_cli, self.ip, self.iw = (str(path(k)) for k in ("NMCLI_BIN", "WPA_CLI_BIN", "IP_BIN", "IW_BIN"))
+
+    def present(self):
+        return (self.sysfs / self.iface).exists()
+
+    def require_present(self):
+        require(self.present(), f"Interface {self.iface} is not present")
+
+
+def tool(argv, timeout=30):
+    """Run a configured program (argument list, never a shell): its output, or
+    None when it is missing, fails or times out."""
+    try:
+        r = subprocess.run(argv, timeout=timeout, cwd="/", env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"},
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.decode("utf-8", "replace") if r.returncode == 0 else None
+
+
+def wpa_psk(ssid, passphrase):
+    """The 256-bit WPA key exactly as wpa_passphrase prints it."""
+    return hashlib.pbkdf2_hmac("sha1", passphrase.encode(), ssid.encode(), 4096, 32).hex()
+
+
+def wifi_key(ssid, psk):
+    return psk.lower() if re.fullmatch(r"[0-9A-Fa-f]{64}", psk) else wpa_psk(ssid, psk)
+
+
+def wifi_ssid_ok(ssid):
+    return type(ssid) is str and 1 <= len(ssid.encode()) <= 32 and not re.search(r"[\x00-\x1f\x7f]", ssid)
+
+
+def wifi_psk_ok(psk):
+    return re.fullmatch(r"[0-9A-Fa-f]{64}|[\x20-\x7e]{8,63}", psk) is not None
+
+
+def wifi_status(w):
+    """Interface state from sysfs, ip and iw (wifi.php parsed ifconfig and iwconfig)."""
+    base = w.sysfs / w.iface
+    if not base.exists():
+        return {"present": False, "up": False}
+
+    def sysfs(name):
+        try:
+            return (base / name).read_text().strip()
+        except OSError:
+            return ""
+
+    out = {"present": True, "up": sysfs("operstate") == "up", "mac": sysfs("address")}
+    for key, name in (("rxPackets", "rx_packets"), ("rxBytes", "rx_bytes"), ("txPackets", "tx_packets"), ("txBytes", "tx_bytes")):
+        value = sysfs("statistics/" + name)
+        if value.isdigit():
+            out[key] = int(value)
+    m = re.search(r"\binet (\d+\.\d+\.\d+\.\d+)/(\d+)", tool([w.ip, "-o", "-4", "addr", "show", "dev", w.iface]) or "")
+    if m:
+        import ipaddress
+        out["ip"], out["netmask"] = m.group(1), str(ipaddress.IPv4Network(f"0.0.0.0/{m.group(2)}").netmask)
+    link = tool([w.iw, "dev", w.iface, "link"]) or ""
+    for key, pattern in (("bssid", r"Connected to (" + MAC.pattern + ")"), ("ssid", r"^\s*SSID: (.*)$"),
+                         ("freq", r"^\s*freq: (\d+)"), ("signal", r"^\s*signal: (-?\d+ dBm)"),
+                         ("bitrate", r"^\s*tx bitrate: ([0-9.]+ MBit/s)")):
+        m = re.search(pattern, link, re.M)
+        if m:
+            out[key] = m.group(1)
+    m = re.search(r"^\s*txpower ([0-9.]+ dBm)", tool([w.iw, "dev", w.iface, "info"]) or "", re.M)
+    if m:
+        out["txPower"] = m.group(1)
+    return out
+
+
+def wifi_plan(request, existing):
+    """Validate a save request against the current networks: (country, items).
+    Every item is {id, ssid, psk}; id "" is a new network, psk "" keeps the
+    stored key (or makes a new network open), as the classic form did."""
+    require(type(request) is dict and set(request) <= {"revision", "country", "networks"}
+            and type(request.get("networks")) is list, "invalid request")
+    errors = []
+    country = request.get("country")
+    if country not in WIFI_COUNTRIES:
+        errors.append("WiFi country code must be exactly 2 uppercase letters (ISO 3166-1 alpha-2)")
+    nets = request["networks"]
+    if len(nets) > WIFI_MAX_NETWORKS:
+        errors.append("network count out of range")
+        nets = []
+    by_id = {n["id"]: n for n in existing}
+    seen, items = set(), []
+    for x, item in enumerate(nets):
+        require(type(item) is dict and set(item) <= {"id", "ssid", "psk"} and "ssid" in item
+                and all(type(item.get(k, "")) is str for k in ("id", "ssid", "psk")), "invalid network")
+        nid, ssid, psk = item.get("id", ""), item["ssid"], item.get("psk", "")
+        if nid:
+            require(nid in by_id and nid not in seen, "unknown or repeated network")
+            seen.add(nid)
+        if not wifi_ssid_ok(ssid):
+            errors.append(f"network {x}: SSID must be 1-32 bytes without control characters")
+        if psk and not wifi_psk_ok(psk):
+            errors.append(f"network {x}: PSK must be 8-63 printable ASCII characters or exactly 64 hex characters")
+        old = by_id.get(nid)
+        if old and old["secured"] and ssid != old["ssid"] and not psk:
+            errors.append(f"network {x}: enter the PSK again when changing the SSID (the stored key is derived from it)")
+        items.append({"id": nid, "ssid": ssid, "psk": psk})
+    if errors:
+        raise Error("\n".join(errors))
+    return country, items
+
+
+# wpa_supplicant backend: network={...} blocks in WPA_SUPPLICANT_CONF. A save
+# rewrites only the blocks it changes or deletes; every other byte is kept.
+
+def wpa_split(text):
+    """Lines (with their endings) and the (first, last) line of every block."""
+    lines = text.splitlines(keepends=True)
+    blocks, i = [], 0
+    while i < len(lines):
+        if re.fullmatch(r"\s*network\s*=\s*\{\s*", lines[i]):
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != "}":
+                j += 1
+            require(j < len(lines), "unterminated network block in the wpa_supplicant configuration")
+            blocks.append((i, j))
+            i = j + 1
+        else:
+            i += 1
+    return lines, blocks
+
+
+def wpa_value(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] == '"':
+        return v[1:-1]
+    if re.fullmatch(r"(?:[0-9a-fA-F]{2})+", v):
+        return bytes.fromhex(v).decode("utf-8", "replace")
+    return v
+
+
+def wpa_entry(line):
+    """(key, value, commented) of a block line; key "" for anything else."""
+    s = line.strip()
+    commented = s.startswith("#")
+    key, sep, value = s.lstrip("#").strip().partition("=") if commented else s.partition("=")
+    return (key.strip() if sep else ""), value, commented
+
+
+def wpa_network(body):
+    ssid = comment = key_mgmt = None
+    psk = False
+    for line in body:
+        key, value, commented = wpa_entry(line)
+        if commented:
+            if key == "ssid" and comment is None:
+                comment = wpa_value(value)
+        elif key == "ssid":
+            ssid = wpa_value(value)
+        elif key in ("psk", "sae_password", "wep_key0", "password"):
+            psk = True
+        elif key == "key_mgmt":
+            key_mgmt = value.strip()
+    # wifi.php shows the "#ssid=" comment when present (its wildcard "*" has no ssid line).
+    return {"ssid": ssid if ssid is not None else (comment or ""),
+            "secured": psk or key_mgmt not in (None, "NONE")}
+
+
+def wpa_country(lines, blocks):
+    inside = {i for a, b in blocks for i in range(a, b + 1)}
+    for i, line in enumerate(lines):
+        key, value, commented = wpa_entry(line)
+        if i not in inside and not commented and key == "country":
+            return i, value.strip()
+    return None, None
+
+
+def wpa_state(w):
+    text, st = read_file(w.conf)
+    lines, blocks = wpa_split(text or "")
+    nets = [dict(wpa_network(lines[a + 1:b]), id=str(n)) for n, (a, b) in enumerate(blocks)]
+    _, country = wpa_country(lines, blocks)
+    revision = hashlib.sha256((text if text is not None else "\0missing").encode()).hexdigest()
+    return text, st, lines, blocks, nets, country, revision
+
+
+def wpa_edit(block, old, item):
+    """Change only the ssid and psk lines of one block."""
+    ssid_changed, psk = item["ssid"] != old["ssid"], item["psk"]
+    if not ssid_changed and not psk:
+        return block
+    out = list(block)
+    indent = re.match(r"[ \t]*", out[1]).group(0) if len(out) > 2 else "\t"
+    indent = indent or "\t"
+
+    def put(key, line, after):
+        for i, l in enumerate(out):
+            k, _, commented = wpa_entry(l)
+            if i and k == key and not commented:
+                out[i] = line
+                return
+        out.insert(after, line)
+
+    def ssid_index():
+        return next((i for i, l in enumerate(out) if i and wpa_entry(l)[0] == "ssid" and not wpa_entry(l)[2]), 0)
+
+    if ssid_changed:
+        put("ssid", f"{indent}ssid={item['ssid'].encode().hex()}\n", 1)
+        for i, l in enumerate(out):
+            k, _, commented = wpa_entry(l)
+            if commented and k == "ssid":
+                out[i] = f'{indent}#ssid="{item["ssid"]}"\n'
+    if psk:
+        # Older Pi-Star files keep the passphrase in a "#psk=" comment: drop it.
+        out = [l for l in out if not (wpa_entry(l)[0] == "psk" and wpa_entry(l)[2])]
+        out = [l for l in out if not (wpa_entry(l)[0] == "key_mgmt" and not wpa_entry(l)[2] and wpa_entry(l)[1].strip() == "NONE")]
+        put("psk", f"{indent}psk={wifi_key(item['ssid'], psk)}\n", ssid_index() + 1)
+    return out
+
+
+def wpa_block(item, index):
+    """A new block in the wifi.php layout, without its plain-text "#psk=" line."""
+    lines = ["network={\n", f'\t#ssid="{item["ssid"]}"\n', f"\tssid={item['ssid'].encode().hex()}\n"]
+    lines.append(f"\tpsk={wifi_key(item['ssid'], item['psk'])}\n" if item["psk"] else "\tkey_mgmt=NONE\n")
+    return lines + [f'\tid_str="{index}"\n', f"\tpriority={100 - index}\n", "\tscan_ssid=1\n", "}\n"]
+
+
+def wpa_write(w, request):
+    text, st, lines, blocks, nets, current, revision = wpa_state(w)
+    if request.get("revision") != revision:
+        raise Stale("the Wi-Fi configuration changed since it was read")
+    country, items = wifi_plan(request, nets)
+    kept = {item["id"]: item for item in items if item["id"]}
+    starts = {a: (n, b) for n, (a, b) in enumerate(blocks)}
+    country_at, _ = wpa_country(lines, blocks)
+    out, first, i = [], None, 0
+    while i < len(lines):
+        if i in starts:
+            n, b = starts[i]
+            first = len(out) if first is None else first
+            item = kept.get(str(n))
+            if item is None:  # deleted, together with the blank line after it
+                i = b + 1
+                if i < len(lines) and not lines[i].strip():
+                    i += 1
+                continue
+            out += wpa_edit(lines[i:b + 1], nets[n], item)
+            i = b + 1
+            continue
+        if i == country_at and current != country:
+            out.append(f"country={country}" + ("\n" if lines[i].endswith("\n") else ""))
+        else:
+            out.append(lines[i])
+        i += 1
+    if text is None:
+        out = [f"ctrl_interface=DIR={w.ctrl} GROUP=netdev\n", "update_config=1\n", "ap_scan=1\n", "fast_reauth=1\n",
+               f"country={country}\n", "\n"]
+    elif country_at is None:
+        at = len(out) if first is None else first
+        while at and not out[at - 1].strip():
+            at -= 1
+        if at and not out[at - 1].endswith("\n"):
+            out[at - 1] += "\n"
+        out.insert(at, f"country={country}\n")
+    added = [(x, item) for x, item in enumerate(items) if not item["id"]]
+    if added and out:
+        if not out[-1].endswith("\n"):
+            out[-1] += "\n"
+        if out[-1].strip():
+            out.append("\n")
+    for x, item in added:  # id_str and priority from the position in the form, as wifi.php
+        out += wpa_block(item, x) + ["\n"]
+    new = "".join(out)
+
+    class Private:  # wifi.php: install -m 600 -o root -g root
+        st_uid, st_gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+        st_mode = 0o600
+    if new != text or st is None or stat.S_IMODE(st.st_mode) != 0o600:
+        replace(w.conf, new, Private)
+    reply = {"ok": True, "message": "Wifi Settings Updated Successfully"}
+    if not w.present():
+        reply["note"] = f"Interface {w.iface} is not present"
+    elif not (w.sysfs / (w.iface + "_ap")).exists():  # Auto AP active: leave the adapter alone
+        if tool([w.wpa_cli, "-p", str(w.ctrl), "-i", w.iface, "reconfigure"]) is None:
+            reply["note"] = "Saved, but wpa_supplicant did not reload the configuration"
+    return reply
+
+
+# NetworkManager backend: wifi connection profiles through nmcli.
+
+def nm_fields(line):
+    """Split one nmcli --terse line on unescaped colons."""
+    out, cur, escaped = [], [], False
+    for ch in line:
+        if escaped:
+            cur.append(ch)
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == ":":
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    return out + ["".join(cur)]
+
+
+def nm_profiles(w):
+    out = tool([w.nmcli, "-t", "-f", "UUID,TYPE", "connection", "show"])
+    require(out is not None, "NetworkManager is not available (nmcli failed)")
+    nets = []
+    for line in out.splitlines():
+        uuid, kind = (nm_fields(line) + [""])[:2]
+        if kind not in ("802-11-wireless", "wifi") or not NM_UUID.fullmatch(uuid):
+            continue
+        detail = tool([w.nmcli, "-t", "-e", "no", "-f",
+                       "connection.id,802-11-wireless.ssid,802-11-wireless.mode,802-11-wireless-security.key-mgmt",
+                       "connection", "show", "uuid", uuid])
+        if detail is None:
+            continue
+        fields = dict(l.partition(":")[::2] for l in detail.splitlines())
+        if fields.get("802-11-wireless.mode", "") not in ("", "infrastructure"):
+            continue  # hotspot and ad-hoc profiles are not client networks
+        km = fields.get("802-11-wireless-security.key-mgmt", "")
+        nets.append({"id": uuid, "name": fields.get("connection.id", ""), "ssid": fields.get("802-11-wireless.ssid", ""),
+                     "secured": km not in ("", "--"), "km": km})
+    return nets
+
+
+def nm_country(w):
+    text, _ = read_file(w.regdom)
+    m = re.search(r"ieee80211_regdom=([A-Z]{2})\b", text or "")
+    if not m:
+        m = re.search(r"^country ([A-Z]{2}):", tool([w.iw, "reg", "get"]) or "", re.M)
+    country = m.group(1) if m and m.group(1) in WIFI_COUNTRIES else None
+    return text, country
+
+
+def nm_state(w):
+    nets = nm_profiles(w)
+    regdom, country = nm_country(w)
+    # Revision: the profiles as listed (never their secrets) and the country file.
+    revision = hashlib.sha256(json.dumps([[n["id"], n["name"], n["ssid"], n["km"]] for n in nets] + [regdom]).encode()).hexdigest()
+    return nets, country, revision
+
+
+def nm_write(w, request):
+    nets, current, revision = nm_state(w)
+    current = current or WIFI_DEFAULT_COUNTRY  # an unknown domain shows as JP: keeping JP writes nothing
+    if request.get("revision") != revision:
+        raise Stale("the Wi-Fi configuration changed since it was read")
+    country, items = wifi_plan(request, nets)
+    old = {n["id"]: n for n in nets}
+    kept = {item["id"] for item in items if item["id"]}
+    nm = [w.nmcli]
+    steps = []
+    for item in items:
+        props = []
+        if item["id"]:
+            if item["ssid"] != old[item["id"]]["ssid"]:
+                props += ["802-11-wireless.ssid", item["ssid"]]
+            if item["psk"]:
+                props += ["802-11-wireless-security.key-mgmt", "wpa-psk", "802-11-wireless-security.psk", wifi_key(item["ssid"], item["psk"])]
+            if props:
+                steps.append(nm + ["connection", "modify", "uuid", item["id"]] + props)
+        else:
+            if item["psk"]:
+                props = ["802-11-wireless-security.key-mgmt", "wpa-psk", "802-11-wireless-security.psk", wifi_key(item["ssid"], item["psk"])]
+            steps.append(nm + ["connection", "add", "type", "wifi", "ifname", w.iface, "con-name", item["ssid"],
+                               "802-11-wireless.ssid", item["ssid"]] + props)
+    steps += [nm + ["connection", "delete", "uuid", n["id"]] for n in nets if n["id"] not in kept]
+    for done, argv in enumerate(steps):
+        # The arguments hold the WPA hash; the message must not.
+        require(tool(argv, timeout=60) is not None,
+                f"NetworkManager refused a change ({done} of {len(steps)} applied); reload the page")
+    reply = {"ok": True, "message": "Wifi Settings Updated Successfully"}
+    if country != current:
+        class Public:
+            st_uid, st_gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+            st_mode = 0o644
+        replace(w.regdom, f"# Wi-Fi country set by the Pi-Star dashboard\noptions cfg80211 ieee80211_regdom={country}\n", Public)
+        if tool([w.iw, "reg", "set", country]) is None:
+            reply["note"] = "Country saved; it applies after a reboot"
+    if not w.present():
+        reply["note"] = f"Interface {w.iface} is not present"
+    elif not (w.sysfs / (w.iface + "_ap")).exists() and tool([w.nmcli, "device", "connect", w.iface], timeout=60) is None:
+        reply["note"] = "Saved, but NetworkManager did not connect"
+    return reply
+
+
+def wifi_read():
+    w = Wifi()
+    if w.backend == "wpa_supplicant":
+        _, _, _, _, nets, country, revision = wpa_state(w)
+    else:
+        nets, country, revision = nm_state(w)
+    return {"revision": revision, "backend": w.backend, "interface": w.iface,
+            "country": country if country in WIFI_COUNTRIES else WIFI_DEFAULT_COUNTRY,
+            "countries": list(WIFI_COUNTRIES),
+            "networks": [{"id": n["id"], "ssid": n["ssid"], "secured": n["secured"]} for n in nets],
+            "status": wifi_status(w)}
+
+
+def wifi_write(request):
+    w = Wifi()
+    return wpa_write(w, request) if w.backend == "wpa_supplicant" else nm_write(w, request)
+
+
+def wifi_scan():
+    """wifi.php "Scan for Networks": raw rows; the page names channels and security."""
+    import time
+    w = Wifi()
+    w.require_present()
+    rows = []
+    if w.backend == "wpa_supplicant":
+        base = [w.wpa_cli, "-p", str(w.ctrl), "-i", w.iface]
+        require(tool(base + ["scan"]) is not None, "wpa_supplicant did not start a scan")
+        time.sleep(WIFI_SLEEP["scan"])
+        out = tool(base + ["scan_results"])
+        require(out is not None, "wpa_supplicant did not return scan results")
+        for line in out.splitlines():
+            f = line.split("\t")
+            if len(f) >= 4 and MAC.fullmatch(f[0]):
+                rows.append({"bssid": f[0], "freq": f[1], "signal": f[2] + " dBm", "security": f[3],
+                             "ssid": f[4] if len(f) > 4 else ""})
+    else:
+        out = tool([w.nmcli, "-t", "-f", "BSSID,FREQ,SIGNAL,SECURITY,SSID", "device", "wifi", "list",
+                    "--rescan", "yes", "ifname", w.iface], timeout=60)
+        require(out is not None, "NetworkManager did not return scan results")
+        for line in out.splitlines():
+            f = nm_fields(line)
+            if len(f) == 5 and MAC.fullmatch(f[0]):
+                rows.append({"bssid": f[0], "freq": f[1].split(" ")[0], "signal": f[2] + " %",
+                             "security": f[3] or "None", "ssid": f[4]})
+    return {"networks": rows}
+
+
+def wifi_action(action):
+    """Interface down / up / reset (wifi.php: ifdown, ifup, wpa_cli reconfigure)."""
+    import time
+    require(action in ("up", "down", "reset"), "unknown action")
+    w = Wifi()
+    w.require_present()
+    up = wifi_status(w)["up"]
+    if action == "down" and not up:
+        return {"ok": True, "message": "Interface already down"}
+    if action == "up" and up:
+        return {"ok": True, "message": "Interface already up"}
+    if w.backend == "wpa_supplicant":
+        wpa = [w.wpa_cli, "-p", str(w.ctrl), "-i", w.iface]
+        link = [w.ip, "link", "set", "dev", w.iface]
+        steps = {"down": [link + ["down"]], "up": [link + ["up"]],
+                 "reset": [wpa + ["reconfigure"], link + ["down"], None, link + ["up"], wpa + ["scan"]]}[action]
+    else:
+        dev = [w.nmcli, "device"]
+        steps = {"down": [dev + ["disconnect", w.iface]], "up": [dev + ["connect", w.iface]],
+                 "reset": [dev + ["disconnect", w.iface], None, dev + ["connect", w.iface],
+                           dev + ["wifi", "rescan", "ifname", w.iface]]}[action]
+    failed = False
+    for argv in steps:
+        if argv is None:
+            time.sleep(WIFI_SLEEP["reset"])
+        elif tool(argv, timeout=60) is None and argv[-1] != "scan" and "rescan" not in argv:
+            failed = True
+    require(not failed, f"Interface {w.iface}: the {action} command failed")
+    return {"ok": True, "message": {"down": f"Interface {w.iface} is down", "up": f"Interface {w.iface} is up",
+                                    "reset": "WiFi adapter reset"}[action]}
+
+
+WIFI_VERBS = {"wifi-read", "wifi-write", "wifi-scan", "wifi-action"}
+
+
+def wifi_main(argv, stdin):
+    STATE.mkdir(mode=0o700, exist_ok=True)
+    with os.fdopen(os.open(STATE / "wifi.lock", os.O_CREAT | os.O_NOFOLLOW | os.O_RDWR, 0o600), "r+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        verb = argv[0]
+        if verb == "wifi-action":
+            require(len(argv) == 2, "expected wifi-action up|down|reset")
+            return wifi_action(argv[1])
+        require(len(argv) == 1, "unexpected arguments")
+        if verb == "wifi-read":
+            return wifi_read()
+        if verb == "wifi-scan":
+            return wifi_scan()
+        raw = stdin.read(65537)
+        require(len(raw) <= 65536, "request too large")
+        try:
+            request = json.loads(raw.decode())
+        except ValueError:
+            raise Error("invalid request") from None
+        require(type(request) is dict, "invalid request")
+        try:
+            return wifi_write(request)
+        except OSError as exc:
+            raise Error(f"could not write the Wi-Fi configuration: {exc.strerror}") from None
+
+
 class Error(Exception):
     pass
 
@@ -881,6 +1419,9 @@ def read():
 
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] in WIFI_VERBS:
+        print(json.dumps(wifi_main(sys.argv[1:], sys.stdin.buffer)))
+        return
     if len(sys.argv) == 2 and sys.argv[1] == "backup":
         sys.stdout.buffer.write(backup())
         return

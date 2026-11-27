@@ -2,7 +2,7 @@
 """Exercise real settings and signed archive transactions on a disposable QA stand."""
 
 import argparse
-from hashlib import sha256
+from hashlib import pbkdf2_hmac, sha256
 from ipaddress import ip_address
 import json
 from pathlib import Path
@@ -484,6 +484,155 @@ def exercise_factory(v, stand, origin, original):
           "then restarts DMRGateway and MMDVMHost", flush=True)
 
 
+WPA_CONF = "/etc/wpa_supplicant/wpa_supplicant.conf"
+
+
+def wpa_psk(ssid, passphrase):
+    # Independent of the helper: what wpa_passphrase prints (PBKDF2-HMAC-SHA1, 4096 rounds, 32 bytes).
+    return pbkdf2_hmac("sha1", passphrase.encode(), ssid.encode(), 4096, 32).hex()
+
+
+def exercise_wifi(v, stand, origin, original):
+    """Wi-Fi page (admin/wifi.php) with the wpa_supplicant backend, through Chromium against the real helper.
+
+    run.sh --wifi sets WIFI_BACKEND=wpa_supplicant in the stand's pistar.conf. The container has no
+    wlan0: saves report it, and Reset / Scan must say so cleanly. Test-only passphrases are never printed."""
+    old_first, old_second, new_second = "qa-first-old-pass", "qa-second-old-pass", "qa-second-new-pass"
+    header = "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\nupdate_config=1\nap_scan=1\nfast_reauth=1\ncountry=GB\n\n"
+    first = ("network={\n\t#ssid=\"QA-First\"\n\tssid=" + b"QA-First".hex() + "\n\tpsk=" + wpa_psk("QA-First", old_first) +
+             "\n\tid_str=\"0\"\n\tpriority=100\n\tscan_ssid=1\n}\n")
+    second_hash = wpa_psk("QA-Second", old_second)
+    second = "network={\n\tssid=\"QA-Second\"\n\tpsk=" + second_hash + "\n\tkey_mgmt=WPA-PSK\n\tpriority=99\n}\n"
+    trailer = "\n# kept verbatim\n"
+    fixture = header + first + "\n" + second + trailer
+    stand.exec("sh", "-c", 'mkdir -p /etc/wpa_supplicant && printf "%s" "$1" > "$2" && chown root:root "$2" && chmod 600 "$2"',
+               "sh", fixture, WPA_CONF)
+    secrets = (old_first, old_second, new_second, second_hash, wpa_psk("QA-First", old_first))
+
+    def on_disk():
+        return stand.read(WPA_CONF).decode()
+
+    def meta():
+        owner, mode, inode = stand.exec("stat", "-c", "%U:%G %a %i", WPA_CONF).stdout.decode().split()
+        return owner + " " + mode, inode
+
+    def go(fragment, boxes=None):
+        v.command("/url", {"url": origin + "/manage/#power"})
+        v.command("/url", {"url": origin + "/manage/#" + fragment})
+        if boxes is None:
+            wait(fragment + " did not load", lambda: v.js("return document.body.innerText.includes('Wireless Information and Statistics')"))
+        else:
+            wait(fragment + " did not load", lambda: v.js("return document.querySelectorAll('.NetworkBoxes').length === arguments[0]"
+                                                          " && !!document.querySelector('select[aria-label=\"WiFi Country Code\"]')", boxes))
+
+    def ssids():
+        return v.js("return [...document.querySelectorAll('.NetworkBoxes input[type=text]')].map(e => e.value)")
+
+    def page_text(fragment):
+        wait("expected: " + fragment, lambda: fragment in v.js("return document.body.innerText"))
+
+    def api(script, *args):
+        return v.command('/execute/async', {'script': script, 'args': list(args)})
+
+    def post(body, with_csrf=True):
+        return api("""const [body,csrf,done]=arguments;
+          fetch('/manage/api/wifi').then(r=>r.json()).then(s=>fetch('/manage/api/wifi',{method:'POST',
+          headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf?s.csrf:''},body:JSON.stringify(Object.assign({revision:s.revision},body))}))
+          .then(async r=>done([r.status, await r.text()]))""", body, with_csrf)
+
+    def wifi_posts():
+        events = v.events()
+        status = {e["params"]["requestId"]: e["params"]["response"]["status"] for e in events if e["method"] == "Network.responseReceived"}
+        return [status.get(e["params"]["requestId"]) for e in events if e["method"] == "Network.requestWillBeSent"
+                and e["params"]["request"]["method"] == "POST" and e["params"]["request"]["url"] == origin + "/manage/api/wifi"]
+
+    def no_secrets(stage, text):
+        for s in secrets:
+            if s in text:
+                raise AssertionError(f"{stage}: a PSK or WPA hash reached the browser")
+
+    history = stand.restarts()
+    # 0. the page lists both networks; neither the GET nor the page carries a key
+    go("wifi-conf", 2)
+    equal("listed SSIDs", ssids(), ["QA-First", "QA-Second"])
+    equal("PSK fields start blank", v.js("return [...document.querySelectorAll('.NetworkBoxes input[type=password]')].map(e => e.value)"), ["", ""])
+    no_secrets("GET /manage/api/wifi", json.dumps(api("fetch('/manage/api/wifi').then(r=>r.text()).then(arguments[0])")))
+    no_secrets("rendered page", v.js("return document.documentElement.outerHTML"))
+    # 1. CSRF: a POST without the header is refused and writes nothing
+    status, _ = post({"action": "save", "country": "GB", "networks": [{"id": "1", "ssid": "QA-Second", "psk": ""}]}, with_csrf=False)
+    equal("save without CSRF", status, 403)
+    equal("CSRF refusal keeps the file", on_disk(), fixture)
+    # 2. Delete the first network and Save: one POST, only that block gone, root:root 0600
+    go("wifi-conf", 2)
+    v.events()
+    v.click('input[aria-label="Delete network 0"]')
+    wait("network box not removed", lambda: v.js("return document.querySelectorAll('.NetworkBoxes').length === 1"))
+    v.click('form input[type=submit]')
+    page_text("Wifi Settings Updated Successfully")
+    page_text("Interface wlan0 is not present")
+    equal("delete: POSTs", wifi_posts(), [200])
+    deleted = header + second + trailer
+    equal("delete: file", on_disk(), deleted)
+    equal("delete: owner and mode", meta()[0], "root:root 600")
+    go("wifi-conf", 1)
+    equal("delete: fresh GET", ssids(), ["QA-Second"])
+    # 3. Change the PSK of the remaining network: only its psk line changes, to the independent hash
+    v.events()
+    v.type_into('input[aria-label="PSK 0"]', new_second)
+    v.click('form input[type=submit]')
+    page_text("Wifi Settings Updated Successfully")
+    equal("PSK change: POSTs", wifi_posts(), [200])
+    changed = deleted.replace("\tpsk=" + second_hash + "\n", "\tpsk=" + wpa_psk("QA-Second", new_second) + "\n")
+    assert changed != deleted
+    equal("PSK change: file", on_disk(), changed)
+    equal("PSK change: owner and mode", meta()[0], "root:root 600")
+    if new_second in on_disk():
+        raise AssertionError("the passphrase was written in plain text")
+    # 4. Two tabs: tab A holds the form, tab B saves first; tab A's save is refused and installs nothing
+    go("wifi-conf", 1)
+    status, _ = post({"action": "save", "country": "DE", "networks": [{"id": "0", "ssid": "QA-Second", "psk": ""}]})
+    equal("tab B save", status, 200)
+    first_write = changed.replace("country=GB\n", "country=DE\n")
+    equal("tab B: file", on_disk(), first_write)
+    written = meta()
+    v.events()
+    v.js("const s=document.querySelector('select[aria-label=\"WiFi Country Code\"]'); s.value='FR'; s.dispatchEvent(new Event('change',{bubbles:true}))")
+    v.click('form input[type=submit]')
+    page_text("changed since this page was loaded")
+    equal("tab A: POSTs", wifi_posts(), [409])
+    equal("tab A: file is tab B's result", on_disk(), first_write)
+    equal("tab A: no second install", meta(), written)
+    go("wifi-conf", 1)
+    equal("reload shows tab B's country", v.js("return document.querySelector('select[aria-label=\"WiFi Country Code\"]').value"), "DE")
+    # 5. invalid input: the page blocks it, the API refuses it with the helper's reason
+    v.click('input[value="Add Network"]')
+    v.type_into('input[aria-label="SSID 1"]', "QA-Short")
+    v.type_into('input[aria-label="PSK 1"]', "short")
+    equal("invalid PSK disables Save", v.js("return document.querySelector('form input[type=submit]').disabled"), True)
+    status, body = post({"action": "save", "country": "DE", "networks": [{"id": "0", "ssid": "QA-Second", "psk": ""}, {"ssid": "QA-Short", "psk": "short"}]})
+    equal("invalid PSK status", (status, body.strip()), (422, "network 1: PSK must be 8-63 printable ASCII characters or exactly 64 hex characters"))
+    status, _ = post({"action": "save", "country": "XX", "networks": []})
+    equal("invalid country status", status, 422)
+    equal("invalid input keeps the file", on_disk(), first_write)
+    equal("invalid input: no install", meta(), written)
+    # 6. the stand has no wlan0: status, Reset and Scan say so without touching anything
+    go("wifi")
+    page_text("Interface is not present")
+    v.click('input[value="Reset WiFi Adapter"]')
+    page_text("Interface wlan0 is not present")
+    go("wifi-conf", 1)
+    v.click('input[value="Scan for Networks (10 secs)"]')
+    page_text("Interface wlan0 is not present")
+    equal("adapter commands keep the file", meta(), written)
+    equal("Wi-Fi restarts", stand.restarts(), history)
+    same_pair("Wi-Fi leaves radio files", stand.pair(), original)
+    print("PASS Chromium Wi-Fi (wpa_supplicant): two networks listed without keys; save without CSRF 403; Delete + Save "
+          "sends one POST and removes only the first block (root:root 600), fresh GET shows one network; PSK change "
+          "writes the independently computed WPA hash with every other byte kept; two-tab stale form 409 without a second "
+          "install, reload shows the first write; invalid PSK blocked in the page and 422 from the API; missing wlan0 "
+          "reported by status, Reset and Scan; no restarts, radio files unchanged", flush=True)
+
+
 def exercise_backup(v, stand, origin, folder, original):
     """Classic Backup/Restore through Chromium against the real helper."""
     import base64
@@ -545,6 +694,7 @@ def main():
     parser.add_argument("--configure", action="store_true")
     parser.add_argument("--css", action="store_true")
     parser.add_argument("--factory", action="store_true")
+    parser.add_argument("--wifi", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -567,7 +717,7 @@ def main():
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
             # /manage/ is the classic admin page; the station settings, DMR
             # services and backup pages live under their own sections.
-            if not (args.expert or args.backup or args.configure or args.css or args.factory):
+            if not (args.expert or args.backup or args.configure or args.css or args.factory or args.wifi):
                 command("/url", {"url": args.origin + "/manage/#settings"})
                 wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
             try:
@@ -592,6 +742,8 @@ def run_scenario(args, v, stand, folder, original, changed):
         exercise_css(v, stand, args.origin, original)
     elif args.factory:
         exercise_factory(v, stand, args.origin, original)
+    elif args.wifi:
+        exercise_wifi(v, stand, args.origin, original)
     elif args.services:
         exercise_services(v, stand, original)
     else:

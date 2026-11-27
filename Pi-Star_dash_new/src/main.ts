@@ -42,6 +42,9 @@ if (settings) {
   };
   window.addEventListener('hashchange', () => void route());
   void route();
+} else if (location.pathname === '/kiosk') {
+  // Wall-screen view of incoming calls (operator listener only).
+  mount((await import('./Kiosk.svelte')).default, {target: document.getElementById('app')!});
 } else if (location.hash === '#console') {
   // Catalog of every classic function; the classic dashboard is the default view.
   mount((await import('./App.svelte')).default, {target: document.getElementById('app')!});

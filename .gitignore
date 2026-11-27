@@ -26,3 +26,6 @@
 **/id_ed25519*
 /Pi-Star_dash_new/qa/evidence/
 /Pi-Star_dash_new/docs/TEST-REPORT.md
+
+# go test -cpuprofile leaves the test binary
+/panel/*.test

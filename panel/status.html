@@ -20,7 +20,7 @@ footer{text-align:center;padding:8px;font-size:11px}
 @media(max-width:660px){body{padding:0}.frame{border-radius:0}.layout{display:flex;flex-direction:column}aside{display:grid;grid-template-columns:1fr 1fr;gap:6px}aside section{margin:0}main{padding:6px}th,td{padding:4px}h2{font-size:13px}}
 </style></head><body><div class="frame">
 <header><div class="meta"><span>Узел: <b>{{.Node}}</b></span><span>MMDVM-Host / DMRGateway</span></div>
-<h1>Pi-Star · Digital Voice Dashboard{{with .Radio.Callsign}} · {{.}}{{end}}</h1>
+<h1>GoSpot · Digital Voice Dashboard{{with .Radio.Callsign}} · {{.}}{{end}}</h1>
 <nav><a href="/">Статус</a><a href="#heard">Last Heard</a><a href="/api/status">JSON</a><a id="settings" hidden>Настройки</a></nav>
 </header><div class="layout"><aside aria-label="Параметры радиостанции">
 <section><h2>Радиостанция</h2><dl><dt>Позывной / DMR ID</dt><dd>{{or .Radio.Callsign "—"}} / {{or .Radio.ID "—"}}</dd>

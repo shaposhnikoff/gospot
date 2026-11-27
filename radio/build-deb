@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# Build pistar-radio: the Pi-Star PS4 radio binaries, the reusable Pi-Star
-# sbin tools and service handlers, the Python 3 ports of pistar-watchdog and
-# pistar-remote (radio/sbin), systemd units for them, the shared libraries
-# Debian lacks, and a daily host-file update timer.
-# All paths come from Pi-Star_dash_new/pistar.conf.
+# Build gospot-radio: the Pi-Star PS4 radio binaries, the reusable Pi-Star
+# sbin tools and service handlers (renamed and rewritten for the GoSpot layout
+# by gospot-rebrand with gospot-rename.table), the Python 3 ports
+# gospot-watchdog and gospot-remote (radio/sbin), systemd units for them, the
+# shared libraries Debian lacks, a daily host-file update timer and the
+# one-time migration from the pistar-radio layout (gospot-radio-migrate).
+# All paths come from Pi-Star_dash_new/gospot.conf.
 set -euo pipefail
 cd "$(dirname "$0")"
 umask 022
 suite=${1:-bookworm}
-# shellcheck source=../Pi-Star_dash_new/pistar.conf
-source ../Pi-Star_dash_new/pistar.conf
+# shellcheck source=../Pi-Star_dash_new/gospot.conf
+source ../Pi-Star_dash_new/gospot.conf
 settings_dir=$PWD/../Pi-Star_dash_new
-bin_src=$(cd "$settings_dir/$PISTAR_BINARIES_BIN_DIR" && pwd)
-sbin_src=$(cd "$settings_dir/$PISTAR_BINARIES_SBIN_DIR" && pwd)
+bin_src=$(cd "$settings_dir/$REFERENCE_BINARIES_BIN_DIR" && pwd)
+sbin_src=$(cd "$settings_dir/$REFERENCE_BINARIES_SBIN_DIR" && pwd)
 libs=$PWD/build/$suite/lib
 [[ -e $libs/libArduiPi_OLED.so.1.0 ]] || ./build-libs.sh "$suite"
 dstar=$PWD/build/$suite/dstar
@@ -31,38 +33,64 @@ dstar_binaries=(ircddbgatewayd timeserverd starnetserverd remotecontrold timerco
 services=(mmdvmhost dmrgateway ysfgateway ysfparrot p25gateway p25parrot nxdngateway nxdnparrot
   nxdn2dmr dapnetgateway m17gateway dgidgateway aprsgateway ysf2dmr ysf2nxdn ysf2p25 dmr2ysf dmr2nxdn mobilegps
   ircddbgateway timeserver timercontrol dstarrepeater)
-# Tools without references to the PHP dashboard, nginx or /var/www.
-tools=(HostFilesUpdate.sh pistar-bmapi pistar-dapnetapi pistar-tgifapi pistar-link pistar-ysflink
-  pistar-p25link pistar-nxdnlink pistar-findmodem pistar-mmdvmcal pistar-mmdvmhost-module
-  pistar-mmdvmremote pistar-modemupgrade pistar-jittertest pistar-sendcw pistar-motdgen
-  pistar-firewall pistar-expand)
 # Python 3 ports of Pi-Star daemons (radio/sbin) and their handlers, which are
 # named like their units, as in Pi-Star.
-daemons=(pistar-watchdog:"$UNIT_PISTAR_WATCHDOG" pistar-remote:"$UNIT_PISTAR_REMOTE")
+daemons=(gospot-watchdog:"$UNIT_GOSPOT_WATCHDOG" gospot-remote:"$UNIT_GOSPOT_REMOTE")
 
 version=$(sed -n 's/^Version: //p' debian/control)
 version=${DEB_VERSION:-$version}
 dpkg --validate-version "$version"
 d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
 p=$d/pkg
-install -d "$p/DEBIAN" "$p$PISTAR_BIN_DIR" "$p$PISTAR_SBIN_DIR" "$p/usr/local/lib" "$p$SYSTEMD_UNIT_DIR" "$p$RADIO_SHARE_DIR"
+install -d "$p/DEBIAN" "$p$GOSPOT_BIN_DIR" "$p$GOSPOT_SBIN_DIR" "$p/usr/local/lib" "$p$SYSTEMD_UNIT_DIR" "$p$RADIO_SHARE_DIR"
 sed "s/^Version: .*/Version: $version/" debian/control >"$p/DEBIAN/control"
-install -m755 debian/postinst "$p/DEBIAN/"
+sed "s|@RADIO_SHARE_DIR@|$RADIO_SHARE_DIR|g" debian/postinst >"$p/DEBIAN/postinst"
+chmod 755 "$p/DEBIAN/postinst"
 
-for b in "${binaries[@]}"; do install -m755 "$bin_src/$b" "$p$PISTAR_BIN_DIR/$b"; done
-for b in "${dstar_binaries[@]}"; do install -m755 "$dstar/bin/$b" "$p$PISTAR_BIN_DIR/$b"; done
+# The rename table with every ${KEY} taken from gospot.conf; the board keeps it
+# for seed-configs and gospot-radio-migrate.
+table=$p$RADIO_SHARE_DIR/rename.table
+./gospot-rebrand resolve gospot-rename.table "$settings_dir/gospot.conf" >"$table"
+chmod 644 "$table"
+install -m755 gospot-rebrand gospot-radio-migrate seed-configs "$p$RADIO_SHARE_DIR/"
+# rebrand SOURCE NAME DEST: a Pi-Star script rewritten by the table; fails on
+# anything the table neither renames nor allows.
+rebrand() { ./gospot-rebrand apply "$table" "$2" <"$1" >"$3"; chmod 755 "$3"; }
+
+# The rebuilt D-Star daemons log to the directory compiled in (LOGDIR).
+for b in "${dstar_binaries[@]}"; do
+  if grep -aqi 'pi-star\|pistar' "$dstar/bin/$b"; then
+    echo "$dstar/bin/$b was built with a Pi-Star path; rebuild it: ./build-dstar.sh $suite" >&2
+    [[ ${GOSPOT_ALLOW_STALE_DSTAR:-} == 1 ]] || exit 1
+    echo "WARNING: GOSPOT_ALLOW_STALE_DSTAR=1, packaging the stale $b for inspection only" >&2
+  fi
+done
+if ! grep -aq "$GOSPOT_LOG_DIR" "$dstar/bin/dstarrepeaterd"; then
+  echo "dstarrepeaterd does not log to $GOSPOT_LOG_DIR; rebuild it: ./build-dstar.sh $suite" >&2
+  [[ ${GOSPOT_ALLOW_STALE_DSTAR:-} == 1 ]] || exit 1
+fi
+
+for b in "${binaries[@]}"; do
+  if [[ $b == *.sh ]]; then rebrand "$bin_src/$b" "$b" "$p$GOSPOT_BIN_DIR/$b"; else install -m755 "$bin_src/$b" "$p$GOSPOT_BIN_DIR/$b"; fi
+done
+for b in "${dstar_binaries[@]}"; do install -m755 "$dstar/bin/$b" "$p$GOSPOT_BIN_DIR/$b"; done
 # AMBE voice data where the daemons look for it; the D-Star host lists are
-# kept up to date by HostFilesUpdate.sh in PISTAR_HOSTS_DIR.
+# kept up to date by HostFilesUpdate.sh in GOSPOT_HOSTS_DIR.
 install -d -m755 "$p$DSTAR_IRCDDB_DATA_DIR" "$p$DSTAR_REPEATER_DATA_DIR"
 install -m644 "$dstar"/ircddbgateway/* "$p$DSTAR_IRCDDB_DATA_DIR/"
 find "$dstar/dstarrepeater" -type f -exec install -m644 {} "$p$DSTAR_REPEATER_DATA_DIR/" \;
 for h in DPlus_Hosts.txt DExtra_Hosts.txt DCS_Hosts.txt CCS_Hosts.txt XLXHosts.txt; do
-  ln -s "$PISTAR_HOSTS_DIR/$h" "$p$DSTAR_IRCDDB_DATA_DIR/$h"
+  ln -s "$GOSPOT_HOSTS_DIR/$h" "$p$DSTAR_IRCDDB_DATA_DIR/$h"
 done
-cp -a "$bin_src/firmware" "$p$PISTAR_BIN_DIR/firmware"
-find "$p$PISTAR_BIN_DIR/firmware" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
+cp -a "$bin_src/firmware" "$p$GOSPOT_BIN_DIR/firmware"
+find "$p$GOSPOT_BIN_DIR/firmware" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 install -m644 "$bin_src/config_clean.zip" "$p$RADIO_SHARE_DIR/config_clean.zip"
-for t in "${tools[@]}"; do install -m755 "$sbin_src/$t" "$p$PISTAR_SBIN_DIR/$t"; done
+# Pi-Star tools without references to the PHP dashboard, nginx or /var/www,
+# installed under the names of the table's tool rules.
+rebrand "$sbin_src/HostFilesUpdate.sh" HostFilesUpdate.sh "$p$GOSPOT_SBIN_DIR/HostFilesUpdate.sh"
+while read -r src dst; do
+  rebrand "$sbin_src/$src" "$src" "$p$GOSPOT_SBIN_DIR/$dst"
+done < <(./gospot-rebrand tools "$table")
 # Shared libraries; the OLED one only satisfies MMDVMHost's link, no display is configured.
 for f in "$libs"/*; do
   if [[ -L $f ]]; then ln -s "$(basename "$(readlink "$f")")" "$p/usr/local/lib/$(basename "$f")"
@@ -76,61 +104,63 @@ handler_unit() {
   local unit=$1
   cat >"$p$SYSTEMD_UNIT_DIR/$unit" <<EOF
 [Unit]
-Description=Pi-Star ${unit%.service} (handler $PISTAR_SBIN_DIR/$unit)
+Description=GoSpot ${unit%.service} (handler $GOSPOT_SBIN_DIR/$unit)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=forking
-ExecStart=$PISTAR_SBIN_DIR/$unit start
-ExecStop=$PISTAR_SBIN_DIR/$unit stop
-ExecReload=$PISTAR_SBIN_DIR/$unit restart
+ExecStart=$GOSPOT_SBIN_DIR/$unit start
+ExecStop=$GOSPOT_SBIN_DIR/$unit stop
+ExecReload=$GOSPOT_SBIN_DIR/$unit restart
 TimeoutStartSec=120
 
 [Install]
 WantedBy=multi-user.target
 EOF
 }
+radio_units=()
 for s in "${services[@]}"; do
-  install -m755 "$sbin_src/$s.service" "$p$PISTAR_SBIN_DIR/$s.service"
+  rebrand "$sbin_src/$s.service" "$s.service" "$p$GOSPOT_SBIN_DIR/$s.service"
   handler_unit "$s.service"
+  radio_units+=("$s.service")
 done
 # Pi-Star's own handlers for these run /usr/bin/python (Python 2); radio/sbin
 # has handlers for the Python 3 ports, which read the paths file below.
 for entry in "${daemons[@]}"; do
   daemon=${entry%%:*} unit=${entry#*:}
-  sed "s|@RADIO_SHARE_DIR@|$RADIO_SHARE_DIR|g" "sbin/$daemon" >"$p$PISTAR_SBIN_DIR/$daemon"
-  chmod 755 "$p$PISTAR_SBIN_DIR/$daemon"
-  if grep -q '@RADIO_SHARE_DIR@' "$p$PISTAR_SBIN_DIR/$daemon"; then echo "placeholder left in $daemon" >&2; exit 1; fi
-  install -m755 "sbin/$daemon.service" "$p$PISTAR_SBIN_DIR/$unit"
+  sed "s|@RADIO_SHARE_DIR@|$RADIO_SHARE_DIR|g" "sbin/$daemon" >"$p$GOSPOT_SBIN_DIR/$daemon"
+  chmod 755 "$p$GOSPOT_SBIN_DIR/$daemon"
+  if grep -q '@RADIO_SHARE_DIR@' "$p$GOSPOT_SBIN_DIR/$daemon"; then echo "placeholder left in $daemon" >&2; exit 1; fi
+  install -m755 "sbin/$daemon.service" "$p$GOSPOT_SBIN_DIR/$unit"
   handler_unit "$unit"
 done
 # The watchdog and the remote act only on units this package installs (the
 # Pi-Star delay timers they also stop are optional).
 for item in ${WATCHDOG_DSTARREPEATER_PROCESSES//,/ } ${WATCHDOG_MMDVMHOST_PROCESSES//,/ } \
-    ${WATCHDOG_COMMON_PROCESSES//,/ } "$UNIT_MMDVMHOST" "$UNIT_DSTARREPEATER" "$UNIT_PISTAR_REMOTE" \
+    ${WATCHDOG_COMMON_PROCESSES//,/ } "$UNIT_MMDVMHOST" "$UNIT_DSTARREPEATER" "$UNIT_GOSPOT_REMOTE" \
     ${REMOTE_MMDVMHOST_STOP_UNITS//,/ } ${REMOTE_DSTARREPEATER_STOP_UNITS//,/ } ${REMOTE_DMR_RESTART_UNITS//,/ } \
     ${REMOTE_P25_RESTART_UNITS//,/ } ${REMOTE_DSTAR_RESTART_UNITS//,/ } ${REMOTE_YSF_RESTART_UNITS//,/ } \
     ${REMOTE_DSTARREPEATER_RESTART_UNITS//,/ }; do
   unit=${item#*:}
   if [[ $unit != *.timer && ! -e $p$SYSTEMD_UNIT_DIR/$unit ]]; then
-    echo "pistar.conf names $unit, which pistar-radio does not install" >&2; exit 1
+    echo "gospot.conf names $unit, which gospot-radio does not install" >&2; exit 1
   fi
 done
 
-cat >"$p$SYSTEMD_UNIT_DIR/pistar-hostfiles.service" <<EOF
+cat >"$p$SYSTEMD_UNIT_DIR/gospot-hostfiles.service" <<EOF
 [Unit]
-Description=Pi-Star host files and ID database update
+Description=GoSpot host files and ID database update
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=$PISTAR_SBIN_DIR/HostFilesUpdate.sh
+ExecStart=$GOSPOT_SBIN_DIR/HostFilesUpdate.sh
 EOF
-cat >"$p$SYSTEMD_UNIT_DIR/pistar-hostfiles.timer" <<EOF
+cat >"$p$SYSTEMD_UNIT_DIR/gospot-hostfiles.timer" <<EOF
 [Unit]
-Description=Daily Pi-Star host files update
+Description=Daily GoSpot host files update
 
 [Timer]
 OnBootSec=10min
@@ -142,36 +172,53 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-# Paths and units the maintainer script, pistar-watchdog and pistar-remote
-# need, resolved at build time.
-paths_keys=(PISTAR_LOG_DIR PISTAR_HOSTS_DIR PISTAR_RELEASE_FILE RADIO_USER RADIO_SHARE_DIR
-  PISTAR_BIN_DIR PISTAR_SBIN_DIR SYSTEM_LOG_DIR MARKER_MMDVMHOST MARKER_DSTARREPEATER
-  CONF_MMDVMHOST CONF_YSFGATEWAY CONF_PISTAR_REMOTE UNIT_MMDVMHOST UNIT_DSTARREPEATER UNIT_PISTAR_REMOTE
+# Paths and units the maintainer scripts, gospot-watchdog and gospot-remote
+# need, resolved at build time; every radio configuration (CONF_*) for the
+# migration, and the handler units it restarts when the log path moved.
+paths_keys=(GOSPOT_LOG_DIR GOSPOT_HOSTS_DIR GOSPOT_RELEASE_FILE GOSPOT_CSS_FILE GOSPOT_KEEPER_LOG RADIO_USER RADIO_SHARE_DIR
+  GOSPOT_BIN_DIR GOSPOT_SBIN_DIR SYSTEM_LOG_DIR MARKER_MMDVMHOST MARKER_DSTARREPEATER
+  UNIT_MMDVMHOST UNIT_DSTARREPEATER UNIT_GOSPOT_WATCHDOG UNIT_GOSPOT_REMOTE
   WATCHDOG_DSTARREPEATER_PROCESSES WATCHDOG_MMDVMHOST_PROCESSES WATCHDOG_COMMON_PROCESSES
   REMOTE_MMDVMHOST_STOP_UNITS REMOTE_DSTARREPEATER_STOP_UNITS REMOTE_DMR_RESTART_UNITS REMOTE_P25_RESTART_UNITS
   REMOTE_DSTAR_RESTART_UNITS REMOTE_YSF_RESTART_UNITS REMOTE_DSTARREPEATER_RESTART_UNITS
   IP_BIN IW_BIN SYSFS_NET_DIR WIFI_INTERFACE)
-for key in "${paths_keys[@]}"; do
-  if [[ -z ${!key:-} ]]; then echo "pistar.conf has no $key" >&2; exit 1; fi
+mapfile -t conf_keys < <(compgen -v CONF_ | LC_ALL=C sort)
+RADIO_UNITS=$(IFS=,; echo "${radio_units[*]}")
+for key in "${paths_keys[@]}" "${conf_keys[@]}" RADIO_UNITS; do
+  if [[ -z ${!key:-} ]]; then echo "gospot.conf has no $key" >&2; exit 1; fi
   printf '%s=%s\n' "$key" "${!key}"
 done >"$p$RADIO_SHARE_DIR/paths"
 chmod 644 "$p$RADIO_SHARE_DIR/paths"
 
-# Default Pi-Star configurations (config_clean.zip) and where each one lives;
-# postinst creates only the files that are missing.
+# Default Pi-Star configurations (config_clean.zip) and where each one lives
+# (the member's GoSpot name decides its CONF_ key); postinst creates only the
+# files that are missing, rewritten by the table. Every member is checked here.
 : >"$p$RADIO_SHARE_DIR/config-seed"
 for member in $(unzip -Z1 "$bin_src/config_clean.zip"); do
-  key=CONF_$(printf '%s' "$member" | tr 'a-z-' 'A-Z_')
+  key=CONF_$(./gospot-rebrand name "$table" "$member" | tr 'a-z-' 'A-Z_')
   target=${!key:-}
-  if [[ -z $target ]]; then echo "pistar.conf has no $key for config_clean.zip member $member" >&2; exit 1; fi
+  if [[ -z $target ]]; then echo "gospot.conf has no $key for config_clean.zip member $member" >&2; exit 1; fi
+  unzip -p "$bin_src/config_clean.zip" "$member" | ./gospot-rebrand apply "$table" "config_clean.zip:$member" >/dev/null
   printf '%s %s\n' "$member" "$target" >>"$p$RADIO_SHARE_DIR/config-seed"
 done
 chmod 644 "$p$RADIO_SHARE_DIR/config-seed"
-install -m755 seed-configs "$p$RADIO_SHARE_DIR/seed-configs"
 
 if find "$p" -name '*.php' | grep -q .; then echo "PHP in package" >&2; exit 1; fi
+# No Pi-Star names in the installed file names, and none left in the text
+# files except where the table allows them. The table itself (old names are
+# its data), the config_clean.zip member list (the zip's Pi-Star member
+# names), the migration (old paths are its input), the package relations
+# (they name pistar-radio) and the Python ports with their handlers (they cite
+# the Pi-Star originals) are the deliberate exceptions.
+if find "$p" -iname '*pistar*' -o -iname '*pi-star*' | grep .; then echo "Pi-Star file names in package" >&2; exit 1; fi
+exempt=("$p/DEBIAN/control" "$table" "$p$RADIO_SHARE_DIR/config-seed" "$p$RADIO_SHARE_DIR/gospot-radio-migrate" "$p$RADIO_SHARE_DIR/gospot-rebrand")
+for entry in "${daemons[@]}"; do exempt+=("$p$GOSPOT_SBIN_DIR/${entry%%:*}" "$p$GOSPOT_SBIN_DIR/${entry#*:}"); done
+while IFS= read -r f; do
+  for e in "${exempt[@]}"; do [[ $f == "$e" ]] && continue 2; done
+  ./gospot-rebrand check "$table" "${f#"$p"}" <"$f"
+done < <(grep -rIli 'pistar\|pi-star\|pi_star' "$p" || true)
 (cd "$p" && find usr lib -type f -print0 | LC_ALL=C sort -z | xargs -0 md5sum >DEBIAN/md5sums)
 mkdir -p "build/$suite"
-dest=build/$suite/pistar-radio_${version}_armhf.deb
+dest=build/$suite/gospot-radio_${version}_armhf.deb
 dpkg-deb --root-owner-group --build "$p" "$dest" >/dev/null
 sha256sum "$dest"

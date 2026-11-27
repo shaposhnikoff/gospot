@@ -70,7 +70,7 @@ func modemTypes(ctx context.Context, run runFunc) ([]linkOption, error) {
 func flashRunning(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	out, _ := runDiagnostic(ctx, "systemctl", "is-active", "pistar-modem-flash.service")
+	out, _ := runDiagnostic(ctx, "systemctl", "is-active", "gospot-modem-flash.service")
 	return strings.TrimSpace(string(out)) == "active"
 }
 
@@ -178,6 +178,6 @@ func serveExpertTools(w http.ResponseWriter, r *http.Request, run configHelperFu
 }
 
 func setToolPaths(lib string, s settings) {
-	modemHelper = filepath.Join(lib, "pistar-modem")
+	modemHelper = filepath.Join(lib, "gospot-modem")
 	modemFlashLog, shellinaboxDefaults = s["MODEM_FLASH_LOG"], s["SHELLINABOX_DEFAULTS"]
 }

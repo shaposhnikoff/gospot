@@ -1,7 +1,7 @@
-# `pistar-config`
+# `gospot-config`
 
 Standalone Python 3 entrypoint for the existing Pi service configuration. Install
-root-owned, mode `0755`, at `/usr/local/libexec/pistar-config`. Its only arguments
+root-owned, mode `0755`, at `/usr/local/libexec/gospot-config`. Its only arguments
 are `read`, `apply`, or `rollback`; exit status zero indicates success.
 
 - `read` returns a JSON object with the seven public settings below.
@@ -23,7 +23,7 @@ USB serial character device (`/dev/ttyUSB<n>`, `/dev/ttyACM<n>`, or a
 or DNS hostname. `port` is 1–65535. Passwords may contain up to 128 printable
 ASCII characters.
 
-The helper locks `/var/lib/pistar-panel-config/` operations, atomically replaces
+The helper locks `/var/lib/gospot/` operations, atomically replaces
 the two fixed INIs individually, and restarts changed services, gateway first.
 The repository's service user owns `/etc/DMRGateway.ini`; apply and rollback
 remove group/other access. Files in the private state directory, including the

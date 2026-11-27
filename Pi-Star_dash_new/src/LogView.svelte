@@ -70,7 +70,7 @@
 </script>
 
 <section class="logs" data-testid="log-view" aria-labelledby="log-title">
-  <header><p class="kicker">ДИАГНОСТИКА PI-STAR</p><h1 id="log-title">Журнал радиомодема</h1>
+  <header><p class="kicker">ДИАГНОСТИКА GOSPOT</p><h1 id="log-title">Журнал радиомодема</h1>
     <p>{demo ? 'Демонстрационные данные.' : 'Текущая загрузка станции.'} Радиособытия из последних 64 записей MMDVMHost и DMRGateway, новые сверху.</p>
   </header>
   <div class="card">
@@ -80,7 +80,7 @@
       <label>Фильтр<input type="search" bind:value={filter} maxlength="128" placeholder="Уровень или текст события" data-testid="log-filter" /></label>
       <button type="button" onclick={togglePause} aria-pressed={paused} data-testid="log-pause">{paused ? 'Возобновить' : 'Пауза'}</button>
       <button type="button" disabled={pending} onclick={refresh} data-testid="log-refresh">Обновить</button>
-      <a href={demo ? demoDownload : endpoint + '/download'} download={demo ? 'pi-star-radio-demo.txt' : 'pi-star-radio-log.txt'} data-testid="log-download">Скачать TXT</a>
+      <a href={demo ? demoDownload : endpoint + '/download'} download={demo ? 'gospot-radio-demo.txt' : 'gospot-radio-log.txt'} data-testid="log-download">Скачать TXT</a>
     </div>
     <p class="meta">{paused ? 'Автообновление на паузе' : 'Автообновление каждые 5 с'}{updated ? ` · Снимок: ${updated}` : ''} · Показано: {visible.length} из {rows.length}</p>
     {#if error}<p class="error" role="alert">{error}{updated ? ' Показан последний полученный снимок.' : ''}</p>{/if}

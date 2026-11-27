@@ -17,9 +17,9 @@ TYPES = {
 }
 MAX_STATUS = 1024 * 1024
 # Set only when an authenticated HTTPS classic docroot is installed on this node.
-CLASSIC_PORT = int(os.environ.get("PISTAR_CLASSIC_HTTPS_PORT", "0"))
+CLASSIC_PORT = int(os.environ.get("GOSPOT_CLASSIC_HTTPS_PORT", "0"))
 if not 0 <= CLASSIC_PORT <= 65535:
-    raise ValueError("Invalid PISTAR_CLASSIC_HTTPS_PORT")
+    raise ValueError("Invalid GOSPOT_CLASSIC_HTTPS_PORT")
 PUBLIC_ALIASES = {"/index.php": "/#overview", "/mmdvmhost/lh.php": "/#heard-all",
                   "/mmdvmhost/localtx.php": "/#heard-rf", "/mmdvmhost/repeaterinfo.php": "/#overview"}
 ADMIN_ALIASES = {"/admin/": "", "/admin/index.php": "", "/admin/configure.php": "#configuration",
@@ -82,7 +82,7 @@ class Handler(BaseHTTPRequestHandler):
         if re.fullmatch(r"/api/last_heard\.php(?:\?num_transmissions=\d{1,3})?", target):
             return self.status(target)
         if target == "/runtime.json":
-            settings = {"backend":"pistar-go","wizardPort":8788}
+            settings = {"backend":"gospot-go","wizardPort":8788}
             if CLASSIC_PORT:
                 settings["classicHttpsPort"] = CLASSIC_PORT
             return self.reply(200, json.dumps(settings).encode(), "application/json")

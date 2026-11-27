@@ -12,7 +12,7 @@ export type Row = {
   name?: string; targetName?: string;
 };
 export type Dashboard = {
-  Hostname: string; Callsign: string; Version: string; PiStar: string; Controller: string;
+  Hostname: string; Callsign: string; Version: string; Release: string; Controller: string;
   Modes: Cell[] | null; Networks: Cell[] | null;
   TRX: { kind: string; mode: string; label: string };
   TX: string; RX: string; Firmware: string; TCXO: string;
@@ -28,7 +28,7 @@ export type Dashboard = {
   Theme?: Theme;
 };
 
-// /etc/pistar-css.ini as css/pistar-css.php applies it (colours are validated
+// /etc/gospot-css.ini as css/pistar-css.php applies it (colours are validated
 // hex values from the server); BannerH1/BannerExt are shown as plain text.
 export type Theme = {
   Page: string; Content: string; Banners: string; BannerText: string; BannerDrop: string; HeadDrop: string;

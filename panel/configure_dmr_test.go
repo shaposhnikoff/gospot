@@ -127,10 +127,10 @@ func dmrMode(t *testing.T, mode string, extra map[string]string) *cfgContext {
 
 func dmrSetup(t *testing.T) {
 	t.Helper()
-	savedDir, savedSections := pistarHostsDir, cfgSections
-	t.Cleanup(func() { pistarHostsDir, cfgSections = savedDir, savedSections })
-	pistarHostsDir = t.TempDir()
-	if err := os.WriteFile(filepath.Join(pistarHostsDir, "DMR_Hosts.txt"), []byte(dmrTestHostsFile), 0o644); err != nil {
+	savedDir, savedSections := gospotHostsDir, cfgSections
+	t.Cleanup(func() { gospotHostsDir, cfgSections = savedDir, savedSections })
+	gospotHostsDir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(gospotHostsDir, "DMR_Hosts.txt"), []byte(dmrTestHostsFile), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfgSections = nil
@@ -278,7 +278,7 @@ func TestDMRHostListParsing(t *testing.T) {
 		t.Fatalf("DMR Master options\n got %v\nwant %v", got, want)
 	}
 	// Short lines read missing columns as "".
-	if err := os.WriteFile(filepath.Join(pistarHostsDir, "DMR_Hosts.txt"), []byte("Short\nBM_X 1 1.2.3.4\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(gospotHostsDir, "DMR_Hosts.txt"), []byte("Short\nBM_X 1 1.2.3.4\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s = buildDMRSection(dmrTestState(t, nil))
@@ -286,7 +286,7 @@ func TestDMRHostListParsing(t *testing.T) {
 		t.Fatalf("short lines: %v", o)
 	}
 	// No host file: empty select, nothing selected.
-	os.Remove(filepath.Join(pistarHostsDir, "DMR_Hosts.txt"))
+	os.Remove(filepath.Join(gospotHostsDir, "DMR_Hosts.txt"))
 	s = buildDMRSection(dmrTestState(t, nil))
 	if ctl := dmrControl(t, s, "dmrMasterHost"); len(ctl.Options) != 0 || ctl.Value != "" {
 		t.Fatalf("missing host file: %+v", ctl)

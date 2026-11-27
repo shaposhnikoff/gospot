@@ -12,7 +12,7 @@ import (
 
 // Every section together: building the page and posting every displayed
 // value back (as Configure.svelte does, one form at a time) must plan no
-// change at all. Uses the QA stand's minimal INIs; PISTAR_ROUNDTRIP_DIR may
+// change at all. Uses the QA stand's minimal INIs; GOSPOT_ROUNDTRIP_DIR may
 // point at a directory of real board files named after configState files
 // (mmdvmhost, dmrgateway, ...; a "marker" file is the controller marker).
 func TestConfigureUntouchedRoundTrip(t *testing.T) {
@@ -32,7 +32,7 @@ func TestConfigureUntouchedRoundTrip(t *testing.T) {
 		}, map[string]*string{"mmdvmhost": ctlMarker("zumspotgpio"), "dstarrepeater": nil}),
 		"classic base": ctlBase(),
 	}
-	if dir := os.Getenv("PISTAR_ROUNDTRIP_DIR"); dir != "" {
+	if dir := os.Getenv("GOSPOT_ROUNDTRIP_DIR"); dir != "" {
 		files := map[string]string{}
 		entries, err := os.ReadDir(dir)
 		if err != nil {

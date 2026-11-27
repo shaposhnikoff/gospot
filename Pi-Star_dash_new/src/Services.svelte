@@ -15,7 +15,7 @@
     busy=true; message=''; error='';
     try {
       if(save) {
-        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-PiStar-CSRF':csrf},body:JSON.stringify(cfg)});
+        const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','X-GoSpot-CSRF':csrf},body:JSON.stringify(cfg)});
         if(!r.ok) throw Error((await r.text()).trim() || `HTTP ${r.status}`);
       }
        await load();

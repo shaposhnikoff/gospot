@@ -1,8 +1,8 @@
 #!/usr/bin/python3 -I
-"""Pi-Star Auto Remote Control: RF keeper commands found in the radio logs.
+"""GoSpot Auto Remote Control: RF keeper commands found in the radio logs.
 
 Python 3 port of Pi-Star's pistar-remote 1.9 (Andy Taylor, MW0MWZ). While
-CONF_PISTAR_REMOTE has "[enable] enabled=true", the callsign of its [keeper]
+CONF_GOSPOT_REMOTE has "[enable] enabled=true", the callsign of its [keeper]
 section controls the hotspot over RF:
 
   DMR     voice header to a [dmr] TG or ID              (MMDVMHost log)
@@ -17,14 +17,14 @@ reboot, shutdown and hostfiles (HostFilesUpdate.sh); D-Star also has getip,
 wifissid, wifirssi and 8Ball, answered as D-Star slow data text through
 texttransmitd, which also announces the other D-Star commands first.
 
-Every path and unit name comes from the pistar-radio paths file (written from
-pistar.conf when the package is built). Programs run as argument lists,
+Every path and unit name comes from the gospot-radio paths file (written from
+gospot.conf when the package is built). Programs run as argument lists,
 never through a shell. Each log line is read once; a command acts only on
 lines of the last WINDOW seconds and at most once per COOLDOWN.
 
-  pistar-remote            run (exits at once when disabled)
-  pistar-remote --enabled  exit 0 when enabled, 1 otherwise
-  pistar-remote --once     one pass over the logs, then exit
+  gospot-remote            run (exits at once when disabled)
+  gospot-remote --enabled  exit 0 when enabled, 1 otherwise
+  gospot-remote --once     one pass over the logs, then exit
 """
 import argparse
 import configparser
@@ -38,7 +38,7 @@ import sys
 import time
 
 PATHS_FILE = "@RADIO_SHARE_DIR@/paths"
-PATH_KEYS = ("PISTAR_BIN_DIR", "PISTAR_SBIN_DIR", "PISTAR_LOG_DIR", "CONF_PISTAR_REMOTE", "CONF_MMDVMHOST",
+PATH_KEYS = ("GOSPOT_BIN_DIR", "GOSPOT_SBIN_DIR", "GOSPOT_LOG_DIR", "CONF_GOSPOT_REMOTE", "CONF_MMDVMHOST",
              "CONF_YSFGATEWAY", "IP_BIN", "IW_BIN", "SYSFS_NET_DIR")
 UNIT_KEYS = ("REMOTE_MMDVMHOST_STOP_UNITS", "REMOTE_DSTARREPEATER_STOP_UNITS", "REMOTE_DMR_RESTART_UNITS",
              "REMOTE_P25_RESTART_UNITS", "REMOTE_DSTAR_RESTART_UNITS", "REMOTE_YSF_RESTART_UNITS",
@@ -86,25 +86,25 @@ DSTARREPEATER_HEADER = re.compile(r"Radio header decoded - My: (.{8})/(.{4})\s+Y
 
 
 def log(message):
-    print("pistar-remote: " + message, flush=True)
+    print("gospot-remote: " + message, flush=True)
 
 
 def load_paths(path=None):
-    """Read the pistar-radio paths file (KEY=value), trusted only if no one
+    """Read the gospot-radio paths file (KEY=value), trusted only if no one
     but its owner, root, can change it. Unprivileged runs (tests) may name
-    another file in PISTAR_RADIO_PATHS."""
+    another file in GOSPOT_RADIO_PATHS."""
     if path is None:
         path = PATHS_FILE
         if os.geteuid() != 0:
-            path = os.environ.get("PISTAR_RADIO_PATHS", PATHS_FILE)
+            path = os.environ.get("GOSPOT_RADIO_PATHS", PATHS_FILE)
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError as e:
-        raise SystemExit(f"pistar-remote: cannot read {path}: {e.strerror}")
+        raise SystemExit(f"gospot-remote: cannot read {path}: {e.strerror}")
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o022:
         os.close(fd)
-        raise SystemExit(f"pistar-remote: unsafe paths file {path}")
+        raise SystemExit(f"gospot-remote: unsafe paths file {path}")
     values = {}
     with os.fdopen(fd, encoding="utf-8") as f:
         for line in f:
@@ -112,18 +112,18 @@ def load_paths(path=None):
             if line and not line.startswith("#"):
                 key, sep, value = line.partition("=")
                 if not sep or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or re.search(r"[\s\"'$`\\]", value):
-                    raise SystemExit(f"pistar-remote: invalid line in {path}")
+                    raise SystemExit(f"gospot-remote: invalid line in {path}")
                 values[key] = value
     for key in PATH_KEYS:
         value = values.get(key, "")
         if not value.startswith("/") or os.path.normpath(value) != value:
-            raise SystemExit(f"pistar-remote: {key} must be a clean absolute path")
+            raise SystemExit(f"gospot-remote: {key} must be a clean absolute path")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", values.get("WIFI_INTERFACE", "")):
-        raise SystemExit("pistar-remote: WIFI_INTERFACE must be an interface name")
+        raise SystemExit("gospot-remote: WIFI_INTERFACE must be an interface name")
     for key in UNIT_KEYS:
         units = values.get(key, "").split(",")
         if not all(UNIT.fullmatch(u) for u in units):
-            raise SystemExit(f"pistar-remote: {key} must be a comma separated list of units")
+            raise SystemExit(f"gospot-remote: {key} must be a comma separated list of units")
     return values
 
 
@@ -203,7 +203,7 @@ class LogFollower:
 class Settings:
     def __init__(self, paths):
         self.paths = paths
-        remote = read_ini(paths["CONF_PISTAR_REMOTE"])
+        remote = read_ini(paths["CONF_GOSPOT_REMOTE"])
         self.keeper = ini_get(remote, "keeper", "callsign").upper()
         self.enabled = ini_get(remote, "enable", "enabled") == "true" and bool(self.keeper)
         self.commands = {}
@@ -220,14 +220,14 @@ class Settings:
             self.commands[mode] = table
         mmdvm = read_ini(paths["CONF_MMDVMHOST"])
         ysf = read_ini(paths["CONF_YSFGATEWAY"])
-        logs = paths["PISTAR_LOG_DIR"]
+        logs = paths["GOSPOT_LOG_DIR"]
         self.mmdvm_log = (ini_get(mmdvm, "Log", "FilePath", logs), ini_get(mmdvm, "Log", "FileRoot", "MMDVM"))
         self.ysf_log = (ini_get(ysf, "Log", "FilePath", logs), ini_get(ysf, "Log", "FileRoot", "YSFGateway"))
         callsign, module = ini_get(mmdvm, "General", "Callsign"), ini_get(mmdvm, "D-Star", "Module")
         # The repeater texttransmitd talks to: callsign padded to 7, then the module.
         self.dstar_repeater = callsign.upper().ljust(7) + module.upper() if callsign and module else None
         self.units = {key: paths[key].split(",") for key in UNIT_KEYS}
-        bins = paths["PISTAR_BIN_DIR"]
+        bins = paths["GOSPOT_BIN_DIR"]
         self.text_transmit = next((p for p in (os.path.join(bins, "texttransmitd"), os.path.join(bins, "texttransmit"))
                                    if os.path.isfile(p)), None)
 
@@ -270,7 +270,7 @@ class Remote:
             if running(self.proc, YSFGATEWAY):
                 self.ysf_lines(gateway, now)
         if running(self.proc, DSTARREPEATER):
-            logs = self.s.paths["PISTAR_LOG_DIR"]
+            logs = self.s.paths["GOSPOT_LOG_DIR"]
             names = [os.path.join(logs, f"{n}-{day}.log") for n in DSTARREPEATER_LOGS]
             path = next((p for p in names if os.path.isfile(p)), names[0])
             self.dstarrepeater_lines(self.dstar.read(path), now)
@@ -368,7 +368,7 @@ class Remote:
         elif action == "hostfiles":
             if self.root_readonly():
                 self.run(["mount", "-o", "remount,rw", "/"])
-            self.run([os.path.join(self.s.paths["PISTAR_SBIN_DIR"], HOSTFILES)])
+            self.run([os.path.join(self.s.paths["GOSPOT_SBIN_DIR"], HOSTFILES)])
         elif action == "getip":
             prefix = "My IP: " if controller == "dstarrepeater" else "IP: "
             self.announce(prefix + (self.address() or "none"))
@@ -413,7 +413,7 @@ class Remote:
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="pistar-remote", description="Pi-Star RF keeper remote control")
+    parser = argparse.ArgumentParser(prog="gospot-remote", description="GoSpot RF keeper remote control (Pi-Star compatible)")
     parser.add_argument("--enabled", action="store_true", help="exit 0 when enabled, 1 otherwise")
     parser.add_argument("--once", action="store_true", help="one pass over the logs, then exit")
     args = parser.parse_args(argv)
@@ -421,7 +421,7 @@ def main(argv=None):
     if args.enabled:
         return 0 if settings.enabled else 1
     if not settings.enabled:
-        log("not enabled in " + settings.paths["CONF_PISTAR_REMOTE"])
+        log("not enabled in " + settings.paths["CONF_GOSPOT_REMOTE"])
         return 0
     remote = Remote(settings)
     while True:

@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// fakeCal stands in for `sudo pistar-calibrate run`: it records the bytes the
+// fakeCal stands in for `sudo gospot-calibrate run`: it records the bytes the
 // panel writes, prints a version line and ends on q or EOF unless stubborn.
 type fakeCal struct {
 	mu       sync.Mutex
@@ -225,7 +225,7 @@ func TestCalibrationSession(t *testing.T) {
 	if in != "kz50\ne435000100\nFq" || !closed || termed {
 		t.Fatalf("stop: input %q closed %v termed %v", in, closed, termed)
 	}
-	if got := rig.calls(); got[0] != "pistar-calibrate restore" {
+	if got := rig.calls(); got[0] != "gospot-calibrate restore" {
 		t.Fatalf("restore after the session: %v", got)
 	}
 	waitFor(t, "not running", func() bool {
@@ -261,7 +261,7 @@ func TestCalibrationIdleTimeoutRestores(t *testing.T) {
 	// ...and a page that went away ends it like Stop.
 	waitFor(t, "idle stop", func() bool { return len(rig.calls()) == 1 })
 	in, closed, termed := rig.fake.got()
-	if in != "q" || !closed || termed || rig.calls()[0] != "pistar-calibrate restore" {
+	if in != "q" || !closed || termed || rig.calls()[0] != "gospot-calibrate restore" {
 		t.Fatalf("idle stop: %q %v %v %v", in, closed, termed, rig.calls())
 	}
 }
@@ -318,7 +318,7 @@ func TestCalibrationSaveOffset(t *testing.T) {
 func TestJitterTest(t *testing.T) {
 	saved := jitterLog
 	defer func() { jitterLog = saved }()
-	jitterLog = filepath.Join(t.TempDir(), "pi-star_icmptest.log")
+	jitterLog = filepath.Join(t.TempDir(), "gospot_icmptest.log")
 	var targets []string
 	release := make(chan error)
 	j := &jitterRunner{start: func(target string) (<-chan error, error) {
@@ -360,14 +360,14 @@ func TestJitterTest(t *testing.T) {
 }
 
 func TestCalibrationSettings(t *testing.T) {
-	if calibrationHelper != "/usr/lib/pistar-dashboard/pistar-calibrate" || jitterHelper != "/usr/lib/pistar-dashboard/pistar-jitter" ||
-		jitterLog != "/var/log/pi-star/pi-star_icmptest.log" || jitterTimeout != 2*time.Minute || calibrationIdle != 30*time.Second {
+	if calibrationHelper != "/usr/lib/gospot/gospot-calibrate" || jitterHelper != "/usr/lib/gospot/gospot-jitter" ||
+		jitterLog != "/var/log/gospot/gospot_icmptest.log" || jitterTimeout != 2*time.Minute || calibrationIdle != 30*time.Second {
 		t.Fatalf("shipped settings: %s %s %s %v %v", calibrationHelper, jitterHelper, jitterLog, jitterTimeout, calibrationIdle)
 	}
 	s, _ := readSettings(shippedSettings)
-	s["JITTER_TIMEOUT"], s["CALIBRATION_IDLE_TIMEOUT"], s["PISTAR_JITTER_LOG"] = "0", "1", "log"
+	s["JITTER_TIMEOUT"], s["CALIBRATION_IDLE_TIMEOUT"], s["GOSPOT_JITTER_LOG"] = "0", "1", "log"
 	err := applySettings(s)
-	for _, key := range []string{"JITTER_TIMEOUT", "CALIBRATION_IDLE_TIMEOUT", "PISTAR_JITTER_LOG"} {
+	for _, key := range []string{"JITTER_TIMEOUT", "CALIBRATION_IDLE_TIMEOUT", "GOSPOT_JITTER_LOG"} {
 		if err == nil || !strings.Contains(err.Error(), key) {
 			t.Errorf("%s accepted: %v", key, err)
 		}
@@ -378,14 +378,14 @@ func TestCalibrationSettings(t *testing.T) {
 }
 
 // TestCalibrationWithRealHelper runs the panel session against the real
-// pistar-calibrate (unprivileged, its own settings file), the fake MMDVMCal of
+// gospot-calibrate (unprivileged, its own settings file), the fake MMDVMCal of
 // the QA stand and a recording systemctl: keys in, output out, Stop restores.
 func TestCalibrationWithRealHelper(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 not installed")
 	}
 	root := t.TempDir()
-	helper, _ := filepath.Abs("helper/pistar-calibrate")
+	helper, _ := filepath.Abs("helper/gospot-calibrate")
 	fake, _ := filepath.Abs("../Pi-Star_dash_new/qa/fixtures/fake-mmdvmcal")
 	for _, d := range []string{"bin", "fakebin"} {
 		os.Mkdir(filepath.Join(root, d), 0o755)
@@ -393,10 +393,10 @@ func TestCalibrationWithRealHelper(t *testing.T) {
 	os.Symlink(fake, filepath.Join(root, "bin", "MMDVMCal"))
 	os.WriteFile(filepath.Join(root, "fakebin", "systemctl"), []byte("#!/bin/sh\necho \"$*\" >>\"$FAKE_SYSTEMCTL_LOG\"\nexit 0\n"), 0o755)
 	os.WriteFile(filepath.Join(root, "mmdvmhost"), []byte("[Modem]\nUARTPort=/dev/ttyACM0\nUARTSpeed=115200\n"), 0o644)
-	conf := filepath.Join(root, "pistar.conf")
-	os.WriteFile(conf, []byte("CONF_MMDVMHOST="+root+"/mmdvmhost\nPISTAR_BIN_DIR="+root+"/bin\nDASHBOARD_STATE_DIR="+root+"/state\n"+
-		"UNIT_MMDVMHOST=mmdvmhost.service\nCALIBRATION_HOLD_UNITS=pistar-watchdog.service\nCALIBRATION_WARMUP=0\nCALIBRATION_MAX_RUNTIME=60\n"), 0o600)
-	env := append(os.Environ(), "PISTAR_SETTINGS="+conf, "PATH="+root+"/fakebin:/usr/bin:/bin",
+	conf := filepath.Join(root, "gospot.conf")
+	os.WriteFile(conf, []byte("CONF_MMDVMHOST="+root+"/mmdvmhost\nGOSPOT_BIN_DIR="+root+"/bin\nDASHBOARD_STATE_DIR="+root+"/state\n"+
+		"UNIT_MMDVMHOST=mmdvmhost.service\nCALIBRATION_HOLD_UNITS=gospot-watchdog.service\nCALIBRATION_WARMUP=0\nCALIBRATION_MAX_RUNTIME=60\n"), 0o600)
+	env := append(os.Environ(), "GOSPOT_SETTINGS="+conf, "PATH="+root+"/fakebin:/usr/bin:/bin",
 		"FAKE_SYSTEMCTL_LOG="+root+"/systemctl.log", "FAKE_MMDVMCAL_LOG="+root+"/input")
 	start := func() (*calProc, error) {
 		cmd := exec.Command(helper, "run")
@@ -443,8 +443,8 @@ func TestCalibrationWithRealHelper(t *testing.T) {
 	}
 	in, _ := os.ReadFile(filepath.Join(root, "input"))
 	calls, _ := os.ReadFile(filepath.Join(root, "systemctl.log"))
-	if string(in) != "ke435000100\nq" || string(calls) != "is-active --quiet pistar-watchdog.service\nstop pistar-watchdog.service\n"+
-		"stop mmdvmhost.service\nstart pistar-watchdog.service\nrestart mmdvmhost.service\n" || !strings.Contains(output(), "Finnished...") {
+	if string(in) != "ke435000100\nq" || string(calls) != "is-active --quiet gospot-watchdog.service\nstop gospot-watchdog.service\n"+
+		"stop mmdvmhost.service\nstart gospot-watchdog.service\nrestart mmdvmhost.service\n" || !strings.Contains(output(), "Finnished...") {
 		t.Fatalf("input %q\nsystemctl %q\noutput %q", in, calls, output())
 	}
 }

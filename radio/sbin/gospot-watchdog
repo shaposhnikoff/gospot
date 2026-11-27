@@ -1,11 +1,11 @@
 #!/usr/bin/python3 -I
-"""Pi-Star Service Watchdog: keep the radio services running.
+"""GoSpot Service Watchdog: keep the radio services running.
 
 Python 3 port of Pi-Star's pistar-watchdog 2.0 (Andy Taylor, MW0MWZ). After
 90 seconds for the services to settle, every 300 seconds it
 
   * cleans the log volume when SYSTEM_LOG_DIR is over 90% full: rotated
-    *.1 and *.1.gz files at its top level, *.log files in PISTAR_LOG_DIR and
+    *.1 and *.1.gz files at its top level, *.log files in GOSPOT_LOG_DIR and
     *.gz files anywhere under SYSTEM_LOG_DIR older than a day go; today's
     controller log keeps its last 500 lines and the controller is restarted;
   * restarts the processes of WATCHDOG_DSTARREPEATER_PROCESSES (when
@@ -15,16 +15,16 @@ Python 3 port of Pi-Star's pistar-watchdog 2.0 (Andy Taylor, MW0MWZ). After
   * restarts DStarRepeater after a DVAP failure ("Bad DVAP header",
     "Cannot open the D-Star modem") or a full buffer ("No space to write")
     in its log of the last five minutes;
-  * restarts UNIT_PISTAR_REMOTE when CONF_PISTAR_REMOTE enables it and its
+  * restarts UNIT_GOSPOT_REMOTE when CONF_GOSPOT_REMOTE enables it and its
     handler reports it is not running.
 
 Pi-Star also trimmed the web server error log; this system has none.
-Every path and unit name comes from the pistar-radio paths file (written from
-pistar.conf when the package is built). Programs run as argument lists,
+Every path and unit name comes from the gospot-radio paths file (written from
+gospot.conf when the package is built). Programs run as argument lists,
 never through a shell.
 
-  pistar-watchdog          run
-  pistar-watchdog --once   one check at once, then exit
+  gospot-watchdog          run
+  gospot-watchdog --once   one check at once, then exit
 """
 import argparse
 import collections
@@ -38,9 +38,9 @@ import sys
 import time
 
 PATHS_FILE = "@RADIO_SHARE_DIR@/paths"
-PATH_KEYS = ("PISTAR_SBIN_DIR", "PISTAR_LOG_DIR", "SYSTEM_LOG_DIR", "MARKER_MMDVMHOST", "MARKER_DSTARREPEATER",
-             "CONF_MMDVMHOST", "CONF_PISTAR_REMOTE")
-UNIT_KEYS = ("UNIT_MMDVMHOST", "UNIT_DSTARREPEATER", "UNIT_PISTAR_REMOTE")
+PATH_KEYS = ("GOSPOT_SBIN_DIR", "GOSPOT_LOG_DIR", "SYSTEM_LOG_DIR", "MARKER_MMDVMHOST", "MARKER_DSTARREPEATER",
+             "CONF_MMDVMHOST", "CONF_GOSPOT_REMOTE")
+UNIT_KEYS = ("UNIT_MMDVMHOST", "UNIT_DSTARREPEATER", "UNIT_GOSPOT_REMOTE")
 PROCESS_KEYS = ("WATCHDOG_DSTARREPEATER_PROCESSES", "WATCHDOG_MMDVMHOST_PROCESSES", "WATCHDOG_COMMON_PROCESSES")
 UNIT = re.compile(r"[A-Za-z0-9@_.-]+\.(?:service|timer)")
 PROCESS = re.compile(r"[A-Za-z0-9_.-]+")
@@ -54,25 +54,25 @@ DVAP_FAILURES = ("Bad DVAP header", "Cannot open the D-Star modem")
 
 
 def log(message):
-    print("pistar-watchdog: " + message, flush=True)
+    print("gospot-watchdog: " + message, flush=True)
 
 
 def load_paths(path=None):
-    """Read the pistar-radio paths file (KEY=value), trusted only if no one
+    """Read the gospot-radio paths file (KEY=value), trusted only if no one
     but its owner, root, can change it. Unprivileged runs (tests) may name
-    another file in PISTAR_RADIO_PATHS."""
+    another file in GOSPOT_RADIO_PATHS."""
     if path is None:
         path = PATHS_FILE
         if os.geteuid() != 0:
-            path = os.environ.get("PISTAR_RADIO_PATHS", PATHS_FILE)
+            path = os.environ.get("GOSPOT_RADIO_PATHS", PATHS_FILE)
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except OSError as e:
-        raise SystemExit(f"pistar-watchdog: cannot read {path}: {e.strerror}")
+        raise SystemExit(f"gospot-watchdog: cannot read {path}: {e.strerror}")
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o022:
         os.close(fd)
-        raise SystemExit(f"pistar-watchdog: unsafe paths file {path}")
+        raise SystemExit(f"gospot-watchdog: unsafe paths file {path}")
     values = {}
     with os.fdopen(fd, encoding="utf-8") as f:
         for line in f:
@@ -80,15 +80,15 @@ def load_paths(path=None):
             if line and not line.startswith("#"):
                 key, sep, value = line.partition("=")
                 if not sep or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or re.search(r"[\s\"'$`\\]", value):
-                    raise SystemExit(f"pistar-watchdog: invalid line in {path}")
+                    raise SystemExit(f"gospot-watchdog: invalid line in {path}")
                 values[key] = value
     for key in PATH_KEYS:
         value = values.get(key, "")
         if not value.startswith("/") or os.path.normpath(value) != value:
-            raise SystemExit(f"pistar-watchdog: {key} must be a clean absolute path")
+            raise SystemExit(f"gospot-watchdog: {key} must be a clean absolute path")
     for key in UNIT_KEYS:
         if not UNIT.fullmatch(values.get(key, "")):
-            raise SystemExit(f"pistar-watchdog: {key} must be a unit name")
+            raise SystemExit(f"gospot-watchdog: {key} must be a unit name")
     for key in PROCESS_KEYS:
         processes(values, key)
     return values
@@ -100,7 +100,7 @@ def processes(paths, key):
     for item in paths.get(key, "").split(","):
         name, _, unit = item.partition(":")
         if not PROCESS.fullmatch(name) or not UNIT.fullmatch(unit):
-            raise SystemExit(f"pistar-watchdog: {key} must be a comma separated list of process:unit")
+            raise SystemExit(f"gospot-watchdog: {key} must be a comma separated list of process:unit")
         pairs.append((name, unit))
     return pairs
 
@@ -236,23 +236,23 @@ class Watchdog:
     # --- log volume ------------------------------------------------------------
     def dstarrepeater_logs(self):
         day = self.clock().strftime("%Y-%m-%d")
-        return [os.path.join(self.p["PISTAR_LOG_DIR"], f"{n}-{day}.log") for n in DSTARREPEATER_LOGS]
+        return [os.path.join(self.p["GOSPOT_LOG_DIR"], f"{n}-{day}.log") for n in DSTARREPEATER_LOGS]
 
     def mmdvm_log(self):
         ini = read_ini(self.p["CONF_MMDVMHOST"])
-        path = ini_get(ini, "Log", "FilePath", self.p["PISTAR_LOG_DIR"])
+        path = ini_get(ini, "Log", "FilePath", self.p["GOSPOT_LOG_DIR"])
         root = ini_get(ini, "Log", "FileRoot", "MMDVM")
         return os.path.join(path, f"{root}-{self.clock().strftime('%Y-%m-%d')}.log")
 
     def clean_logs(self, dstar, mmdvm):
-        log_dir, pistar_logs = self.p["SYSTEM_LOG_DIR"], self.p["PISTAR_LOG_DIR"]
+        log_dir, gospot_logs = self.p["SYSTEM_LOG_DIR"], self.p["GOSPOT_LOG_DIR"]
         log(f"{log_dir} is over {DISK_LIMIT}% full, cleaning up")
         now = time.time()
         old = lambda st: now - st.st_mtime > DAY  # noqa: E731 - find -mtime +0
         for e in files_in(log_dir):
             if e.name.endswith(".1") or e.name.endswith(".1.gz"):
                 remove(e.path)
-        for e in files_in(pistar_logs):
+        for e in files_in(gospot_logs):
             if e.name.endswith(".log") and old(e.stat(follow_symlinks=False)):
                 remove(e.path)
         for top, _, files in os.walk(log_dir):
@@ -320,23 +320,23 @@ class Watchdog:
                 self.sleep(60)
                 return
 
-    # --- pistar-remote ---------------------------------------------------------
+    # --- gospot-remote ---------------------------------------------------------
     def check_remote(self):
-        remote = read_ini(self.p["CONF_PISTAR_REMOTE"])
+        remote = read_ini(self.p["CONF_GOSPOT_REMOTE"])
         if ini_get(remote, "enable", "enabled") != "true":
             return
-        unit = self.p["UNIT_PISTAR_REMOTE"]
-        handler = os.path.join(self.p["PISTAR_SBIN_DIR"], unit)  # Pi-Star handlers are named like their unit
+        unit = self.p["UNIT_GOSPOT_REMOTE"]
+        handler = os.path.join(self.p["GOSPOT_SBIN_DIR"], unit)  # Pi-Star handlers are named like their unit
         code, out = self.run([handler, "status"], capture=True)
         if code == 127:
             return
         if "not" in out:
-            log(f"pistar-remote is enabled but not running, restarting {unit}")
+            log(f"gospot-remote is enabled but not running, restarting {unit}")
             self.restart(unit)
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="pistar-watchdog", description="Pi-Star service watchdog")
+    parser = argparse.ArgumentParser(prog="gospot-watchdog", description="GoSpot service watchdog (Pi-Star compatible)")
     parser.add_argument("--once", action="store_true", help="one check at once, then exit")
     args = parser.parse_args(argv)
     watchdog = Watchdog(load_paths())

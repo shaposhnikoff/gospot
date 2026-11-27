@@ -70,13 +70,13 @@
 </script>
 
 <svelte:head>
-  <title>{view.state === 'onair' ? `On air: ${view.call.callsign}` : 'station' in view && view.station ? `${view.station.callsign} · Calls` : 'Pi-Star · Calls'}</title>
+  <title>{view.state === 'onair' ? `On air: ${view.call.callsign}` : 'station' in view && view.station ? `${view.station.callsign} · Calls` : 'GoSpot · Calls'}</title>
 </svelte:head>
 
 <div class="kiosk" data-state={view.state}>
   <header>
     <div class="station">
-      <b>{'station' in view && view.station ? view.station.callsign : 'Pi-Star'}</b>
+      <b>{'station' in view && view.station ? view.station.callsign : 'GoSpot'}</b>
       {#if 'station' in view && view.station?.freq}<span class="freq">{view.station.freq}</span>{/if}
     </div>
     <div class="status">

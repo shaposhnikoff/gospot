@@ -1,0 +1,220 @@
+#!/usr/bin/python3 -I
+"""Move a board from the pistar-radio layout to the gospot-radio one.
+
+  gospot-radio-migrate PATHS TABLE [ROOT]
+
+PATHS is the gospot-radio paths file (the new locations), TABLE the resolved
+rename table (radio/gospot-rename.table). ROOT (tests) is prepended to every
+path; unit operations then run GOSPOT_SYSTEMCTL instead of systemctl. On a
+real board they run only when systemd is running.
+
+Idempotent; called by the gospot-radio postinst. Nothing is deleted: an old
+file whose new location already exists stays where it is and is reported.
+  * /var/log/pi-star/*      -> GOSPOT_LOG_DIR (moved, inodes kept, no symlink)
+  * radio configurations    -> only "Key=/var/log/pi-star..." values change
+  * /etc/pistar-release     -> GOSPOT_RELEASE_FILE, "[Pi-Star]" -> "[GoSpot]"
+  * /etc/pistar-css.ini     -> GOSPOT_CSS_FILE
+  * /etc/pistar-remote      -> CONF_GOSPOT_REMOTE
+  * /var/pistar-keeper/pistar-keeper.log -> GOSPOT_KEEPER_LOG
+  * /etc/update-motd.d/50-pistar-motd   -> 50-gospot-motd (rewritten by TABLE)
+  * enabled pistar-watchdog/pistar-remote/pistar-hostfiles units -> the gospot
+    units are enabled; running ones are stopped and their gospot units started
+  * when logs or configurations moved, the active radio units are restarted
+    (try-restart), since running daemons would keep writing to the old path.
+"""
+import glob
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+# The pistar-radio / Pi-Star locations (this script is their only user).
+OLD_LOG_DIR = "/var/log/pi-star"
+OLD_RELEASE = "/etc/pistar-release"
+OLD_CSS = "/etc/pistar-css.ini"
+OLD_REMOTE = "/etc/pistar-remote"
+OLD_KEEPER_LOG = "/var/pistar-keeper/pistar-keeper.log"
+OLD_MOTD = "/etc/update-motd.d/50-pistar-motd"
+NEW_MOTD = "/etc/update-motd.d/50-gospot-motd"
+OLD_UNITS = {"pistar-watchdog.service": "UNIT_GOSPOT_WATCHDOG", "pistar-remote.service": "UNIT_GOSPOT_REMOTE",
+             "pistar-hostfiles.timer": "gospot-hostfiles.timer"}
+LOG_VALUE = re.compile(r"^(\s*[A-Za-z0-9_.]+\s*=\s*)" + re.escape(OLD_LOG_DIR) + r"(?=/|\s*$)")
+
+
+def say(message):
+    print("gospot-radio: " + message, flush=True)
+
+
+def read_paths(path):
+    values = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                values[k] = v
+    return values
+
+
+class Migration:
+    def __init__(self, paths, table, root):
+        self.p, self.table, self.root = paths, table, root
+        self.changed = False  # logs or configurations moved: restart active radio units
+        self.test = bool(root)
+        self.systemctl = os.environ.get("GOSPOT_SYSTEMCTL", "systemctl") if self.test else (
+            "systemctl" if os.path.isdir("/run/systemd/system") else None)
+
+    def at(self, path):
+        return self.root + path
+
+    # --- files ------------------------------------------------------------------
+    def rewrite(self, path, transform):
+        """Replace a file's bytes atomically, keeping owner and mode."""
+        with open(path, "rb") as f:
+            old = f.read()
+        new = transform(old)
+        if new is None or new == old:
+            return False
+        st = os.stat(path)
+        tmp = os.path.join(os.path.dirname(path), ".gospot-migrate." + os.path.basename(path))
+        with open(tmp, "wb") as f:
+            f.write(new)
+        os.chown(tmp, st.st_uid, st.st_gid)
+        os.chmod(tmp, st.st_mode & 0o7777)
+        os.replace(tmp, path)
+        return True
+
+    def move(self, old, new):
+        """Rename old to new; False (and a report) when new already exists."""
+        src, dst = self.at(old), self.at(new)
+        if old == new or not os.path.lexists(src):
+            return False
+        if os.path.lexists(dst):
+            say(f"kept {old}: {new} already exists")
+            return False
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        try:
+            os.rename(src, dst)
+        except OSError as e:
+            if e.errno != 18:  # EXDEV: another file system
+                raise
+            subprocess.run(["cp", "-a", "--", src, dst], check=True)
+            shutil.rmtree(src) if os.path.isdir(src) and not os.path.islink(src) else os.unlink(src)
+        say(f"moved {old} to {new}")
+        return True
+
+    def logs(self):
+        old, new = OLD_LOG_DIR, self.p["GOSPOT_LOG_DIR"]
+        src, dst = self.at(old), self.at(new)
+        if old == new or not os.path.isdir(src) or os.path.islink(src):
+            return
+        if not os.path.isdir(dst):
+            os.makedirs(dst)
+            st = os.stat(src)
+            os.chown(dst, st.st_uid, st.st_gid)
+            os.chmod(dst, st.st_mode & 0o7777)
+        moved = kept = 0
+        for name in sorted(os.listdir(src)):
+            if os.path.lexists(os.path.join(dst, name)):
+                kept += 1
+                say(f"kept {old}/{name}: {new}/{name} already exists")
+                continue
+            os.rename(os.path.join(src, name), os.path.join(dst, name))
+            moved += 1
+        if moved:
+            self.changed = True
+            say(f"moved {moved} entries of {old} to {new}")
+        if not kept:
+            os.rmdir(src)
+            say(f"removed the empty {old}")
+
+    def configs(self):
+        new_dir = self.p["GOSPOT_LOG_DIR"].encode()
+
+        def fix(data):
+            out = []
+            for line in data.decode("utf-8", "surrogateescape").splitlines(keepends=True):
+                out.append(LOG_VALUE.sub(lambda m: m.group(1) + new_dir.decode(), line))
+            return "".join(out).encode("utf-8", "surrogateescape")
+
+        for key in sorted(k for k in self.p if k.startswith("CONF_")):
+            path = self.at(self.p[key])
+            if os.path.isfile(path) and not os.path.islink(path) and self.rewrite(path, fix):
+                self.changed = True
+                say(f"{self.p[key]}: log path {OLD_LOG_DIR} -> {self.p['GOSPOT_LOG_DIR']}")
+
+    def release(self):
+        if self.move(OLD_RELEASE, self.p["GOSPOT_RELEASE_FILE"]):
+            self.rewrite(self.at(self.p["GOSPOT_RELEASE_FILE"]),
+                         lambda d: re.sub(rb"(?m)^\[Pi-Star\](?=[ \t]*\r?$)", b"[GoSpot]", d, count=1))
+
+    def keeper(self):
+        new = self.p["GOSPOT_KEEPER_LOG"]
+        old_dir, new_dir = os.path.dirname(OLD_KEEPER_LOG), os.path.dirname(new)
+        if os.path.isdir(self.at(old_dir)) and not os.path.lexists(self.at(new_dir)):
+            self.move(old_dir, new_dir)
+            self.move(os.path.join(new_dir, os.path.basename(OLD_KEEPER_LOG)), new)
+        elif os.path.isdir(self.at(old_dir)):
+            self.move(OLD_KEEPER_LOG, new)
+
+    def motd(self):
+        src = self.at(OLD_MOTD)
+        if not os.path.isfile(src) or os.path.lexists(self.at(NEW_MOTD)):
+            if os.path.isfile(src):
+                say(f"kept {OLD_MOTD}: {NEW_MOTD} already exists")
+            return
+        with open(src, "rb") as f:
+            r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(os.path.abspath(__file__)), "gospot-rebrand"),
+                                "apply", self.table, OLD_MOTD], input=f.read(), capture_output=True)
+        if r.returncode:
+            say(f"kept {OLD_MOTD}: {r.stderr.decode().strip()}")
+            return
+        self.move(OLD_MOTD, NEW_MOTD)
+        self.rewrite(self.at(NEW_MOTD), lambda d: r.stdout)
+
+    # --- units ------------------------------------------------------------------
+    def ctl(self, *args):
+        return subprocess.run([self.systemctl, *args], capture_output=True, text=True)
+
+    def units(self):
+        start = []
+        for old, new in OLD_UNITS.items():
+            new = self.p.get(new, new)
+            for link in glob.glob(self.at("/etc/systemd/system/*.wants/" + old)):
+                if self.systemctl:
+                    self.ctl("enable", new)
+                    say(f"enabled {new} ({old} was enabled)")
+                if not os.path.exists(link):  # dangling: the old unit file is gone
+                    os.unlink(link)
+            if self.systemctl and self.ctl("is-active", "--quiet", old).returncode == 0:
+                self.ctl("stop", old)
+                start.append(new)
+                say(f"stopped {old}, starting {new}")
+        if self.systemctl and self.changed:
+            units = [u for u in self.p.get("RADIO_UNITS", "").split(",") if u]
+            if units:
+                self.ctl("try-restart", *units)
+                say("restarted the active radio services on the new log path")
+        for unit in start:
+            self.ctl("start", unit)
+
+
+def main(argv):
+    if len(argv) not in (3, 4):
+        print(__doc__, file=sys.stderr)
+        return 2
+    m = Migration(read_paths(argv[1]), argv[2], argv[3].rstrip("/") if len(argv) == 4 else "")
+    m.logs()
+    m.release()
+    m.move(OLD_CSS, m.p["GOSPOT_CSS_FILE"])
+    m.move(OLD_REMOTE, m.p["CONF_GOSPOT_REMOTE"])
+    m.configs()
+    m.keeper()
+    m.motd()
+    m.units()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

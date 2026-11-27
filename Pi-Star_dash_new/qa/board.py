@@ -25,7 +25,7 @@ class Installed(unittest.TestCase):
             self.assertGreater(len(get(urljoin(base, asset))), 100)
 
     def test_runtime(self):
-        self.assertEqual(json.loads(get(base + "runtime.json"))["backend"], "pistar-go")
+        self.assertEqual(json.loads(get(base + "runtime.json"))["backend"], "gospot-go")
 
     def test_status_matches_collector(self):
         staged = json.loads(get(base + "api/status"))

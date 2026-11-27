@@ -161,7 +161,7 @@ func wsDial(ctx context.Context, rawURL, origin, protocol string, tlsConfig *tls
 	}
 	key := base64.StdEncoding.EncodeToString(nonce[:])
 	req := "GET " + u.RequestURI() + " HTTP/1.1\r\nHost: " + u.Host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-		"Sec-WebSocket-Key: " + key + "\r\nSec-WebSocket-Version: 13\r\nUser-Agent: pistar-dashboard\r\n"
+		"Sec-WebSocket-Key: " + key + "\r\nSec-WebSocket-Version: 13\r\nUser-Agent: gospot\r\n"
 	if origin != "" {
 		req += "Origin: " + origin + "\r\n"
 	}

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # One-time move of DEPLOY_HOST from the upstream layout (MMDVM-Host.ini,
 # journald, user units in /etc/systemd/system) to the Pi-Star layout with the
-# pistar-radio package. Backs everything up first and rolls back on any
+# gospot-radio package. Backs everything up first and rolls back on any
 # failure, including "modem did not answer" and "no DMR master login".
-# Usage: radio/migrate-board path/to/pistar-radio_*.deb
+# Usage: radio/migrate-board path/to/gospot-radio_*.deb
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-# shellcheck source=../Pi-Star_dash_new/pistar.conf
-source "$here/../Pi-Star_dash_new/pistar.conf"
-deb=${1:?usage: migrate-board pistar-radio.deb}
-[[ $(dpkg-deb -f "$deb" Package) == pistar-radio && $(dpkg-deb -f "$deb" Architecture) == armhf ]]
-stage=/tmp/pistar-migrate
+# shellcheck source=../Pi-Star_dash_new/gospot.conf
+source "$here/../Pi-Star_dash_new/gospot.conf"
+deb=${1:?usage: migrate-board gospot-radio.deb}
+[[ $(dpkg-deb -f "$deb" Package) == gospot-radio && $(dpkg-deb -f "$deb" Architecture) == armhf ]]
+stage=/tmp/gospot-migrate
 ssh -T -o BatchMode=yes "$DEPLOY_HOST" "rm -rf $stage && mkdir -m700 $stage"
 scp -q -o BatchMode=yes "$deb" "$here/convert-config.py" "$DEPLOY_HOST:$stage/"
-remote_vars=$(declare -p DEPLOY_HOST PISTAR_BIN_DIR PISTAR_HOSTS_DIR PISTAR_LOG_DIR MARKER_MMDVMHOST \
+remote_vars=$(declare -p DEPLOY_HOST GOSPOT_BIN_DIR GOSPOT_HOSTS_DIR GOSPOT_LOG_DIR MARKER_MMDVMHOST \
   CONF_MMDVMHOST CONF_DMRGATEWAY UNIT_MMDVMHOST UNIT_DMRGATEWAY MIGRATE_FROM_MMDVMHOST \
   MIGRATE_FROM_DMRGATEWAY MIGRATE_FROM_DATA_DIR MIGRATION_BACKUP_DIR)
 ssh -T -o BatchMode=yes "$DEPLOY_HOST" "stage=$stage deb=$(basename "$deb") bash -s" <<EOF
@@ -30,7 +30,7 @@ for u in "$UNIT_MMDVMHOST" "$UNIT_DMRGATEWAY"; do
   if [[ -f /etc/systemd/system/$u ]]; then sudo -n cp -a "/etc/systemd/system/$u" "$B/$u"; fi
 done
 for b in MMDVMHost DMRGateway; do
-  if [[ -f $PISTAR_BIN_DIR/$b ]]; then sudo -n cp -a "$PISTAR_BIN_DIR/$b" "$B/$b.bin"; fi
+  if [[ -f $GOSPOT_BIN_DIR/$b ]]; then sudo -n cp -a "$GOSPOT_BIN_DIR/$b" "$B/$b.bin"; fi
 done
 marker_created=0
 echo "Backup: $B"
@@ -38,12 +38,12 @@ echo "Backup: $B"
 rollback() {
   echo "ROLLBACK: restoring the previous radio setup" >&2
   sudo -n systemctl disable --now "$UNIT_MMDVMHOST" "$UNIT_DMRGATEWAY" 2>/dev/null || true
-  sudo -n dpkg -r pistar-radio >/dev/null 2>&1 || true
+  sudo -n dpkg -r gospot-radio >/dev/null 2>&1 || true
   for u in "$UNIT_MMDVMHOST" "$UNIT_DMRGATEWAY"; do
     if [[ -f $B/$u ]]; then sudo -n cp -a "$B/$u" "/etc/systemd/system/$u"; fi
   done
   for b in MMDVMHost DMRGateway; do
-    if [[ -f $B/$b.bin ]]; then sudo -n cp -a "$B/$b.bin" "$PISTAR_BIN_DIR/$b"; fi
+    if [[ -f $B/$b.bin ]]; then sudo -n cp -a "$B/$b.bin" "$GOSPOT_BIN_DIR/$b"; fi
   done
   sudo -n rm -f "$CONF_MMDVMHOST" "$CONF_DMRGATEWAY"
   if (( marker_created )); then sudo -n rm -f "$MARKER_MMDVMHOST"; fi
@@ -54,7 +54,7 @@ rollback() {
 trap rollback ERR
 
 sudo -n python3 -I "$stage/convert-config.py" "$MIGRATE_FROM_MMDVMHOST" "$MIGRATE_FROM_DMRGATEWAY" \
-  "$CONF_MMDVMHOST" "$CONF_DMRGATEWAY" "$PISTAR_LOG_DIR" "$PISTAR_HOSTS_DIR"
+  "$CONF_MMDVMHOST" "$CONF_DMRGATEWAY" "$GOSPOT_LOG_DIR" "$GOSPOT_HOSTS_DIR"
 if [[ ! -e $MARKER_MMDVMHOST ]]; then sudo -n touch "$MARKER_MMDVMHOST"; marker_created=1; fi
 
 sudo -n systemctl disable --now "$UNIT_MMDVMHOST" "$UNIT_DMRGATEWAY"
@@ -62,15 +62,15 @@ sudo -n rm -f "/etc/systemd/system/$UNIT_MMDVMHOST" "/etc/systemd/system/$UNIT_D
 sudo -n systemctl daemon-reload
 sudo -n dpkg -i "$stage/$deb"
 for f in DMRIds.dat NXDN.csv RSSI.dat; do
-  if [[ ! -e $PISTAR_HOSTS_DIR/$f && -f $MIGRATE_FROM_DATA_DIR/$f ]]; then
-    sudo -n cp -a "$MIGRATE_FROM_DATA_DIR/$f" "$PISTAR_HOSTS_DIR/$f"
+  if [[ ! -e $GOSPOT_HOSTS_DIR/$f && -f $MIGRATE_FROM_DATA_DIR/$f ]]; then
+    sudo -n cp -a "$MIGRATE_FROM_DATA_DIR/$f" "$GOSPOT_HOSTS_DIR/$f"
   fi
 done
 start=$(date -u +%s)
 sudo -n systemctl enable --now "$UNIT_DMRGATEWAY" "$UNIT_MMDVMHOST"
 
-host_log=$PISTAR_LOG_DIR/MMDVM-$(date -u +%F).log
-gw_log=$PISTAR_LOG_DIR/DMRGateway-$(date -u +%F).log
+host_log=$GOSPOT_LOG_DIR/MMDVM-$(date -u +%F).log
+gw_log=$GOSPOT_LOG_DIR/DMRGateway-$(date -u +%F).log
 modem=0; login=0
 for _ in $(seq 1 90); do
   sleep 1
@@ -86,7 +86,7 @@ trap - ERR
 echo "MMDVMHost: $(grep -m1 -o 'description: .*' "$host_log")"
 echo "DMRGateway: $(grep 'Logged into the master successfully' "$gw_log" | tail -1)"
 echo "Took $(( $(date -u +%s) - start ))s after start"
-echo "PASS migrated $(hostname -s): pistar-radio $(dpkg-query -W -f='${Version}' pistar-radio), configs $CONF_MMDVMHOST $CONF_DMRGATEWAY, backup $B"
+echo "PASS migrated $(hostname -s): gospot-radio $(dpkg-query -W -f='${Version}' gospot-radio), configs $CONF_MMDVMHOST $CONF_DMRGATEWAY, backup $B"
 rm -rf "$stage"
 REMOTE
 )

@@ -1,7 +1,7 @@
 <script lang="ts">
   // admin/expert/: header-menu.inc, the warning on index.php and the generic
   // Quick Edit editors (edit_*.php).
-  import PiStarFrame from './PiStarFrame.svelte';
+  import GoSpotFrame from './GoSpotFrame.svelte';
   import QuickEdit from './QuickEdit.svelte';
   import FullEdit from './FullEdit.svelte';
   import ApiKeys from './ApiKeys.svelte';
@@ -17,7 +17,7 @@
     ['nxdngateway', 'NXDN GW'], ['dapnetgateway', 'DAPNET GW'],
   ];
   const full: [string, string][] = [
-    ['full-dmrgateway', 'DMR GW'], ['full-pistar-remote', 'PiStar-Remote'], ['full-wpaconfig', 'WiFi'],
+    ['full-dmrgateway', 'DMR GW'], ['full-gospot-remote', 'GoSpot-Remote'], ['full-wpaconfig', 'WiFi'],
     ['full-apikeys', 'API Keys'], ['full-cron', 'System Cron'], ['full-rssidat', 'RSSI Dat'],
   ];
   const tools: [string, string][] = [['tool-css', 'CSS Tool'], ['tool-fw', 'FW'], ['tool-ssh', 'SSH Access']];
@@ -44,7 +44,7 @@
   </p>
 {/snippet}
 
-<PiStarFrame title="Expert Editors" links={['Dashboard', 'Admin', 'Update', 'Backup/Restore', 'Configuration']} {menu} footer="dashboard">
+<GoSpotFrame title="Expert Editors" links={['Dashboard', 'Admin', 'Update', 'Backup/Restore', 'Configuration']} {menu} footer="dashboard">
   {#if quickFile}
     {#key quickFile}<QuickEdit file={quickFile} />{/key}
   {:else if fullFile}
@@ -65,7 +65,7 @@
         <tr><th>Expert Editors</th></tr>
         <tr><td align="center" style="white-space: normal;">
           <h2>**WARNING**</h2>
-          Pi-Star Expert editors have been created to make editing some of the extra settings in the<br />
+          GoSpot Expert editors have been created to make editing some of the extra settings in the<br />
           config files more simple, allowing you to update some areas of the config files without the<br />
           need to login to your Pi over SSH.<br />
           <br />
@@ -76,11 +76,11 @@
           <br />
           With that warning in mind, you are free to make any changes you like, for help come to the Facebook<br />
           group (link at the bottom of the page) and ask for help if / when you need it.<br />
-          73 and enjoy your Pi-Star experiance.<br />
-          Pi-Star UK Team.<br />
+          73 and enjoy your GoSpot experiance.<br />
+          GoSpot Team.<br />
           <br />
         </td></tr>
       </tbody>
     </table>
   {/if}
-</PiStarFrame>
+</GoSpotFrame>

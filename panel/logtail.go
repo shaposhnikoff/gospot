@@ -12,7 +12,7 @@ import (
 )
 
 // Pi-Star layout: MMDVMHost and DMRGateway write daily files named after the
-// UTC date (FileRotate=1), e.g. /var/log/pi-star/MMDVM-2026-11-27.log.
+// UTC date (FileRotate=1), e.g. /var/log/gospot/MMDVM-2026-11-27.log.
 // One poller per file follows appends and moves to the next day's file.
 
 const (
@@ -109,8 +109,8 @@ func (f *logFile) read(emit func(unit, line string, at time.Time), prime bool) {
 // followFiles feeds the same consumers as the journal follower.
 func followFiles(ctx context.Context) {
 	files := []*logFile{
-		{dir: pistarLogDir, root: "MMDVM", unit: modemUnit},
-		{dir: pistarLogDir, root: "DMRGateway", unit: masterUnit},
+		{dir: gospotLogDir, root: "MMDVM", unit: modemUnit},
+		{dir: gospotLogDir, root: "DMRGateway", unit: masterUnit},
 	}
 	emit := func(unit, line string, at time.Time) {
 		applyRecord(followRecord{Message: line, Unit: unit, Invocation: "file",

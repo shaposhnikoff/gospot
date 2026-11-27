@@ -24,7 +24,7 @@ key=${PISTAR3_SSH_KEY:-"$root/../id_ed25519_192.168.210.194"}
 if [[ -f $key ]]; then ssh_opts+=(-o IdentitiesOnly=yes -i "$key"); fi
 remote() { ssh "${ssh_opts[@]}" max@192.168.210.194 "$@"; }
 
-files=(staging/install.sh "$server" staging/psdash-stage.service staging/pending.html)
+files=(staging/install.sh "$server" staging/gospot-stage.service staging/pending.html)
 if [[ $action == deploy ]]; then
     [[ -s $root/$ui/index.html ]] || { echo "Missing $ui/index.html" >&2; exit 1; }
     if [[ -n $(find "$root/$ui" ! -type d ! -type f -print -quit) ]]; then
@@ -32,8 +32,8 @@ if [[ $action == deploy ]]; then
     fi
     files+=("$ui")
 fi
-tmp=$(remote 'test "$(hostname -s)" = pistar3 && sudo -n true && mktemp -d /tmp/psdash-stage.XXXXXXXX')
-[[ $tmp =~ ^/tmp/psdash-stage\.[a-zA-Z0-9]{8}$ ]]
+tmp=$(remote 'test "$(hostname -s)" = pistar3 && sudo -n true && mktemp -d /tmp/gospot-stage.XXXXXXXX')
+[[ $tmp =~ ^/tmp/gospot-stage\.[a-zA-Z0-9]{8}$ ]]
 trap 'remote "rm -rf -- $tmp"' EXIT
 tar -C "$root" "${tar_opts[@]}" -cf - "${files[@]}" | remote "tar -xf - -C $tmp"
 remote "sudo -n bash $tmp/staging/install.sh $action"

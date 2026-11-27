@@ -74,8 +74,8 @@ test('relay events and groups are validated', () => {
 });
 
 test('the socket stays on the page origin', () => {
-  assert.equal(socketURL({ protocol: 'http:', host: 'pistar:8789' }, false, 91), 'ws://pistar:8789/api/hoseline?tg=91');
-  assert.equal(socketURL({ protocol: 'https:', host: 'pistar:8788' }, true, 2504), 'wss://pistar:8788/manage/api/hoseline?tg=2504');
+  assert.equal(socketURL({ protocol: 'http:', host: 'gospot:8789' }, false, 91), 'ws://gospot:8789/api/hoseline?tg=91');
+  assert.equal(socketURL({ protocol: 'https:', host: 'gospot:8788' }, true, 2504), 'wss://gospot:8788/manage/api/hoseline?tg=2504');
 });
 
 test('fallback scheduling plays frames back to back and rebuffers after a gap', () => {

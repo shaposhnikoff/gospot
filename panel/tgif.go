@@ -37,7 +37,7 @@ var (
 	nonDigits        = regexp.MustCompile(`[^0-9]`)
 )
 
-// tgifClient talks to TGIF. api and session default to pistar.conf values;
+// tgifClient talks to TGIF. api and session default to gospot.conf values;
 // tests point them at a fake server.
 type tgifClient struct {
 	client       *http.Client
@@ -168,7 +168,7 @@ func (t *tgifClient) request(ctx context.Context, token, id, resource, method st
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", "Pi-Star TGIF TG Manager/"+id)
+	req.Header.Set("User-Agent", "GoSpot TGIF TG Manager/"+id)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

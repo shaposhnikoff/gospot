@@ -16,7 +16,7 @@ import (
 )
 
 // Operator and talkgroup names for heard rows, from the lists Pi-Star's
-// HostFilesUpdate.sh keeps in PISTAR_HOSTS_DIR:
+// HostFilesUpdate.sh keeps in GOSPOT_HOSTS_DIR:
 //
 //   - DMRIds.dat (pistar.uk/downloads/DMRIds.dat.gz, ~250k lines), read the
 //     way MMDVMHost's CUserDB does: fields split on ',' or TAB, an optional
@@ -339,7 +339,7 @@ type heardNames interface {
 	target(mode, to string) string
 }
 
-// hostNames holds the PISTAR_HOSTS_DIR lists for one dashboard build: one
+// hostNames holds the GOSPOT_HOSTS_DIR lists for one dashboard build: one
 // stat per file, a parse only when a file changed.
 type hostNames struct {
 	users *userDB
@@ -347,9 +347,9 @@ type hostNames struct {
 }
 
 func currentHostNames() hostNames {
-	h := hostNames{users: operatorNames.get(filepath.Join(pistarHostsDir, userDBFile)), tg: map[string]map[uint32]string{}}
+	h := hostNames{users: operatorNames.get(filepath.Join(gospotHostsDir, userDBFile)), tg: map[string]map[uint32]string{}}
 	for mode, file := range tgListByMode {
-		h.tg[mode], _ = cachedHostFile("tglist", filepath.Join(pistarHostsDir, file), parseTGList)
+		h.tg[mode], _ = cachedHostFile("tglist", filepath.Join(gospotHostsDir, file), parseTGList)
 	}
 	return h
 }

@@ -11,7 +11,7 @@ const row = (x: Partial<Row>): Row => ({
 });
 
 const dash = (heard: Row[], x: Partial<Dashboard> = {}): Dashboard => ({
-  Hostname: 'pistar3', Callsign: 'UT3UDX', Version: 'v1', PiStar: '4.3', Controller: 'mmdvmhost', Modes: [], Networks: [],
+  Hostname: 'pistar3', Callsign: 'UT3UDX', Version: 'v1', Release: '4.3', Controller: 'mmdvmhost', Modes: [], Networks: [],
   TRX: { kind: 'listening', mode: '', label: 'Listening' }, TX: '433.800000 MHz', RX: '433.800000 MHz', Firmware: '', TCXO: '',
   DStar: null, DMR: null, YSF: null, P25: null, NXDN: null, M17: null, POCSAG: null,
   Heard: heard, Local: heard.filter(r => r.source === 'RF'), HeardReady: true, TimeZone: 'EET', Now: new Date(T0).toISOString(), ...x,

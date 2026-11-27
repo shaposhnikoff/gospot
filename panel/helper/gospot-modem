@@ -1,11 +1,11 @@
 #!/bin/bash
-# Privileged entry point for Expert > FW: list the firmware types Pi-Star's
-# pistar-modemupgrade knows, or flash one of them in a detached job that
+# Privileged entry point for Expert > FW: list the firmware types
+# gospot-modemupgrade (Pi-Star's pistar-modemupgrade) knows, or flash one of them in a detached job that
 # writes MODEM_FLASH_LOG.
 set -euo pipefail
-. /etc/pistar-dashboard/pistar.conf
-tool=$PISTAR_SBIN_DIR/pistar-modemupgrade
-unit=pistar-modem-flash.service
+. /etc/gospot/gospot.conf
+tool=$GOSPOT_SBIN_DIR/gospot-modemupgrade
+unit=gospot-modem-flash.service
 case "${1:-}" in
   list) exec "$tool" list ;;
   flash)
@@ -17,5 +17,5 @@ case "${1:-}" in
     /usr/bin/systemd-run --quiet --collect --unit="$unit" "$tool" "$want"
     echo started
     ;;
-  *) echo "usage: pistar-modem list|flash TYPE" >&2; exit 2 ;;
+  *) echo "usage: gospot-modem list|flash TYPE" >&2; exit 2 ;;
 esac

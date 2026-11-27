@@ -1,5 +1,5 @@
 <script lang="ts">
-  // admin/expert/edit_dashboard.php: /etc/pistar-css.ini, one table per
+  // admin/expert/edit_dashboard.php: /etc/gospot-css.ini, one table per
   // section, Apply saves every shown value; Factory Reset removes the file.
   import { onMount } from 'svelte';
 
@@ -23,7 +23,7 @@
   async function send(body: Record<string, unknown>, done: string) {
     message = ''; error = '';
     const r = await fetch('/manage/api/expert/css', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf },
       body: JSON.stringify({ revision, ...body }),
     }).catch(() => null);
     if (!r || !r.ok) { error = r ? (await r.text()).trim() : 'No response from the board'; return; }

@@ -14,7 +14,7 @@ import (
 // dashboardVersion is set at build time (-X main.dashboardVersion=...).
 var dashboardVersion = "dev"
 
-// Locations come from pistar.conf via applySettings.
+// Locations come from gospot.conf via applySettings.
 var (
 	mmdvmINI, dmrGWINI, dapnetINI, ircddbINI, dstarRptINI = newINIFile(), newINIFile(), newINIFile(), newINIFile(), newINIFile()
 	ysf2dmrINI, ysf2nxdnINI, ysf2p25INI                   = newINIFile(), newINIFile(), newINIFile()
@@ -55,7 +55,7 @@ type dashRow struct {
 	Live     bool      `json:"live"`
 	Note     string    `json:"note"`
 	// Name and TargetName come from DMRIds.dat and the TGList files in
-	// PISTAR_HOSTS_DIR ("" when unknown); the classic pages ignore them.
+	// GOSPOT_HOSTS_DIR ("" when unknown); the classic pages ignore them.
 	Name       string `json:"name"`
 	TargetName string `json:"targetName"`
 }
@@ -83,7 +83,7 @@ type dashboard struct {
 	Hostname   string
 	Callsign   string
 	Version    string
-	PiStar     string
+	Release    string
 	Controller string
 	Modes      []dashCell
 	Networks   []dashCell
@@ -362,7 +362,7 @@ func buildDashboard(in dashInputs) dashboard {
 		return mhz(v)
 	}
 	zone, _ := in.now.In(time.Local).Zone()
-	d := dashboard{Hostname: in.hostname, Callsign: callsign, Version: dashboardVersion, PiStar: in.release.get("Pi-Star", "Version"), Controller: in.controller,
+	d := dashboard{Hostname: in.hostname, Callsign: callsign, Version: dashboardVersion, Release: releaseVersion(in.release), Controller: in.controller,
 		TX: freq("TXFrequency"), RX: freq("RXFrequency"), Firmware: in.firmware, TCXO: in.tcxo,
 		HeardReady: in.heardOK, TimeZone: zone, Now: in.now.UTC()}
 	if in.controller != "mmdvmhost" {
@@ -534,11 +534,20 @@ func classicClock(t time.Time) string {
 	return t.Format("15:04:05 Jan ") + strconv.Itoa(day) + suffix
 }
 
-var pistarRelease = newINIFile()
+var gospotRelease = newINIFile()
 
 func releaseINI() iniData {
-	if pistarRelease.location() != pistarReleaseFile {
-		pistarRelease.setPath(pistarReleaseFile)
+	if gospotRelease.location() != gospotReleaseFile {
+		gospotRelease.setPath(gospotReleaseFile)
 	}
-	return pistarRelease.load()
+	return gospotRelease.load()
+}
+
+// releaseVersion is Version of the release file: section [GoSpot], or [Pi-Star]
+// in a classic Pi-Star file (an upgraded board or a restored classic backup).
+func releaseVersion(d iniData) string {
+	if v := d.get("GoSpot", "Version"); v != "" {
+		return v
+	}
+	return d.get("Pi-Star", "Version")
 }

@@ -10,9 +10,9 @@ root=$(sed -n 's|^Native release: \(/.*\)$|\1|p' "$d/package.log")
 [[ $root == "$PWD"/build/release-* && -s $root/ui/index.html ]]
 release=$(basename "$root")
 p=$d/pkg
-# All installation paths and ports come from pistar.conf (see AGENTS.md).
-# shellcheck source=../pistar.conf
-source ./pistar.conf
+# All installation paths and ports come from gospot.conf (see AGENTS.md).
+# shellcheck source=../gospot.conf
+source ./gospot.conf
 lib=$DASHBOARD_LIB_DIR
 ui=$DASHBOARD_UI_DIR
 share=$(dirname "$ui")
@@ -20,7 +20,6 @@ wizard=$WIZARD_CONFIG_DIR
 [[ $DASHBOARD_BM_STATE_DIR == /var/lib/* && $DASHBOARD_BM_STATE_DIR != */*/*/*/* ]]
 bm_state=${DASHBOARD_BM_STATE_DIR#/var/lib/}
 units=/lib/systemd/system
-radio=../image/stage-mmdvm/00-install/files
 install -d "$p"/DEBIAN "$p$lib" "$p$share" "$p$units"
 base=$(sed -n 's/^Version: //p' debian/control)
 version=${DEB_VERSION:-$base}
@@ -30,40 +29,44 @@ sed "s/^Version: .*/Version: $version/" debian/control >"$p/DEBIAN/control"
 install -m755 debian/{prerm,postrm} "$p/DEBIAN/"
 sed "s|@DASHBOARD_LIB_DIR@|$lib|g" debian/postinst >"$p/DEBIAN/postinst"
 chmod 755 "$p/DEBIAN/postinst"
-install -d -m755 "$p/etc/sudoers.d" "$p/etc/pistar-dashboard"
-sed "s|@DASHBOARD_LIB_DIR@|$lib|g" debian/sudoers >"$p/etc/sudoers.d/pistar-dashboard"
-chmod 440 "$p/etc/sudoers.d/pistar-dashboard"
-if grep -q @ "$p/etc/sudoers.d/pistar-dashboard"; then echo "unresolved sudoers placeholder" >&2; exit 1; fi
-install -m644 pistar.conf "$p/etc/pistar-dashboard/pistar.conf"
+install -d -m755 "$p/etc/sudoers.d" "$p/etc/gospot"
+sed "s|@DASHBOARD_LIB_DIR@|$lib|g" debian/sudoers >"$p/etc/sudoers.d/gospot"
+chmod 440 "$p/etc/sudoers.d/gospot"
+if grep -q @ "$p/etc/sudoers.d/gospot"; then echo "unresolved sudoers placeholder" >&2; exit 1; fi
+install -m644 gospot.conf "$p/etc/gospot/gospot.conf"
 install -d -m755 "$p$lib"
-install -m644 pistar.conf "$p$lib/pistar.conf.default"
-install -m755 debian/pistar-conf-merge "$p$lib/pistar-conf-merge"
-printf '%s\n' /etc/pistar-dashboard/pistar.conf >"$p/DEBIAN/conffiles"
-install -m755 ../panel/helper/{pistar-config,pistar-power,pistar-native-update,pistar-configure,pistar-modem,pistar-calibrate,pistar-jitter} "$p$lib/"
+install -m644 gospot.conf "$p$lib/gospot.conf.default"
+install -m755 debian/gospot-conf-merge "$p$lib/gospot-conf-merge"
+# One-time takeover of a pistar-dashboard installation (run by postinst).
+install -m755 debian/gospot-migrate "$p$lib/gospot-migrate"
+install -m644 debian/migrate/pistar-dashboard.conf "$p$lib/pistar-dashboard.conf.default"
+printf '%s\n' /etc/gospot/gospot.conf >"$p/DEBIAN/conffiles"
+install -m755 ../panel/helper/{gospot-config,gospot-power,gospot-native-update,gospot-configure,gospot-modem,gospot-calibrate,gospot-jitter} "$p$lib/"
 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go -C ../panel build -trimpath \
   -ldflags="-s -w -X main.dashboardVersion=$version" \
   -o "$p$lib/panel" .
 install -d "$p$share"
 cp -a "$root/ui" "$p$ui"
 printf '%s\n' "$release" >"$p$share/RELEASE"
-for unit in psdash-stage pistar-panel pistar-wizard; do
+for unit in gospot-stage gospot-panel gospot-wizard; do
   case $unit in
-    psdash-stage) src=staging/$unit.service; cmd="$lib/panel -operator-listen :$OPERATOR_PORT" ;;
-    pistar-panel) src=$radio/$unit.service; cmd="$lib/panel -listen :$PANEL_PORT" ;;
-    pistar-wizard) src=$radio/$unit.service; cmd="$lib/panel -admin-listen :$MANAGEMENT_PORT -tls-cert $wizard/tls-cert.pem -tls-key %d/tls-key" ;;
+    gospot-stage) src=staging/$unit.service; cmd="$lib/panel -operator-listen :$OPERATOR_PORT" ;;
+    gospot-panel) src=debian/$unit.service; cmd="$lib/panel -listen :$PANEL_PORT" ;;
+    gospot-wizard) src=debian/$unit.service; cmd="$lib/panel -admin-listen :$MANAGEMENT_PORT -tls-cert $wizard/tls-cert.pem -tls-key %d/tls-key" ;;
   esac
   sed "s|^ExecStart=.*|ExecStart=$cmd|" "$src" >"$p$units/$unit.service"
+  if grep -q '@' "$p$units/$unit.service"; then echo "unresolved placeholder in $unit.service" >&2; exit 1; fi
   # Existing pilot units are administrator files in /etc: retain them for removal.
   install -d "$p$units/$unit.service.d"
-  printf '[Service]\nExecStart=\nExecStart=%s\n' "$cmd" >"$p$units/$unit.service.d/50-pistar-dashboard.conf"
-  if [[ $unit == pistar-wizard ]]; then
+  printf '[Service]\nExecStart=\nExecStart=%s\n' "$cmd" >"$p$units/$unit.service.d/50-gospot.conf"
+  if [[ $unit == gospot-wizard ]]; then
     printf 'LoadCredential=\nLoadCredential=admin-password:%s/admin-password\nLoadCredential=tls-key:%s/tls-key.pem\nStateDirectory=%s\nStateDirectoryMode=0700\n' \
-      "$wizard" "$wizard" "$bm_state" >>"$p$units/$unit.service.d/50-pistar-dashboard.conf"
+      "$wizard" "$wizard" "$bm_state" >>"$p$units/$unit.service.d/50-gospot.conf"
   fi
 done
 node scripts/audit-native.mjs "$p"
 # Conffiles are tracked by dpkg separately, as in debhelper packages.
-(cd "$p" && find usr lib etc -type f ! -path etc/pistar-dashboard/pistar.conf -print0 | LC_ALL=C sort -z | xargs -0 md5sum >DEBIAN/md5sums)
-dest="build/$release/pistar-dashboard_${version}_armhf.deb"
+(cd "$p" && find usr lib etc -type f ! -path etc/gospot/gospot.conf -print0 | LC_ALL=C sort -z | xargs -0 md5sum >DEBIAN/md5sums)
+dest="build/$release/gospot_${version}_armhf.deb"
 dpkg-deb --root-owner-group --build "$p" "$dest"
 sha256sum "$dest"

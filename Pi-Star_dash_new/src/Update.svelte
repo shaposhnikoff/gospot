@@ -3,7 +3,7 @@
   // refreshes the Pi-Star host files and ID databases and upgrades the OS
   // packages; it never pulls a PHP dashboard.
   import { onMount } from 'svelte';
-  import PiStarFrame from './PiStarFrame.svelte';
+  import GoSpotFrame from './GoSpotFrame.svelte';
   import download from './images/download.png';
 
   let csrf = '';
@@ -43,7 +43,7 @@
   async function start() {
     error = '';
     const r = await fetch('/manage/api/update', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf }, body: JSON.stringify({ confirm: true }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf }, body: JSON.stringify({ confirm: true }),
     }).catch(() => null);
     if (!r || r.status !== 202) {
       error = r ? (await r.text()).trim() : 'Could not reach the board.';
@@ -55,7 +55,7 @@
   }
 </script>
 
-<PiStarFrame title="Update" links={['Dashboard', 'Admin', 'Power', 'Backup/Restore', 'Configuration']}>
+<GoSpotFrame title="Update" links={['Dashboard', 'Admin', 'Power', 'Backup/Restore', 'Configuration']}>
   {#if started}
     <table width="100%">
       <tbody>
@@ -70,7 +70,7 @@
         <tr>
           <td align="center" style="padding: 20px;">
             <p style="margin-bottom: 20px;">
-              <strong>This will update the Pi-Star host files, ID databases and system packages.</strong><br />
+              <strong>This will update the GoSpot host files, ID databases and system packages.</strong><br />
               <br />
               The update process may take several minutes to complete.<br />
               Please do not interrupt the process or power off your system during the update.
@@ -85,4 +85,4 @@
       </tbody>
     </table>
   {/if}
-</PiStarFrame>
+</GoSpotFrame>

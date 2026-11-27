@@ -74,7 +74,7 @@ export async function checkPackaged({write,wd,js,click,until,ssh,root,admin,post
     const initial=ids();
     const n=posts.length;
     const {cookies}=await cdp('Network.getCookies',{urls:[admin+endpoint]});
-    const cookie=cookies.find(c=>c.name==='__Host-pistar-csrf');
+    const cookie=cookies.find(c=>c.name==='__Host-gospot-csrf');
     assert(cookie?.secure && cookie.httpOnly && /^[0-9a-f]{64}$/.test(cookie.value));
     const el=await wd('/element',{using:'css selector',value:sel});
     const path='/element/'+el['element-6066-11e4-a52e-4f735466cecf'];

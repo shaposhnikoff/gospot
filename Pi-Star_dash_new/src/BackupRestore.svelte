@@ -1,7 +1,7 @@
 <script lang="ts">
   // admin/config_backup.php: classic-compatible Pi-Star configuration zip.
   import { onMount } from 'svelte';
-  import PiStarFrame from './PiStarFrame.svelte';
+  import GoSpotFrame from './GoSpotFrame.svelte';
   import download from './images/download.png';
   import restoreIcon from './images/restore.png';
 
@@ -20,7 +20,7 @@
     if (!confirm('This will overwrite the current configuration with the contents of ' + file.name + '. Continue?')) return;
     busy = true;
     const r = await fetch('/manage/api/backup/classic', {
-      method: 'POST', headers: { 'Content-Type': 'application/zip', 'X-PiStar-CSRF': csrf }, body: await file.arrayBuffer(),
+      method: 'POST', headers: { 'Content-Type': 'application/zip', 'X-GoSpot-CSRF': csrf }, body: await file.arrayBuffer(),
     }).catch(() => null);
     busy = false;
     if (!r) { output = ['No response from the board.']; ok = false; return; }
@@ -30,7 +30,7 @@
   }
 </script>
 
-<PiStarFrame title="Backup/Restore" links={['Dashboard', 'Admin', 'Power', 'Update', 'Configuration']}>
+<GoSpotFrame title="Backup/Restore" links={['Dashboard', 'Admin', 'Power', 'Update', 'Configuration']}>
   {#if output}
     <table width="100%">
       <tbody>
@@ -56,10 +56,10 @@
           <td colspan="2" align="justify" style="white-space: normal;">
             <br />
             <b>WARNING:</b><br />
-            Editing the files outside of Pi-Star *could* have un-desireable side effects.<br />
+            Editing the files outside of GoSpot *could* have un-desireable side effects.<br />
             <br />
             This backup and restore tool, will backup your config files to a Zip file, and allow you to restore them later<br />
-            either to this Pi-Star or another one.<br />
+            either to this GoSpot or another one.<br />
             <ul>
               <li>System Passwords / Dashboard passwords are NOT backed up / restored.</li>
               <li>Wireless Configuration IS backed up and restored</li>
@@ -69,4 +69,4 @@
       </tbody>
     </table>
   {/if}
-</PiStarFrame>
+</GoSpotFrame>

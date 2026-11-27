@@ -1,17 +1,28 @@
 #!/bin/sh
-# seed-configs SEED_LIST ZIP: create each missing target from its member of the
-# Pi-Star default configuration zip (lines "member target"); existing files
-# are never changed. New files are 0644, like the Pi-Star image.
+# seed-configs SEED_LIST ZIP TABLE: create each missing target from its member
+# of the Pi-Star default configuration zip (lines "member target"), rewritten
+# for the GoSpot layout by gospot-rebrand (next to this script) with the
+# resolved rename TABLE; existing files are never changed. New files are 0644,
+# like the Pi-Star image. A member the table cannot rewrite is not installed
+# and the script fails.
 set -eu
-seed=$1 zip=$2
+seed=$1 zip=$2 table=$3
+rebrand=$(dirname "$0")/gospot-rebrand
+status=0
 while read -r member target; do
     [ -n "$member" ] && [ ! -e "$target" ] || continue
-    tmp=$(mktemp "$(dirname "$target")/.pistar-seed.XXXXXX")
-    if unzip -p "$zip" "$member" >"$tmp" && [ -s "$tmp" ]; then
-        chmod 0644 "$tmp"
-        mv "$tmp" "$target"
-        echo "pistar-radio: created $target from the Pi-Star defaults"
+    tmp=$(mktemp "$(dirname "$target")/.gospot-seed.XXXXXX")
+    if unzip -p "$zip" "$member" >"$tmp.src" && [ -s "$tmp.src" ]; then
+        if python3 -I "$rebrand" apply "$table" "$member" <"$tmp.src" >"$tmp"; then
+            chmod 0644 "$tmp"
+            mv "$tmp" "$target"
+            echo "gospot-radio: created $target from the Pi-Star compatible defaults"
+        else
+            rm -f "$tmp"; status=1
+        fi
     else
         rm -f "$tmp"
     fi
+    rm -f "$tmp.src"
 done <"$seed"
+exit "$status"

@@ -3,7 +3,7 @@
   // cells and controls (panel/configure_*.go); this page renders them in the
   // classic markup and posts the whole form on any "Apply Changes".
   import { onMount } from 'svelte';
-  import PiStarFrame from './PiStarFrame.svelte';
+  import GoSpotFrame from './GoSpotFrame.svelte';
 
   type Option = { value: string; label: string };
   type Control = { kind: string; name?: string; value?: string; text?: string; options?: Option[]; attrs?: Record<string, string> };
@@ -29,7 +29,7 @@
     }
     form = f;
   }
-  const appliedKey = 'pistar-configure-applied';
+  const appliedKey = 'gospot-configure-applied';
   onMount(() => {
     if (sessionStorage.getItem(appliedKey)) {
       sessionStorage.removeItem(appliedKey);
@@ -45,7 +45,7 @@
     for (const s of sections ?? []) if ((s.form ?? 'config') === formName) for (const row of s.rows) for (const c of row.cells) for (const ctl of c.controls ?? []) if (ctl.name) names.add(ctl.name);
     const posted = Object.fromEntries(Object.entries(form).filter(([k]) => names.has(k)));
     const r = await fetch('/manage/api/configure', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf },
       body: JSON.stringify({ revision, form: posted }),
     }).catch(() => null);
     busy = false;
@@ -64,7 +64,7 @@
     if (!confirm('WARNING: This will set all your settings back to factory defaults. WiFi setup will be retained to maintain network access to this Pi.\n\nAre you SURE you want to do this?\n\nPress OK to restore the factory configuration\nPress Cancel to go back.')) return;
     busy = true; message = ''; error = '';
     const r = await fetch('/manage/api/configure/factory-reset', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf }, body: JSON.stringify({ confirm: 'RESET' }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf }, body: JSON.stringify({ confirm: 'RESET' }),
     }).catch(() => null);
     busy = false;
     if (!r || !r.ok) { error = r ? (await r.text()).trim() : 'No response from the board'; return; }
@@ -112,7 +112,7 @@
   {/if}
 {/snippet}
 
-<PiStarFrame title="Configuration" links={['Dashboard', 'Admin', 'Expert', 'Calibrate', 'Power', 'Update', 'Backup/Restore', 'Factory Reset']} actions={{ 'Factory Reset': () => { void factoryReset(); } }}>
+<GoSpotFrame title="Configuration" links={['Dashboard', 'Admin', 'Expert', 'Calibrate', 'Power', 'Update', 'Backup/Restore', 'Factory Reset']} actions={{ 'Factory Reset': () => { void factoryReset(); } }}>
   {#if message}<table><tbody><tr><td style="background:#1d1; white-space: pre-line;">{message}</td></tr></tbody></table><br />{/if}
   {#if error}<table><tbody><tr><td style="background:#f33;">{error}</td></tr></tbody></table><br />{/if}
   {#if !sections}
@@ -145,7 +145,7 @@
       </div>
     {/each}
   {/if}
-</PiStarFrame>
+</GoSpotFrame>
 
 <style>
   .section :global(h2) { color: var(--ps-text, #000000); font: 1em verdana, arial, sans-serif; text-align: center; font-weight: bold; padding: 0; margin: 8px 0 0 0; }

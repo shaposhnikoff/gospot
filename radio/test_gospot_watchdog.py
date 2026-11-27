@@ -1,9 +1,9 @@
-"""radio/sbin/pistar-watchdog: service checks, DStarRepeater failures and log
+"""radio/sbin/gospot-watchdog: service checks, DStarRepeater failures and log
 housekeeping.
 
 The script is loaded as a module and driven with temporary markers, logs, a
 fake /proc, a command recorder, a fixed clock and a fake disk usage; the
-program and its handler also run for real with PISTAR_RADIO_PATHS and a
+program and its handler also run for real with GOSPOT_RADIO_PATHS and a
 recording systemctl on PATH. Log lines copy the Pi-Star PS4 formats."""
 from datetime import datetime, timedelta
 import importlib.machinery
@@ -18,8 +18,8 @@ import unittest
 from unittest import mock
 
 HERE = Path(__file__).resolve().parent
-SCRIPT = HERE / "sbin" / "pistar-watchdog"
-HANDLER = HERE / "sbin" / "pistar-watchdog.service"
+SCRIPT = HERE / "sbin" / "gospot-watchdog"
+HANDLER = HERE / "sbin" / "gospot-watchdog.service"
 
 
 def load(path, name):
@@ -30,7 +30,7 @@ def load(path, name):
     return module
 
 
-watchdog = load(SCRIPT, "pistar_watchdog")
+watchdog = load(SCRIPT, "gospot_watchdog")
 sys.dont_write_bytecode = True
 
 NOW = datetime(2026, 11, 27, 12, 0, 0)
@@ -55,7 +55,7 @@ def dstarrepeater(text, ago=10):
 
 class Recorder:
     def __init__(self):
-        self.calls, self.status = [], "pistar-remote is running as PID 42\n"
+        self.calls, self.status = [], "gospot-remote is running as PID 42\n"
 
     def __call__(self, argv, capture=False):
         self.calls.append(list(argv))
@@ -69,19 +69,19 @@ class Fixture(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = root = Path(tmp.name)
-        for d in ("etc", "sbin", "proc", "var/log/pi-star"):
+        for d in ("etc", "sbin", "proc", "var/log/gospot"):
             (root / d).mkdir(parents=True)
-        self.logs = root / "var" / "log" / "pi-star"
+        self.logs = root / "var" / "log" / "gospot"
         (root / "etc" / "mmdvmhost").write_text(f"[Log]\nFilePath={self.logs}\nFileRoot=MMDVM\n")
-        (root / "etc" / "pistar-remote").write_text("[enable]\nenabled=false\n")
+        (root / "etc" / "gospot-remote").write_text("[enable]\nenabled=false\n")
         self.paths = {
-            "PISTAR_SBIN_DIR": str(root / "sbin"), "PISTAR_LOG_DIR": str(self.logs),
+            "GOSPOT_SBIN_DIR": str(root / "sbin"), "GOSPOT_LOG_DIR": str(self.logs),
             "SYSTEM_LOG_DIR": str(root / "var" / "log"),
             "MARKER_MMDVMHOST": str(root / "etc" / "dstar-radio.mmdvmhost"),
             "MARKER_DSTARREPEATER": str(root / "etc" / "dstar-radio.dstarrepeater"),
-            "CONF_MMDVMHOST": str(root / "etc" / "mmdvmhost"), "CONF_PISTAR_REMOTE": str(root / "etc" / "pistar-remote"),
+            "CONF_MMDVMHOST": str(root / "etc" / "mmdvmhost"), "CONF_GOSPOT_REMOTE": str(root / "etc" / "gospot-remote"),
             "UNIT_MMDVMHOST": "mmdvmhost.service", "UNIT_DSTARREPEATER": "dstarrepeater.service",
-            "UNIT_PISTAR_REMOTE": "pistar-remote.service",
+            "UNIT_GOSPOT_REMOTE": "gospot-remote.service",
             "WATCHDOG_DSTARREPEATER_PROCESSES": "dstarrepeaterd:dstarrepeater.service",
             "WATCHDOG_MMDVMHOST_PROCESSES": MMDVM_PROCESSES,
             "WATCHDOG_COMMON_PROCESSES": "ircddbgatewayd:ircddbgateway.service,timeserverd:timeserver.service",
@@ -151,24 +151,24 @@ class Services(Fixture):
 
 class Remote(Fixture):
     def test_enabled_remote_that_is_not_running_is_restarted(self):
-        (self.root / "etc" / "pistar-remote").write_text(REMOTE_ON)
-        self.rec.status = "pistar-remote is not running\n"
-        handler = [str(self.root / "sbin" / "pistar-remote.service"), "status"]
-        self.assertEqual(self.check(), [handler] + restart("pistar-remote.service")[0])
+        (self.root / "etc" / "gospot-remote").write_text(REMOTE_ON)
+        self.rec.status = "gospot-remote is not running\n"
+        handler = [str(self.root / "sbin" / "gospot-remote.service"), "status"]
+        self.assertEqual(self.check(), [handler] + restart("gospot-remote.service")[0])
         self.assertEqual(self.sleeps, [2, 10])
 
     def test_running_disabled_or_missing(self):
-        (self.root / "etc" / "pistar-remote").write_text(REMOTE_ON)
-        handler = [str(self.root / "sbin" / "pistar-remote.service"), "status"]
+        (self.root / "etc" / "gospot-remote").write_text(REMOTE_ON)
+        handler = [str(self.root / "sbin" / "gospot-remote.service"), "status"]
         self.assertEqual(self.check(), [handler])
         self.rec.status = None  # handler missing
         self.assertEqual(self.check(), [handler])
-        (self.root / "etc" / "pistar-remote").write_text(REMOTE_ON.replace("true", "false"))
+        (self.root / "etc" / "gospot-remote").write_text(REMOTE_ON.replace("true", "false"))
         self.assertEqual(self.check(), [])
-        (self.root / "etc" / "pistar-remote").write_text("enabled=true\n")  # no section: not an INI file
+        (self.root / "etc" / "gospot-remote").write_text("enabled=true\n")  # no section: not an INI file
         self.assertEqual(self.check(), [])
         self.assertTrue(any(m.startswith("cannot parse") for m in self.logged))
-        (self.root / "etc" / "pistar-remote").unlink()
+        (self.root / "etc" / "gospot-remote").unlink()
         self.assertEqual(self.check(), [])
 
 
@@ -228,8 +228,8 @@ class Housekeeping(Fixture):
         made = {}
         for rel, old in (("syslog.1", False), ("messages.1.gz", False), ("syslog", False), ("daemon.log.2.gz", False),
                          ("apt/history.log.3.gz", True), ("apt/eipp.log.xz", True), ("nginx/error.log", True),
-                         ("journal/x/system.journal", True), ("pi-star/MMDVM-2026-11-25.log", True),
-                         ("pi-star/DMRGateway-2026-11-27.log", False), ("pi-star/notes.txt", True),
+                         ("journal/x/system.journal", True), ("gospot/MMDVM-2026-11-25.log", True),
+                         ("gospot/DMRGateway-2026-11-27.log", False), ("gospot/notes.txt", True),
                          ("nested/old.gz", True)):
             path = var / rel
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +249,7 @@ class Housekeeping(Fixture):
         self.usage = 91
         self.assertEqual(self.check(), [["systemctl", "restart", "mmdvmhost.service"]])
         self.assertEqual(self.sleeps, [60])
-        gone = {"syslog.1", "messages.1.gz", "apt/history.log.3.gz", "pi-star/MMDVM-2026-11-25.log", "nested/old.gz"}
+        gone = {"syslog.1", "messages.1.gz", "apt/history.log.3.gz", "gospot/MMDVM-2026-11-25.log", "nested/old.gz"}
         for rel, path in made.items():
             self.assertEqual(path.exists(), rel not in gone, rel)
         self.assertTrue((self.root / "var" / "log" / "link.1").is_symlink())
@@ -272,7 +272,7 @@ class Housekeeping(Fixture):
         self.assertEqual(self.check(), [])
         self.assertTrue(all(p.exists() for p in made.values()))
 
-    def test_missing_pi_star_log_dir(self):
+    def test_missing_log_dir(self):
         for f in self.logs.iterdir():
             f.unlink()
         self.logs.rmdir()
@@ -306,7 +306,7 @@ class Paths(Fixture):
         self.assertEqual(watchdog.load_paths(self.paths_file("# c\n" + body)), self.paths)
         for bad, mode in ((body, 0o646),
                           (body.replace("SYSTEM_LOG_DIR=/", "SYSTEM_LOG_DIR=./"), 0o644),
-                          (body.replace("UNIT_PISTAR_REMOTE=pistar-remote.service", "UNIT_PISTAR_REMOTE=x"), 0o644),
+                          (body.replace("UNIT_GOSPOT_REMOTE=gospot-remote.service", "UNIT_GOSPOT_REMOTE=x"), 0o644),
                           (body.replace("timeserverd:timeserver.service", "timeserverd"), 0o644),
                           (body.replace("dstarrepeaterd:", "dstar repeaterd:"), 0o644),
                           (body + "lower=x\n", 0o644)):
@@ -328,7 +328,7 @@ class Commands(Fixture):
 
 
 class Program(Fixture):
-    """The script and its handler as programs, with PISTAR_RADIO_PATHS."""
+    """The script and its handler as programs, with GOSPOT_RADIO_PATHS."""
 
     def setUp(self):
         super().setUp()
@@ -344,13 +344,13 @@ class Program(Fixture):
         paths = self.root / "paths"
         paths.write_text("".join(f"{k}={v}\n" for k, v in self.paths.items()))
         paths.chmod(0o644)
-        self.env = dict(os.environ, PISTAR_RADIO_PATHS=str(paths), PATH=f"{fake}:{os.environ['PATH']}",
+        self.env = dict(os.environ, GOSPOT_RADIO_PATHS=str(paths), PATH=f"{fake}:{os.environ['PATH']}",
                         FAKE_SYSTEMCTL_LOG=str(self.root / "systemctl.log"))
         for src in (SCRIPT, HANDLER):
             (self.root / "sbin" / src.name).write_bytes(src.read_bytes())
             (self.root / "sbin" / src.name).chmod(0o755)
 
-    def program(self, *args, name="pistar-watchdog"):
+    def program(self, *args, name="gospot-watchdog"):
         # Output goes to a file: a daemon the handler starts keeps it open.
         with tempfile.TemporaryFile("w+") as out:
             done = subprocess.run([str(self.root / "sbin" / name), *args], env=self.env, stdout=out,
@@ -360,41 +360,41 @@ class Program(Fixture):
         return done
 
     def test_once_with_everything_running(self):
-        (self.root / "etc" / "pistar-remote").write_text(REMOTE_ON)
-        remote_handler = self.root / "sbin" / "pistar-remote.service"
-        remote_handler.write_text("#!/bin/sh\necho pistar-remote is running as PID 1\n")
+        (self.root / "etc" / "gospot-remote").write_text(REMOTE_ON)
+        remote_handler = self.root / "sbin" / "gospot-remote.service"
+        remote_handler.write_text("#!/bin/sh\necho gospot-remote is running as PID 1\n")
         remote_handler.chmod(0o755)
         done = self.program("--once")
         self.assertEqual(done.returncode, 0, done.stdout)
         self.assertFalse((self.root / "systemctl.log").exists(), done.stdout)
 
     def test_bad_paths_file_stops_the_program(self):
-        self.env["PISTAR_RADIO_PATHS"] = str(self.root / "missing")
+        self.env["GOSPOT_RADIO_PATHS"] = str(self.root / "missing")
         done = self.program("--once")
         self.assertEqual(done.returncode, 1)
         self.assertIn("cannot read", done.stdout)
 
     def test_handler_manages_the_daemon(self):
-        self.assertIn("is not running", self.program("status", name="pistar-watchdog.service").stdout)
-        self.assertIn("is not running", self.program("stop", name="pistar-watchdog.service").stdout)
-        self.assertIn("started as PID", self.program("start", name="pistar-watchdog.service").stdout)
-        self.addCleanup(self.program, "stop", name="pistar-watchdog.service")
+        self.assertIn("is not running", self.program("status", name="gospot-watchdog.service").stdout)
+        self.assertIn("is not running", self.program("stop", name="gospot-watchdog.service").stdout)
+        self.assertIn("started as PID", self.program("start", name="gospot-watchdog.service").stdout)
+        self.addCleanup(self.program, "stop", name="gospot-watchdog.service")
         deadline = time.monotonic() + 10
-        while "is running" not in self.program("status", name="pistar-watchdog.service").stdout:
-            self.assertLess(time.monotonic(), deadline, "pistar-watchdog did not start")
+        while "is running" not in self.program("status", name="gospot-watchdog.service").stdout:
+            self.assertLess(time.monotonic(), deadline, "gospot-watchdog did not start")
             time.sleep(0.1)
-        first = self.program("status", name="pistar-watchdog.service").stdout.split()[-1]
-        self.assertIn("already running", self.program("start", name="pistar-watchdog.service").stdout)
-        self.assertIn("Killing", self.program("restart", name="pistar-watchdog.service").stdout)
+        first = self.program("status", name="gospot-watchdog.service").stdout.split()[-1]
+        self.assertIn("already running", self.program("start", name="gospot-watchdog.service").stdout)
+        self.assertIn("Killing", self.program("restart", name="gospot-watchdog.service").stdout)
         deadline = time.monotonic() + 10
         while True:
-            status = self.program("status", name="pistar-watchdog.service").stdout
+            status = self.program("status", name="gospot-watchdog.service").stdout
             if "is running" in status and status.split()[-1] != first:
                 break
-            self.assertLess(time.monotonic(), deadline, "pistar-watchdog did not restart")
+            self.assertLess(time.monotonic(), deadline, "gospot-watchdog did not restart")
             time.sleep(0.1)
-        self.assertIn("Killing", self.program("stop", name="pistar-watchdog.service").stdout)
-        self.assertIn("is not running", self.program("status", name="pistar-watchdog.service").stdout)
+        self.assertIn("Killing", self.program("stop", name="gospot-watchdog.service").stdout)
+        self.assertIn("is not running", self.program("status", name="gospot-watchdog.service").stdout)
         self.assertFalse((self.root / "systemctl.log").exists())  # still settling for 90 s, no checks yet
 
 

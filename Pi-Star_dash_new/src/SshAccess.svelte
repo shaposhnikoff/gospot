@@ -8,10 +8,10 @@
 
 <table width="100%">
   <tbody>
-    <tr><th>SSH - Pi-Star</th></tr>
+    <tr><th>SSH - GoSpot</th></tr>
     <tr><td align="left"><div id="tail">
       {#if url}
-        <iframe src={url} title="Pi-Star_SSH" style="border:0px #ffffff none; background:#ffffff; color:#00ff00;" height="100%" width="100%"></iframe>
+        <iframe src={url} title="GoSpot_SSH" style="border:0px #ffffff none; background:#ffffff; color:#00ff00;" height="100%" width="100%"></iframe>
       {:else if port === 0}
         SSH Feature not yet installed
       {/if}

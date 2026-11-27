@@ -3,7 +3,7 @@
   // "#wifi-conf" is ?page=wpa_conf (country, networks, Scan, Save). The board
   // never sends a stored PSK: a blank PSK keeps the saved key.
   import { onMount } from 'svelte';
-  import PiStarFrame from './PiStarFrame.svelte';
+  import GoSpotFrame from './GoSpotFrame.svelte';
   import { convertToChannel, convertToSecurity, ifconfigBytes, ssidOk, pskOk } from './wifi';
 
   type Status = {
@@ -52,7 +52,7 @@
 
   async function post(body: Record<string, unknown>): Promise<Response | null> {
     return fetch('/manage/api/wifi', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': data?.csrf ?? '' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': data?.csrf ?? '' },
       body: JSON.stringify(body),
     }).catch(() => null);
   }
@@ -104,7 +104,7 @@
   const line = (label: string, width: number) => label.padStart(width, ' ') + ' : ';
 </script>
 
-<PiStarFrame title="WiFi Config" links={['Dashboard', 'Admin', 'Configuration', 'Expert', 'Power', 'Update', 'Backup/Restore']}>
+<GoSpotFrame title="WiFi Config" links={['Dashboard', 'Admin', 'Configuration', 'Expert', 'Power', 'Update', 'Backup/Restore']}>
   <div class="wifi">
     {#if message}<table><tbody><tr><td style="background:#1d1;">{message}{#if note}<br />{note}{/if}</td></tr></tbody></table><br />{/if}
     {#if error}<div role="alert"><table><tbody><tr><td style="background:#f33;">{error}</td></tr></tbody></table></div><br />{/if}
@@ -196,7 +196,7 @@
       {/if}
     {/if}
   </div>
-</PiStarFrame>
+</GoSpotFrame>
 
 <style>
   /* admin/wifi/styles.php with the built-in palette. */

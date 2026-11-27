@@ -167,7 +167,7 @@ var cfgRadioUnits = []string{
 	"dgidgateway.service", "ysfparrot.service", "p25gateway.service", "p25parrot.service", "nxdngateway.service",
 	"nxdnparrot.service", "nxdn2dmr.service", "m17gateway.service", "dmr2ysf.service", "dmr2nxdn.service",
 	"dapnetgateway.service", "aprsgateway.service", "mobilegps.service", "ircddbgateway.service",
-	"timeserver.service", "pistar-remote.service", "pistar-watchdog.service",
+	"timeserver.service", "gospot-remote.service", "gospot-watchdog.service",
 	"mmdvmhost.service", "dstarrepeater.service",
 }
 

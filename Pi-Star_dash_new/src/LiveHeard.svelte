@@ -24,7 +24,7 @@
     void update(); return () => { ctrl.abort(); clearTimeout(timer); };
   });
 </script>
-<section class="panel feed"><h2>Последние вызовы · Pi-Star API</h2>
+<section class="panel feed"><h2>Последние вызовы · GoSpot API</h2>
   {#if stamp}<small>Получено: {stamp}</small>{/if}
   {#if error}<p role="status">Не удалось прочитать журнал.{loaded ? ' Показан последний снимок.' : ''}</p>{/if}
   {#if rows.length}<div class="table-scroll"><table><thead><tr>{#each heads as h}<th>{h}</th>{/each}</tr></thead>

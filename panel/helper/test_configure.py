@@ -9,24 +9,24 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 TMP = Path(tempfile.mkdtemp())
-conf = (ROOT / "Pi-Star_dash_new" / "pistar.conf").read_text()
+conf = (ROOT / "Pi-Star_dash_new" / "gospot.conf").read_text()
 lines = []
 for line in conf.splitlines():
     key = line.partition("=")[0]
     if key.startswith(("CONF_", "FLAG_")) or key in ("DASHBOARD_STATE_DIR", "MARKER_MMDVMHOST", "MARKER_DSTARREPEATER", "HOSTNAME_FILE",
-                                          "WPA_SUPPLICANT_CONF", "CRONTAB_FILE", "PISTAR_HOSTS_DIR",
+                                          "WPA_SUPPLICANT_CONF", "CRONTAB_FILE", "GOSPOT_HOSTS_DIR",
                                           "BM_API_KEY_FILE", "DAPNET_API_KEY_FILE", "TGIF_API_KEY_FILE",
-                                          "HOSTS_FILE", "HOSTAPD_CONF", "HOSTAP_OFF_FLAG", "PISTAR_UPNP_SCRIPT",
-                                          "WIZARD_CONFIG_DIR", "DHCPCD_CONF", "PISTAR_CSS_FILE", "RADIO_SHARE_DIR"):
+                                          "HOSTS_FILE", "HOSTAPD_CONF", "HOSTAP_OFF_FLAG", "GOSPOT_UPNP_SCRIPT",
+                                          "WIZARD_CONFIG_DIR", "DHCPCD_CONF", "GOSPOT_CSS_FILE", "RADIO_SHARE_DIR"):
         line = f"{key}={TMP / key.lower()}"
     lines.append(line)
-settings = TMP / "pistar.conf"
+settings = TMP / "gospot.conf"
 import pwd
 lines = [l if not l.startswith("DASHBOARD_ADMIN_USER=") else "DASHBOARD_ADMIN_USER=" + pwd.getpwuid(os.geteuid()).pw_name for l in lines]
 settings.write_text("\n".join(lines) + "\n")
 os.chmod(settings, 0o644)
-os.environ["PISTAR_SETTINGS"] = str(settings)
-loader = importlib.machinery.SourceFileLoader("configure_helper", str(Path(__file__).with_name("pistar-configure")))
+os.environ["GOSPOT_SETTINGS"] = str(settings)
+loader = importlib.machinery.SourceFileLoader("configure_helper", str(Path(__file__).with_name("gospot-configure")))
 helper = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(helper)
 
@@ -127,7 +127,7 @@ class SystemOpsTest(unittest.TestCase):
         helper.MARKERS["dstarrepeater"].unlink(missing_ok=True)
         helper.HOSTAPD.write_text("interface=wlan0\nssid=pi-star\nwpa_passphrase=raspberry\n")
         helper.UPNP.write_text("#!/bin/bash\n\t$DAEMON_PATH$DAEMON -a $ipVar 80 80 TCP\n\t$DAEMON_PATH$DAEMON -a $ipVar 22 22 TCP\n")
-        helper.CRONTAB.write_text("*/5 *\t* * *\troot\t/usr/local/sbin/pistar-upnp.service start > /dev/null 2>&1 &\n")
+        helper.CRONTAB.write_text("*/5 *\t* * *\troot\t/usr/local/sbin/gospot-upnp.service start > /dev/null 2>&1 &\n")
         self.apply({"modem": {"Hardware": "zumspotusb"}, "autoap": "off", "autoap_psk": "newsecret1",
                     "upnp": "off", "upnp_ports": {"80": "on", "22": "off"}})
         self.assertEqual(helper.MARKERS["mmdvmhost"].read_text(), "[Modem]\nHardware=zumspotusb\n")
@@ -184,7 +184,7 @@ class SystemOpsTest(unittest.TestCase):
         orig = helper.subprocess.run
         helper.subprocess.run = lambda args, **kw: ran.append(args)
         saved_user = helper.LINUX_USER
-        helper.LINUX_USER = "no-such-user-pistar"
+        helper.LINUX_USER = "no-such-user-gospot"
         try:
             self.apply({"password": "s3cret pass"})
         finally:
@@ -238,6 +238,40 @@ class BackupTest(unittest.TestCase):
         self.assertFalse(out["ok"])
         self.assertEqual(helper.FILES["mmdvmhost"].read_text(), "[General]\nCallsign=KEEP\n")
         self.assertTrue(helper.MARKERS["mmdvmhost"].exists())
+
+    def test_backup_uses_gospot_member_names(self):
+        helper.CSS_FILE.write_text("[Background]\nPage=111111\n")
+        helper.FILES["gospot-remote"].write_text("[enable]\nenabled=false\n")
+        names = self.names(helper.backup())
+        self.assertIn("gospot-css.ini", names)
+        self.assertIn("gospot-remote", names)
+        self.assertFalse([n for n in names if "pistar" in n], names)
+
+    def test_classic_member_names_restore_under_gospot_paths(self):
+        import io, zipfile
+        def zipped(*members):
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                for k, v in members:
+                    z.writestr(k, v)
+            return buf.getvalue()
+        helper.CSS_FILE.unlink(missing_ok=True)
+        helper.FILES["gospot-remote"].unlink(missing_ok=True)
+        classic = zipped(("pistar-css.ini", "[Background]\nPage=222222\n"), ("pistar-remote", "[enable]\nenabled=true\n"),
+                         ("mmdvmhost", HOST))
+        out = helper.restore(classic, run=lambda *a: None, is_loaded=lambda u: False)
+        self.assertTrue(out["ok"], out)
+        self.assertIn("(3 files)", out["output"][0])
+        self.assertEqual(helper.CSS_FILE.read_text(), "[Background]\nPage=222222\n")
+        self.assertEqual(helper.FILES["gospot-remote"].read_text(), "[enable]\nenabled=true\n")
+        self.assertFalse([p for p in TMP.rglob("*pistar*")])
+        # A GoSpot-named member wins over its classic name, in either order.
+        for members in ((("pistar-css.ini", "[Background]\nPage=333333\n"), ("gospot-css.ini", "[Background]\nPage=444444\n")),
+                        (("gospot-css.ini", "[Background]\nPage=444444\n"), ("pistar-css.ini", "[Background]\nPage=333333\n"))):
+            out = helper.restore(zipped(*members), run=lambda *a: None, is_loaded=lambda u: False)
+            self.assertTrue(out["ok"], out)
+            self.assertEqual(helper.CSS_FILE.read_text(), "[Background]\nPage=444444\n")
+            self.assertIn("(1 files)", out["output"][0])
 
     def test_classic_archive_and_refusals(self):
         import io, zipfile

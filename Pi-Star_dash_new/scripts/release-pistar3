@@ -13,7 +13,7 @@ bash ../panel/deploy-wizard.sh
 # continue to reference the previous bundle. No credentials in the payload.
 tar -C dist -cf - assets index.html | ssh "${node[@]}" 'set -eu
   test "$(hostname -s)" = pistar3
-  dst=/usr/local/share/pistar-native-ui
+  dst=/usr/local/share/gospot-native-ui
   sudo -n install -d -m755 "$dst/assets"
   tmp=$(mktemp -d)
   trap "rm -rf -- \"$tmp\"" EXIT

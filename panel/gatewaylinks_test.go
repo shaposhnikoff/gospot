@@ -36,10 +36,10 @@ func TestGatewayLinkParsing(t *testing.T) {
 }
 
 func TestYSFRoomName(t *testing.T) {
-	saved := pistarHostsDir
-	defer func() { pistarHostsDir = saved }()
-	pistarHostsDir = t.TempDir()
-	os.WriteFile(filepath.Join(pistarHostsDir, "YSFHosts.txt"), []byte("16710;GB_SOUTH_WEST_REGIONAL;South West;1.2.3.4;42000;003;\n"), 0o644)
+	saved := gospotHostsDir
+	defer func() { gospotHostsDir = saved }()
+	gospotHostsDir = t.TempDir()
+	os.WriteFile(filepath.Join(gospotHostsDir, "YSFHosts.txt"), []byte("16710;GB_SOUTH_WEST_REGIONAL;South West;1.2.3.4;42000;003;\n"), 0o644)
 	if got := ysfRoomName("16710"); got != "GB SOUTH WEST REG.." {
 		t.Fatalf("%q", got)
 	}

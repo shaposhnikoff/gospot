@@ -37,7 +37,7 @@ func TestOperatorStaticAndRouting(t *testing.T) {
 		{"GET", "/kiosk.html", 404, ""},
 		{"HEAD", "/", 200, ""},
 		{"GET", "/health", 200, "ok\n"},
-		{"GET", "/runtime.json", 200, `{"backend":"pistar-go","wizardPort":8788}`},
+		{"GET", "/runtime.json", 200, `{"backend":"gospot-go","wizardPort":8788}`},
 		{"POST", "/api/status", 405, ""},
 		{"GET", "/escape.html", 404, ""},
 		{"GET", "/%2e%2e/secret.html", 404, ""},
@@ -123,7 +123,7 @@ func TestOperatorUsesConfiguredManagementPort(t *testing.T) {
 	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest("GET", "/runtime.json", nil))
-	if response.Body.String() != `{"backend":"pistar-go","wizardPort":8791}` {
+	if response.Body.String() != `{"backend":"gospot-go","wizardPort":8791}` {
 		t.Fatalf("incorrect advertised runtime: %s", response.Body.String())
 	}
 }

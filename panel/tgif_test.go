@@ -20,11 +20,11 @@ func tgifFixture(t *testing.T, host, gw, release string, token bool) string {
 	t.Helper()
 	linksFixture(t, host)
 	dir := filepath.Dir(mmdvmINI.location())
-	savedKey, savedRelease := tgifKeyFile, pistarReleaseFile
-	t.Cleanup(func() { tgifKeyFile, pistarReleaseFile = savedKey, savedRelease })
+	savedKey, savedRelease := tgifKeyFile, gospotReleaseFile
+	t.Cleanup(func() { tgifKeyFile, gospotReleaseFile = savedKey, savedRelease })
 	os.WriteFile(filepath.Join(dir, "dmrgateway"), []byte(gw), 0o644)
-	pistarReleaseFile = filepath.Join(dir, "pistar-release")
-	os.WriteFile(pistarReleaseFile, []byte("[Pi-Star]\nVersion = "+release+"\n"), 0o644)
+	gospotReleaseFile = filepath.Join(dir, "gospot-release")
+	os.WriteFile(gospotReleaseFile, []byte("[GoSpot]\nVersion = "+release+"\n"), 0o644)
 	tgifKeyFile = filepath.Join(dir, "tgifapi.key")
 	if token {
 		os.WriteFile(tgifKeyFile, []byte("[key]\napikey="+testTGIFToken+"\n"), 0o600)
@@ -129,7 +129,7 @@ func newFakeTGIF(t *testing.T) *fakeTGIF {
 		f.mu.Unlock()
 		if want := "Bearer " + testTGIFToken; strings.HasPrefix(r.URL.Path, "/v1/") &&
 			(r.Header.Get("Authorization") != want || r.Header.Get("Accept") != "application/json" ||
-				r.Header.Get("User-Agent") != "Pi-Star TGIF TG Manager/234123401" ||
+				r.Header.Get("User-Agent") != "GoSpot TGIF TG Manager/234123401" ||
 				(len(body) > 0) != (r.Header.Get("Content-Type") == "application/json")) {
 			t.Errorf("headers of %s %s: %v", r.Method, r.URL.Path, r.Header)
 		}

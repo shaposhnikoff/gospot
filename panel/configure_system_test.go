@@ -22,7 +22,7 @@ const stockUpnp = "#!/bin/bash\n" +
 	"stop)\n" +
 	"\t\t$DAEMON -u ${igdURL} -d 10022 UDP > /dev/null 2>&1\n"
 
-const stockCron = "SHELL=/bin/sh\n*/5 *\t* * *\troot\t/usr/local/sbin/pistar-upnp.service start > /dev/null 2>&1 &\n"
+const stockCron = "SHELL=/bin/sh\n*/5 *\t* * *\troot\t/usr/local/sbin/gospot-upnp.service start > /dev/null 2>&1 &\n"
 
 type sysFix struct {
 	dir                      string
@@ -37,7 +37,7 @@ func withSys(t *testing.T, upnp, cron string, hostapd, off, wireless bool) *sysF
 	saved, savedWireless := cfgSys, cfgWirelessPresent
 	t.Cleanup(func() { cfgSys, cfgWirelessPresent = saved, savedWireless })
 	dir := t.TempDir()
-	f := &sysFix{dir: dir, upnp: filepath.Join(dir, "pistar-upnp.service"), cron: filepath.Join(dir, "crontab"),
+	f := &sysFix{dir: dir, upnp: filepath.Join(dir, "gospot-upnp.service"), cron: filepath.Join(dir, "crontab"),
 		hostapd: filepath.Join(dir, "hostapd.conf"), off: filepath.Join(dir, "hostap.off"), wireless: wireless}
 	write := func(p, s string, ok bool) {
 		if ok {
@@ -51,7 +51,7 @@ func withSys(t *testing.T, upnp, cron string, hostapd, off, wireless bool) *sysF
 	write(f.hostapd, "ssid=pi-star\nwpa=2\nwpa_passphrase=raspberry\n", hostapd)
 	write(f.off, "", off)
 	cfgSys.upnpScript, cfgSys.crontab, cfgSys.hostapdConf, cfgSys.hostapOff = f.upnp, f.cron, f.hostapd, f.off
-	cfgSys.linuxUser = "pi-star"
+	cfgSys.linuxUser = "gospot"
 	cfgWirelessPresent = func() bool { return wireless }
 	return f
 }
@@ -117,8 +117,8 @@ func TestCfgSystemSettings(t *testing.T) {
 	if err := setCfgSystemPaths(s); err != nil {
 		t.Fatal(err)
 	}
-	if cfgSys.upnpScript != s["PISTAR_UPNP_SCRIPT"] || cfgSys.crontab != s["CRONTAB_FILE"] || cfgSys.hostapOff != s["HOSTAP_OFF_FLAG"] ||
-		cfgSys.hostapdConf != s["HOSTAPD_CONF"] || cfgSys.linuxUser != s["PISTAR_LINUX_USER"] || cfgSys.upnpScript == "" {
+	if cfgSys.upnpScript != s["GOSPOT_UPNP_SCRIPT"] || cfgSys.crontab != s["CRONTAB_FILE"] || cfgSys.hostapOff != s["HOSTAP_OFF_FLAG"] ||
+		cfgSys.hostapdConf != s["HOSTAPD_CONF"] || cfgSys.linuxUser != s["GOSPOT_LINUX_USER"] || cfgSys.upnpScript == "" {
 		t.Fatalf("settings not installed: %+v", cfgSys)
 	}
 	before := cfgSys
@@ -197,7 +197,7 @@ func TestFirewallReadsFileState(t *testing.T) {
 		"no cron line": {stockUpnp, "SHELL=/bin/sh\n", false, false,
 			map[string]string{"dashAccess": "PRV", "ircRCAccess": "PRV", "sshAccess": "PRV", "uPNP": "ON"}},
 		// exec() returns the last matching line.
-		"last line wins": {stockUpnp + "\t\t$DAEMON -a $ipVar 22 22 TCP\n", stockCron + "#x pistar-upnp.service\n", false, false,
+		"last line wins": {stockUpnp + "\t\t$DAEMON -a $ipVar 22 22 TCP\n", stockCron + "#x gospot-upnp.service\n", false, false,
 			map[string]string{"dashAccess": "PRV", "ircRCAccess": "PRV", "sshAccess": "PUB", "uPNP": "OFF"}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -339,13 +339,13 @@ func TestAdminPassBuild(t *testing.T) {
 	}
 	row := sec.Rows[1].Cells
 	in := row[1].Controls
-	if row[0].Label != "pi-star" || in[0].Text != "Password:" || in[1].Name != "adminPassword" || in[1].Kind != "password" ||
+	if row[0].Label != "gospot" || in[0].Text != "Password:" || in[1].Name != "adminPassword" || in[1].Kind != "password" ||
 		in[2].Text != "Confirm Password:" || in[3].Name != "adminPasswordConfirm" || in[3].Kind != "password" ||
 		row[2].Controls[0].Kind != "button" || row[2].Controls[0].Text != "Set Password" {
 		t.Fatalf("row: %+v", row)
 	}
 	note := sec.Rows[2].Cells[0]
-	if note.Label != "WARNING:" || note.Colspan != 3 || note.Controls[0].Text != "This changes the password for this admin page\nAND the \"pi-star\" SSH account" {
+	if note.Label != "WARNING:" || note.Colspan != 3 || note.Controls[0].Text != "This changes the password for this admin page\nAND the \"gospot\" SSH account" {
 		t.Fatalf("note: %+v", note)
 	}
 }

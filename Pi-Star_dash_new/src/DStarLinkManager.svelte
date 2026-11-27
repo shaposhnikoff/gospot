@@ -1,6 +1,6 @@
 <script lang="ts">
   // dstarrepeater/link_manager.php of the classic admin page, with its
-  // PiStar-Keeper logbook. Link and unlink run remotecontrold on the board.
+  // GoSpot-Keeper logbook. Link and unlink run remotecontrold on the board.
   import { onMount, tick } from 'svelte';
   import { type DStarManager, type DStarForm, letters, dstarLinkBody, dstarOutput } from './dstar';
 
@@ -34,7 +34,7 @@
   async function submit(e: SubmitEvent) {
     e.preventDefault();
     const r = await fetch('/manage/api/links/dstar', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': data?.csrf ?? '' }, body: JSON.stringify(dstarLinkBody(form)),
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': data?.csrf ?? '' }, body: JSON.stringify(dstarLinkBody(form)),
     }).catch(() => null);
     let text = '';
     if (r) text = r.ok ? (await r.json()).output : await r.text();
@@ -100,10 +100,10 @@
 
 {#if data?.keeper}
   <br />
-  <b>PiStar-Keeper Logbook</b><input type="button" value="Download Logbook" onclick={() => { location.href = '/manage/api/links/dstar/keeper'; }} />
+  <b>GoSpot-Keeper Logbook</b><input type="button" value="Download Logbook" onclick={() => { location.href = '/manage/api/links/dstar/keeper'; }} />
   <table>
     <tbody>
-      <tr><th><a class="tooltip" href="#top">PiStar-Keeper Log Entries (UTC)<span><b>PiStar-Keeper Log Entries (UTC)</b></span></a></th></tr>
+      <tr><th><a class="tooltip" href="#top">GoSpot-Keeper Log Entries (UTC)<span><b>GoSpot-Keeper Log Entries (UTC)</b></span></a></th></tr>
       {#each data.keeper as line}<tr><td align="left">{line}</td></tr>{/each}
     </tbody>
   </table>

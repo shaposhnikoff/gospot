@@ -16,7 +16,7 @@ import (
 )
 
 // pistar.uk/downloads/DMRIds.dat.gz lines (ID TAB callsign TAB first name).
-const pistarDMRIds = "1023001\tVE3THW\tWayne\n1023002\tVA3ECM\tMathieu\n" +
+const gospotDMRIds = "1023001\tVE3THW\tWayne\n1023002\tVA3ECM\tMathieu\n" +
 	"# comment\n\n" +
 	"2550430\tut3udx\tMax\r\n" + // CRLF, lower-case callsign (CUserDB upper-cases)
 	"2550431\tUT3UDX\tMaksym\n" + // second ID of the same callsign
@@ -29,8 +29,8 @@ const pistarDMRIds = "1023001\tVE3THW\tWayne\n1023002\tVA3ECM\tMathieu\n" +
 	"4000002\tN0NAME\n" + // no name column
 	"4000003\tM1ABC\t  Jo\x07hn \t\n"
 
-func TestParseUserDBPistarFormat(t *testing.T) {
-	db := parseUserDB(strings.NewReader(pistarDMRIds))
+func TestParseUserDBClassicFormat(t *testing.T) {
+	db := parseUserDB(strings.NewReader(gospotDMRIds))
 	for from, want := range map[string]string{
 		"1023001": "Wayne", "VA3ECM": "Mathieu", "2550430": "Max", "2550431": "Maksym",
 		"UT3UDX": "Max", "ut3udx": "Max", "UT3UDX-1": "Max", "UT3UDX/P": "Max",
@@ -138,9 +138,9 @@ func TestParseTGList(t *testing.T) {
 func withHostsDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	old := pistarHostsDir
-	pistarHostsDir = dir
-	t.Cleanup(func() { pistarHostsDir = old })
+	old := gospotHostsDir
+	gospotHostsDir = dir
+	t.Cleanup(func() { gospotHostsDir = old })
 	return dir
 }
 
@@ -226,7 +226,7 @@ func TestHostNamesLookups(t *testing.T) {
 		t.Fatal("missing files must resolve nothing")
 	}
 
-	writeHostFile(t, filepath.Join(dir, "DMRIds.dat"), pistarDMRIds, mod)
+	writeHostFile(t, filepath.Join(dir, "DMRIds.dat"), gospotDMRIds, mod)
 	writeHostFile(t, filepath.Join(dir, "TGList_BM.txt"), testTGList, mod)
 	writeHostFile(t, filepath.Join(dir, "TGList_P25.txt"), "10200;0;North America;TG10200\n", mod)
 	writeHostFile(t, filepath.Join(dir, "TGList_NXDN.txt"), "65000;0;World Wide;TG65000\n", mod)
@@ -342,7 +342,7 @@ func TestDashboardJSONShapeWithNames(t *testing.T) {
 		return k
 	}
 	top := []string{"Callsign", "Controller", "DMR", "DStar", "DStarInfo", "Firmware", "Heard", "HeardReady", "Hostname", "Local", "M17", "Modes",
-		"NXDN", "Networks", "Now", "P25", "POCSAG", "PiStar", "RX", "TCXO", "TRX", "TX", "Theme", "TimeZone", "Version", "YSF"}
+		"NXDN", "Networks", "Now", "P25", "POCSAG", "RX", "Release", "TCXO", "TRX", "TX", "Theme", "TimeZone", "Version", "YSF"}
 	if got := keys(doc); !slices.Equal(got, top) {
 		t.Fatalf("top-level keys changed:\n got %v\nwant %v", got, top)
 	}

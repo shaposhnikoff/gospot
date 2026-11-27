@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +52,26 @@ func TestClassicBackupHandler(t *testing.T) {
 	}
 	if strings.Join(verbs, "|") != "backup|restore|restore" {
 		t.Fatalf("%v", verbs)
+	}
+}
+
+func TestClassicBackupArchiveName(t *testing.T) {
+	saved := hostnameFile
+	t.Cleanup(func() { hostnameFile = saved })
+	hostnameFile = filepath.Join(t.TempDir(), "hostname")
+	run := func(context.Context, string, []byte) ([]byte, error) { return []byte("PK\x03\x04"), nil }
+	now := time.Date(2026, 11, 27, 9, 0, 0, 0, time.Local)
+	for host, want := range map[string]string{
+		"pistar3\n": `attachment; filename="GoSpot_Config_pistar3_2026-Nov-27.zip"`,
+		"gospot\n":  `attachment; filename="GoSpot_Config_2026-Nov-27.zip"`,
+		"":          `attachment; filename="GoSpot_Config_2026-Nov-27.zip"`,
+	} {
+		os.WriteFile(hostnameFile, []byte(host), 0o644)
+		w := httptest.NewRecorder()
+		serveClassicBackup(w, maintenanceRequest("GET", "/manage/api/backup/classic", "", false), run, now)
+		if got := w.Header().Get("Content-Disposition"); got != want {
+			t.Errorf("hostname %q: %s, want %s", host, got, want)
+		}
 	}
 }
 

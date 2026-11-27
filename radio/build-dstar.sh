@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild the Pi-Star D-Star daemons (ircddbgatewayd, timeserverd,
+# Rebuild the D-Star daemons of the Pi-Star PS4 set (ircddbgatewayd, timeserverd,
 # starnetserverd, remotecontrold, timercontrold, aprs/text/voicetransmitd,
 # dstarrepeaterd) for armhf against the target release's wxWidgets 3.2; the
 # PS4 builds need wxWidgets 3.0, which Bookworm and Trixie no longer ship.
@@ -9,8 +9,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 suite=${1:-bookworm}
 [[ $suite =~ ^(bookworm|trixie)$ ]] || { echo "usage: $0 [bookworm|trixie]" >&2; exit 2; }
-# shellcheck source=../Pi-Star_dash_new/pistar.conf
-source ../Pi-Star_dash_new/pistar.conf
+# shellcheck source=../Pi-Star_dash_new/gospot.conf
+source ../Pi-Star_dash_new/gospot.conf
 out=$PWD/build/$suite/dstar
 rm -rf "$out"; mkdir -p "$out"
 
@@ -20,7 +20,7 @@ dstar_rev=fea6b5a87c4e8e94c1a060669fd3c0b57d08956f    # g4klx/DStarRepeater, wxW
 
 docker run --rm --platform linux/arm/v7 -v "$out:/out" \
   -e IRCDDB_REV="$ircddb_rev" -e DSTAR_REV="$dstar_rev" \
-  -e IRCDDB_DATA="$DSTAR_IRCDDB_DATA_DIR" -e DSTAR_DATA="$DSTAR_REPEATER_DATA_DIR" -e LOGS="$PISTAR_LOG_DIR" \
+  -e IRCDDB_DATA="$DSTAR_IRCDDB_DATA_DIR" -e DSTAR_DATA="$DSTAR_REPEATER_DATA_DIR" -e LOGS="$GOSPOT_LOG_DIR" \
   "debian:$suite-slim" bash -euo pipefail -c '
     apt-get update -qq
     apt-get install -y -qq --no-install-recommends build-essential git ca-certificates libwxgtk3.2-dev \

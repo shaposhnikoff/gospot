@@ -39,7 +39,7 @@ func maintenanceRequest(method, path, body string, csrf bool) *http.Request {
 		token := strings.Repeat("ab", 32)
 		r.AddCookie(&http.Cookie{Name: wizardCookie, Value: token})
 		if csrf {
-			r.Header.Set("X-PiStar-CSRF", token)
+			r.Header.Set("X-GoSpot-CSRF", token)
 		}
 	}
 	return r
@@ -88,12 +88,33 @@ func TestPowerAndUpdate(t *testing.T) {
 	if w := do(maintenanceRequest("POST", "/manage/api/update", `{"confirm":true}`, true)); w.Code != 409 {
 		t.Fatalf("second update: %d", w.Code)
 	}
-	if strings.Join(calls, "|") != "pistar-power shutdown|pistar-native-update start" {
+	if strings.Join(calls, "|") != "gospot-power shutdown|gospot-native-update start" {
 		t.Fatalf("calls: %v", calls)
 	}
 	w := do(maintenanceRequest("GET", "/manage/api/power", ``, false))
 	var reply tailReply
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &reply) != nil || len(reply.CSRF) != 64 || !strings.Contains(w.Header().Get("Set-Cookie"), wizardCookie) {
 		t.Fatalf("token: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLiveLogDownloadName(t *testing.T) {
+	savedLog, savedHost, savedMarker := gospotLogDir, hostnameFile, markerDStarRepeater
+	t.Cleanup(func() { gospotLogDir, hostnameFile, markerDStarRepeater = savedLog, savedHost, savedMarker })
+	dir := t.TempDir()
+	gospotLogDir, hostnameFile, markerDStarRepeater = dir, filepath.Join(dir, "hostname"), filepath.Join(dir, "no-marker")
+	now := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	os.WriteFile(filepath.Join(dir, "MMDVM-2026-11-27.log"), []byte("M: line\n"), 0o644)
+	run := func(context.Context, string, string) error { return nil }
+	for host, want := range map[string]string{
+		"pistar3\n": `attachment; filename="GoSpot_pistar3_MMDVM-2026-11-27.log"`,
+		"gospot\n":  `attachment; filename="GoSpot_MMDVM-2026-11-27.log"`,
+	} {
+		os.WriteFile(hostnameFile, []byte(host), 0o644)
+		w := httptest.NewRecorder()
+		serveMaintenance(w, maintenanceRequest("GET", "/manage/api/livelog/download", "", false), run, now)
+		if w.Code != 200 || w.Header().Get("Content-Disposition") != want || w.Body.String() != "M: line\n" {
+			t.Errorf("hostname %q: %d %s", host, w.Code, w.Header().Get("Content-Disposition"))
+		}
 	}
 }

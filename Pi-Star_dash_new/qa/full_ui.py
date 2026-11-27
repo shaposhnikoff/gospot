@@ -165,9 +165,9 @@ def overview(v, expected):
     events = v.events()
     runtime = v.resource("runtime.json", events)
     backend = runtime.get("backend")
-    if backend not in ("demo", "pistar-go"):
+    if backend not in ("demo", "gospot-go"):
         raise AssertionError(f"unknown /runtime.json backend: {backend!r}")
-    mode = "live" if backend == "pistar-go" else "demo"
+    mode = "live" if backend == "gospot-go" else "demo"
     if expected:
         equal("runtime mode", mode, expected)
     if mode == "live":
@@ -305,7 +305,7 @@ def console(v, mode):
         raise AssertionError("cross-group case-insensitive TGIF search did not narrow the catalog")
     v.click(tid("console-filter-networks"))
     equal("group + search intersection", set(ids("item")), {"tgif", "tgif-static"})
-    v.type_into(search, "no-such-pistar-entry")
+    v.type_into(search, "no-such-gospot-entry")
     equal("unmatched search", ids("item"), [])
     equal("empty results message", v.js("return text(document.querySelector('.no-results strong'))"), "Ничего не найдено")
     v.click(".no-results button")

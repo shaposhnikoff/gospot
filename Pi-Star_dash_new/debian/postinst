@@ -1,17 +1,20 @@
 #!/bin/sh
 set -eu
 [ "$1" = configure ] || exit 0
-for account in psdash-stage pistar-wizard pistar-panel; do
+for account in gospot-stage gospot-wizard gospot-panel; do
     if ! getent passwd "$account" >/dev/null; then
         useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$account"
     fi
     test "$(id -u "$account")" -ne 0
 done
+# A board that ran pistar-dashboard: settings, credentials, state and service
+# accounts move to the gospot names (a no-op after the first run).
+@DASHBOARD_LIB_DIR@/gospot-migrate
 # A locally edited conffile keeps its values but gains settings added by
 # newer packages; otherwise the services would refuse to start.
-@DASHBOARD_LIB_DIR@/pistar-conf-merge /etc/pistar-dashboard/pistar.conf @DASHBOARD_LIB_DIR@/pistar.conf.default
-# Paths come from the package conffile (Pi-Star_dash_new/pistar.conf).
-. /etc/pistar-dashboard/pistar.conf
+@DASHBOARD_LIB_DIR@/gospot-conf-merge /etc/gospot/gospot.conf @DASHBOARD_LIB_DIR@/gospot.conf.default
+# Paths come from the package conffile (Pi-Star_dash_new/gospot.conf).
+. /etc/gospot/gospot.conf
 cfg=$WIZARD_CONFIG_DIR
 install -d -m755 "$cfg"
 umask 077
@@ -28,11 +31,11 @@ fi
 test -s "$cfg/admin-password"
 test -s "$cfg/tls-key.pem"
 openssl x509 -in "$cfg/tls-cert.pem" -noout -checkend 0
-/usr/sbin/visudo -cf /etc/sudoers.d/pistar-dashboard
+/usr/sbin/visudo -cf /etc/sudoers.d/gospot
 umask 022
 if [ -d /run/systemd/system ]; then
     systemctl daemon-reload
-    for unit in pistar-panel pistar-wizard psdash-stage; do
+    for unit in gospot-panel gospot-wizard gospot-stage; do
         systemctl enable "$unit.service"
         systemctl restart "$unit.service"
         systemctl is-active --quiet "$unit.service"

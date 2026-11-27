@@ -54,7 +54,7 @@ export const startFrequency = (rxFrequency: number, rxOffset: number) => String(
 /** Offset label for a frequency line: frequency - RXFrequency. */
 export const offsetOf = (frequency: number, rxFrequency: number) => String(Math.trunc(frequency) - Math.trunc(rxFrequency));
 
-/** Offsets the board accepts (pistar-configure writes [Modem] RXOffset). */
+/** Offsets the board accepts (gospot-configure writes [Modem] RXOffset). */
 export const validOffset = (v: string) => /^-?\d{1,6}$/.test(v.trim());
 
 export interface Figures { frames: string; bits: string; errors: string; ber: string; seconds?: string }

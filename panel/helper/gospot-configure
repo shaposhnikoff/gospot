@@ -7,7 +7,7 @@ apply  <- JSON {revision, changes: {name: {section: {key: value|null}}},
 wifi-read, wifi-write, wifi-scan, wifi-action up|down|reset
        -> the Wi-Fi page (admin/wifi.php); see the Wi-Fi section below
 
-Only the configuration files named in pistar.conf are read or written; values
+Only the configuration files named in gospot.conf are read or written; values
 are single-line strings; comments, ordering, ownership and modes are kept.
 Every change is written atomically and rolled back, together with the service
 restarts, if any step fails.
@@ -37,17 +37,17 @@ class _Lazy:
 subprocess = _Lazy("subprocess")
 tempfile = _Lazy("tempfile")
 
-SETTINGS = "/etc/pistar-dashboard/pistar.conf"
+SETTINGS = "/etc/gospot/gospot.conf"
 
 
 def load_settings():
-    """Read pistar.conf (KEY=value), trusted only if no one else can write it.
+    """Read gospot.conf (KEY=value), trusted only if no one else can write it.
 
-    Unprivileged runs (tests) may name another file in PISTAR_SETTINGS; root,
+    Unprivileged runs (tests) may name another file in GOSPOT_SETTINGS; root,
     as under sudo, always uses the installed file."""
     path = SETTINGS
     if os.geteuid() != 0:
-        path = os.environ.get("PISTAR_SETTINGS", SETTINGS)
+        path = os.environ.get("GOSPOT_SETTINGS", SETTINGS)
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o022:
@@ -79,7 +79,7 @@ FILES = {name: setting_path(_SETTINGS, "CONF_" + name.upper().replace("-", "_"))
     "mmdvmhost", "dmrgateway", "ysfgateway", "p25gateway", "nxdngateway", "m17gateway",
     "dapnetgateway", "dgidgateway", "aprsgateway", "ircddbgateway", "dstarrepeater",
     "timeserver", "starnetserver", "ysf2dmr", "ysf2nxdn", "ysf2p25", "dmr2ysf", "dmr2nxdn",
-    "pistar-remote", "mobilegps")}
+    "gospot-remote", "mobilegps")}
 STATE = setting_path(_SETTINGS, "DASHBOARD_STATE_DIR")
 MARKERS = {"mmdvmhost": setting_path(_SETTINGS, "MARKER_MMDVMHOST"),
            "dstarrepeater": setting_path(_SETTINGS, "MARKER_DSTARREPEATER")}
@@ -91,26 +91,26 @@ HOSTNAME = setting_path(_SETTINGS, "HOSTNAME_FILE")
 HOSTS = setting_path(_SETTINGS, "HOSTS_FILE")
 HOSTAPD = setting_path(_SETTINGS, "HOSTAPD_CONF")
 HOSTAP_OFF = setting_path(_SETTINGS, "HOSTAP_OFF_FLAG")
-UPNP = setting_path(_SETTINGS, "PISTAR_UPNP_SCRIPT")
+UPNP = setting_path(_SETTINGS, "GOSPOT_UPNP_SCRIPT")
 CRONTAB = setting_path(_SETTINGS, "CRONTAB_FILE")
 WIZARD_DIR = setting_path(_SETTINGS, "WIZARD_CONFIG_DIR")
-LINUX_USER = _SETTINGS.get("PISTAR_LINUX_USER", "")
+LINUX_USER = _SETTINGS.get("GOSPOT_LINUX_USER", "")
 WIZARD_UNIT = _SETTINGS["UNIT_WIZARD"]
 # Services the page may restart: the Pi-Star radio daemons and helpers.
 UNITS = {u + ".service" for u in (
     "mmdvmhost", "dmrgateway", "ysfgateway", "ysfparrot", "p25gateway", "p25parrot", "nxdngateway",
     "nxdnparrot", "nxdn2dmr", "dapnetgateway", "m17gateway", "dgidgateway", "aprsgateway", "ysf2dmr",
     "ysf2nxdn", "ysf2p25", "dmr2ysf", "dmr2nxdn", "mobilegps", "ircddbgateway", "dstarrepeater",
-    "timeserver", "starnetserver", "pistar-remote", "pistar-watchdog")}
+    "timeserver", "starnetserver", "gospot-remote", "gospot-watchdog")}
 LIMIT = 1 << 20
 
 # Expert > Full Edit: file, mode for a new file, services restarted after a save.
 FULL = {
     "dmrgateway": (FILES["dmrgateway"], 0o644, ["mmdvmhost.service", "dmrgateway.service"]),
-    "pistar-remote": (FILES["pistar-remote"], 0o644, ["pistar-remote.service"]),
+    "gospot-remote": (FILES["gospot-remote"], 0o644, ["gospot-remote.service"]),
     "wpaconfig": (setting_path(_SETTINGS, "WPA_SUPPLICANT_CONF"), 0o600, []),
     "cron": (setting_path(_SETTINGS, "CRONTAB_FILE"), 0o644, []),
-    "rssidat": (setting_path(_SETTINGS, "PISTAR_HOSTS_DIR") / "RSSI.dat", 0o644, []),
+    "rssidat": (setting_path(_SETTINGS, "GOSPOT_HOSTS_DIR") / "RSSI.dat", 0o644, []),
 }
 # fulledit_cron.php pistar_cron_validate(): one diagnostic per offending line.
 CRON_RULES = [(re.compile(p, f), why) for p, f, why in (
@@ -192,8 +192,8 @@ def keys_write(request):
 
 
 # Backup/Restore (admin/config_backup.php backup_files()): archive name ->
-# (path, mode, owner). Owner None means root. Names match classic Pi-Star
-# archives, so their backups restore here and ours restore there.
+# (path, mode, owner). Owner None means root. Names follow classic Pi-Star
+# archives except the GoSpot-named files below.
 def backup_files():
     s = _SETTINGS
     files = {
@@ -202,7 +202,7 @@ def backup_files():
     }
     for name in ("ircddbgateway", "mmdvmhost", "dstarrepeater", "dapnetgateway", "p25gateway", "m17gateway",
                  "ysfgateway", "ysf2dmr", "dgidgateway", "nxdngateway", "dmrgateway", "starnetserver",
-                 "timeserver", "pistar-remote"):
+                 "timeserver", "gospot-remote"):
         files[name] = (FILES[name], 0o644, None)
     files["dstar-radio.mmdvmhost"] = (MARKERS["mmdvmhost"], 0o644, None)
     files["dstar-radio.dstarrepeater"] = (MARKERS["dstarrepeater"], 0o644, None)
@@ -210,10 +210,15 @@ def backup_files():
     files["hostname"] = (HOSTNAME, 0o644, None)
     for name, key in (("bmapi.key", "bm"), ("dapnetapi.key", "dapnet"), ("tgifapi.key", "tgif")):
         files[name] = (KEYS[key][0], 0o600, KEY_OWNER)
-    files["pistar-css.ini"] = (setting_path(s, "PISTAR_CSS_FILE"), 0o644, None)
-    files["RSSI.dat"] = (setting_path(s, "PISTAR_HOSTS_DIR") / "RSSI.dat", 0o644, None)
+    files["gospot-css.ini"] = (setting_path(s, "GOSPOT_CSS_FILE"), 0o644, None)
+    files["RSSI.dat"] = (setting_path(s, "GOSPOT_HOSTS_DIR") / "RSSI.dat", 0o644, None)
     return files
 
+
+# Members of classic Pi-Star backups (Pi-Star_Config_*.zip) whose files have
+# GoSpot names here; restore installs them under the new name. A member under
+# the new name in the same archive wins.
+CLASSIC_MEMBERS = {"pistar-remote": "gospot-remote", "pistar-css.ini": "gospot-css.ini"}
 
 ZIP_MAX = 256 * 1024
 UNPACKED_MAX = 4 * 1024 * 1024
@@ -259,7 +264,8 @@ def restore(blob, run=None, is_loaded=None):
         total += info.file_size
         if total > UNPACKED_MAX:
             return {"ok": False, "output": ["Refusing ZIP — unpacked size is too large."]}
-        if name in allowed:
+        name = CLASSIC_MEMBERS.get(name, name)
+        if name in allowed and (name not in admit or info.filename == name):
             admit[name] = info
     timezone = None
     if "config.php" in {i.filename for i in infos}:
@@ -267,7 +273,7 @@ def restore(blob, run=None, is_loaded=None):
         if m and Path("/usr/share/zoneinfo", m.group(1).decode(errors="replace")).is_file():
             timezone = m.group(1).decode()
     if not admit:
-        return {"ok": False, "output": ["ZIP contained no recognised Pi-Star config files."]}
+        return {"ok": False, "output": ["ZIP contained no recognised GoSpot or Pi-Star config files."]}
     contents = {}
     for name, info in admit.items():
         data = z.read(info)
@@ -316,7 +322,7 @@ def restore(blob, run=None, is_loaded=None):
                 run("restart", unit)
     except Exception as exc:
         # The reason goes to the caller's log; it never includes values.
-        print(f"pistar-configure: apply failed: {type(exc).__name__}", file=sys.stderr)
+        print(f"gospot-configure: apply failed: {type(exc).__name__}", file=sys.stderr)
         for name in reversed(written):
             text, st = before[name]
             path = allowed[name][0]
@@ -336,8 +342,8 @@ def restore(blob, run=None, is_loaded=None):
 
 
 # Services config_backup.php stops before and starts after a restore.
-RESTORE_UNITS = ["dstarrepeater.service", "ircddbgateway.service", "timeserver.service", "pistar-watchdog.service",
-                 "pistar-remote.service", "ysfgateway.service", "ysf2dmr.service", "p25gateway.service",
+RESTORE_UNITS = ["dstarrepeater.service", "ircddbgateway.service", "timeserver.service", "gospot-watchdog.service",
+                 "gospot-remote.service", "ysfgateway.service", "ysf2dmr.service", "p25gateway.service",
                  "nxdngateway.service", "m17gateway.service", "dapnetgateway.service", "mobilegps.service",
                  "dmrgateway.service", "mmdvmhost.service"]
 
@@ -378,8 +384,8 @@ def full_write(name, request, run=None):
     return {"ok": True}
 
 
-CSS_FILE = setting_path(_SETTINGS, "PISTAR_CSS_FILE")
-# admin/expert/edit_dashboard.php shows these when /etc/pistar-css.ini is missing.
+CSS_FILE = setting_path(_SETTINGS, "GOSPOT_CSS_FILE")
+# admin/expert/edit_dashboard.php shows these when /etc/gospot-css.ini is missing.
 CSS_DEFAULT = ("[Background]\nPage=edf0f5\nContent=ffffff\nBanners=dd4b39\n\n"
                "[Text]\nBanners=ffffff\nBannersDrop=303030\n\n"
                "[Tables]\nHeadDrop=8b0000\nBgEven=f7f7f7\nBgOdd=d0d0d0\n\n"
@@ -451,7 +457,7 @@ RADIO_SHARE = setting_path(_SETTINGS, "RADIO_SHARE_DIR")
 FACTORY_UNITS = ["dmrgateway.service", "ysfgateway.service", "ysf2dmr.service", "ysf2nxdn.service", "ysf2p25.service",
                  "dgidgateway.service", "p25gateway.service", "nxdngateway.service", "m17gateway.service",
                  "dmr2ysf.service", "dmr2nxdn.service", "dapnetgateway.service", "aprsgateway.service",
-                 "ircddbgateway.service", "timeserver.service", "pistar-remote.service",
+                 "ircddbgateway.service", "timeserver.service", "gospot-remote.service",
                  "mmdvmhost.service", "dstarrepeater.service"]
 
 
@@ -526,23 +532,23 @@ MAC = re.compile(r"[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}")
 
 
 class Wifi:
-    """Wi-Fi settings from pistar.conf, resolved per command so a missing key
+    """Wi-Fi settings from gospot.conf, resolved per command so a missing key
     breaks only this page."""
 
     def __init__(self):
         s = _SETTINGS
         self.backend = s.get("WIFI_BACKEND", "")
         require(self.backend in ("networkmanager", "wpa_supplicant"),
-                "WIFI_BACKEND in pistar.conf must be networkmanager or wpa_supplicant")
+                "WIFI_BACKEND in gospot.conf must be networkmanager or wpa_supplicant")
         self.iface = s.get("WIFI_INTERFACE", "")
         require(re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", self.iface) is not None,
-                "WIFI_INTERFACE in pistar.conf is not an interface name")
+                "WIFI_INTERFACE in gospot.conf is not an interface name")
 
         def path(key):
             try:
                 return setting_path(s, key)
             except SystemExit as exc:
-                raise Error(f"{exc} (pistar.conf)") from None
+                raise Error(f"{exc} (gospot.conf)") from None
         self.conf, self.sysfs = path("WPA_SUPPLICANT_CONF"), path("SYSFS_NET_DIR")
         self.ctrl, self.regdom = path("WPA_CTRL_DIR"), path("WIFI_REGDOM_CONF")
         self.nmcli, self.wpa_cli, self.ip, self.iw = (str(path(k)) for k in ("NMCLI_BIN", "WPA_CLI_BIN", "IP_BIN", "IW_BIN"))
@@ -920,7 +926,7 @@ def nm_write(w, request):
         class Public:
             st_uid, st_gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
             st_mode = 0o644
-        replace(w.regdom, f"# Wi-Fi country set by the Pi-Star dashboard\noptions cfg80211 ieee80211_regdom={country}\n", Public)
+        replace(w.regdom, f"# Wi-Fi country set by the GoSpot\noptions cfg80211 ieee80211_regdom={country}\n", Public)
         if tool([w.iw, "reg", "set", country]) is None:
             reply["note"] = "Country saved; it applies after a reboot"
     if not w.present():
@@ -1158,7 +1164,7 @@ NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _./+-]{0,63}")
 
 
 def replace(path, text, st):
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".pistar-")
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".gospot-")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(text.encode())
@@ -1339,7 +1345,7 @@ def system_ops(system, run):
         for port, state in system["upnp_ports"].items():
             set_line(UPNP, rf"\$ipVar {port} {port}", "", comment=(state == "off"))
     if "upnp" in system:
-        set_line(CRONTAB, r"pistar-upnp\.service", "", comment=(system["upnp"] == "off"))
+        set_line(CRONTAB, r"gospot-upnp\.service", "", comment=(system["upnp"] == "off"))
     if "password" in system:
         pw = system["password"]
         path = WIZARD_DIR / "admin-password"
@@ -1394,7 +1400,7 @@ def apply(request, run=systemctl, is_loaded=None):
             run("restart", unit)
     except Exception as exc:
         # The reason goes to the caller's log; it never includes values.
-        print(f"pistar-configure: apply failed: {type(exc).__name__}", file=sys.stderr)
+        print(f"gospot-configure: apply failed: {type(exc).__name__}", file=sys.stderr)
         for name in reversed(written):
             try:
                 replace(FILES[name], texts[name], stats[name])

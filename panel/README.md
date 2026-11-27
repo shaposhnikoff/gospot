@@ -1,4 +1,4 @@
-# Pi-Star panel: first-stage rollout
+# GoSpot panel: first-stage rollout
 
 На странице статуса слева показаны позывной, ID, RX/TX и включённые
 режимы из `/etc/MMDVM-Host.ini`. Справа — подтверждения от модема и
@@ -23,7 +23,7 @@ go test ./...
 
 The script takes no target argument. It builds the current package locally with
 `CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7`, checks the remote hostname,
-installs `/usr/local/bin/pistar-panel` and `pistar-panel.service`, and starts the
+installs `/usr/local/bin/gospot-panel` and `gospot-panel.service`, and starts the
 panel under a dedicated system account with journal access and no login shell. Repeat the baseline
 command: both radio services should still be active, with identical invocation
 IDs, PIDs and boot ID.
@@ -31,7 +31,7 @@ IDs, PIDs and boot ID.
 ## Verify the first node
 
 ```sh
-ssh pistar3 'systemctl show pistar-panel -p ActiveState -p SubState -p DynamicUser -p SupplementaryGroups -p NRestarts; journalctl -u pistar-panel -b -n 30 --no-pager'
+ssh pistar3 'systemctl show gospot-panel -p ActiveState -p SubState -p DynamicUser -p SupplementaryGroups -p NRestarts; journalctl -u gospot-panel -b -n 30 --no-pager'
 curl -fsS --retry 3 --retry-delay 5 --max-time 5 http://192.168.210.194:8787/api/status
 ssh pistar3 'sudo -n journalctl --utc -u mmdvmhost -u dmrgateway --since "15 minutes ago" --no-pager'
 ```
@@ -42,7 +42,7 @@ before the first snapshot is expected. On the host running the
 master (`192.168.10.11`), inspect independent evidence for this peer:
 
 ```sh
-docker logs --timestamps --since 15m dvserver 2>&1 | grep -Ei '1234570|pistar-3|homebrew'
+docker logs --timestamps --since 15m dvserver 2>&1 | grep -Ei '1234570|gospot-3|homebrew'
 ```
 
 Match **claim 1234570 / principal 1005** specifically; other peers share the
@@ -72,7 +72,7 @@ time, and check the rendered status as well as the process staying responsive:
 For a failed first install, remove just the panel on `pistar3`:
 
 ```sh
-ssh pistar3 'sudo -n systemctl disable --now pistar-panel.service && sudo -n rm -f /etc/systemd/system/pistar-panel.service /usr/local/bin/pistar-panel /usr/local/bin/pistar-panel.new && sudo -n systemctl daemon-reload'
+ssh pistar3 'sudo -n systemctl disable --now gospot-panel.service && sudo -n rm -f /etc/systemd/system/gospot-panel.service /usr/local/bin/gospot-panel /usr/local/bin/gospot-panel.new && sudo -n systemctl daemon-reload'
 ```
 
 Repeat the baseline check. For a later update, redeploy the last known-good

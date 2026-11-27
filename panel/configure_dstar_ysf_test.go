@@ -12,14 +12,14 @@ import (
 
 // Tests for configure_dstar_ysf.go (docs/configure-spec/03-dstar-ysf.md).
 
-const dsyLog = "/var/log/pi-star"
+const dsyLog = "/var/log/gospot"
 
 func dsyEnv(t *testing.T) string {
 	t.Helper()
-	savedHosts, savedLog := pistarHostsDir, pistarLogDir
-	t.Cleanup(func() { pistarHostsDir, pistarLogDir = savedHosts, savedLog })
+	savedHosts, savedLog := gospotHostsDir, gospotLogDir
+	t.Cleanup(func() { gospotHostsDir, gospotLogDir = savedHosts, savedLog })
 	dir := t.TempDir()
-	pistarHostsDir, pistarLogDir = dir, dsyLog
+	gospotHostsDir, gospotLogDir = dir, dsyLog
 	files := map[string]string{
 		"DCS_Hosts.txt":    "# DCS reflectors\nDCS001\tdcs001.xreflector.net\nDCS002\tdcs002.xreflector.net\nXLX000\txlx000.example\nDCS003\tXLX-linked.example\n",
 		"DPlus_Hosts.txt":  "REF001\tref001.dstargateway.org\tL\nREF002\tref002.dstargateway.org\tL\nXRF757\txrf757.example\tL\n#REF999\tcommented\n",

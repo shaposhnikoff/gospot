@@ -5,7 +5,7 @@
   // Offset writes [Modem] RXOffset of the MMDVMHost configuration.
   // #calibration-debug also shows MMDVMCal's output, like ?debug.
   import { onMount } from 'svelte';
-  import PiStarFrame from './PiStarFrame.svelte';
+  import GoSpotFrame from './GoSpotFrame.svelte';
   import red from './images/20red.png';
   import green from './images/20green.png';
   import { BerMeter, MODES, chart, offsetOf, scan, startFrequency, validOffset, type Figures, type Mode } from './calibration';
@@ -35,7 +35,7 @@
 
   async function post(body: Record<string, string>): Promise<Response | null> {
     return fetch('/manage/api/calibration', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf }, body: JSON.stringify(body),
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf }, body: JSON.stringify(body),
     }).catch(() => null);
   }
 
@@ -127,7 +127,7 @@
   const led = (on: boolean) => (on ? green : red);
 </script>
 
-<PiStarFrame title="Calibration" links={['Dashboard', 'Admin', 'Power', 'Backup/Restore', 'Configuration']}>
+<GoSpotFrame title="Calibration" links={['Dashboard', 'Admin', 'Power', 'Backup/Restore', 'Configuration']}>
   <table width="100%">
     <tbody>
       <tr><th>Calibration Tool</th></tr>
@@ -223,7 +223,7 @@
       {#if debug}<tr><td align="left"><div id="tail" bind:this={tail}>{text}</div></td></tr>{/if}
     </tbody>
   </table>
-</PiStarFrame>
+</GoSpotFrame>
 
 <style>
   #chart { display: block; }

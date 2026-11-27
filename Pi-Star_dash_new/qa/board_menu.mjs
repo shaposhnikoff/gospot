@@ -20,7 +20,7 @@ assert.equal(ssh('hostname -s'),'pistar3');
 if(write) assert.equal(ssh('sudo -n cat /run/qa-isolated-dashboard'),'isolated synthetic radio INIs');
 const radio = () => ssh('sudo -n sha256sum /etc/MMDVM-Host.ini /etc/DMRGateway.ini && systemctl show -p InvocationID --value mmdvmhost dmrgateway');
 const before=radio();
-const pin=createHash('sha256').update(new X509Certificate(ssh('sudo -n cat /etc/pistar-wizard/tls-cert.pem')).publicKey.export({type:'spki',format:'der'})).digest('base64');
+const pin=createHash('sha256').update(new X509Certificate(ssh('sudo -n cat /etc/gospot/wizard/tls-cert.pem')).publicKey.export({type:'spki',format:'der'})).digest('base64');
 const show = p => execFileSync('git',['-C','../Pi-Star_DV_Dash','show','10bf34c9:'+p],{encoding:'utf8'});
 const en=Object.fromEntries([...show('lang/english_uk.php').matchAll(/"(\w+)"\s*=>\s*"([^"]+)"/g)].map(m=>m.slice(1)));
 const cfg=show('admin/configure.php');
@@ -71,16 +71,16 @@ try {
       const save=write && p.request.method==='POST' && ['/manage/api/services','/manage/api/protocols'].some(path=>u.href===admin+path);
       const ok=(['GET','HEAD'].includes(p.request.method) && [root,admin].includes(u.origin)) || save;
       if(save){
-        const token=Object.entries(p.request.headers).find(([k])=>k.toLowerCase()==='x-pistar-csrf')?.[1]??'';
+        const token=Object.entries(p.request.headers).find(([k])=>k.toLowerCase()==='x-gospot-csrf')?.[1]??'';
         posts.push({id:p.networkId,path:u.pathname,csrf:/^[0-9a-f]{64}$/.test(token),csrfDigest:createHash('sha256').update(token).digest('hex'),body:JSON.parse(p.request.postData)});
       }
       if(!ok)blocked.push(p.request.method+' '+u.origin+u.pathname);
       void cdp(ok?'Fetch.continueRequest':'Fetch.failRequest',ok?{requestId:p.requestId}:{requestId:p.requestId,errorReason:'BlockedByClient'});
     } else if(method==='Fetch.authRequired'){
       const a=p.authChallenge;
-      const allow=a.source==='Server' && a.origin===admin && a.realm==='Pi-Star' && a.scheme==='basic' && new URL(p.request.url).pathname.startsWith('/manage/');
+      const allow=a.source==='Server' && a.origin===admin && a.realm==='GoSpot' && a.scheme==='basic' && new URL(p.request.url).pathname.startsWith('/manage/');
       void cdp('Fetch.continueWithAuth',{requestId:p.requestId,authChallengeResponse:allow?
-        {response:'ProvideCredentials',username:'pi-star',password:ssh('sudo -n cat /etc/pistar-wizard/admin-password')}:{response:'CancelAuth'}});
+        {response:'ProvideCredentials',username:'gospot',password:ssh('sudo -n cat /etc/gospot/wizard/admin-password')}:{response:'CancelAuth'}});
     } else if(method==='Network.responseReceived' && posts.some(x=>x.id===p.requestId)){
       posts.find(x=>x.id===p.requestId).status=p.response.status;
     } else if(method==='Network.responseReceived' && ['/manage/api/services','/manage/api/protocols'].some(k=>p.response.url===admin+k)){
@@ -107,7 +107,7 @@ try {
       await until(()=>js(`return document.querySelector('nav a[href="#console"]')?.getClientRects().length`));
       await click('nav a[href="#console"]');
       await until(()=>js(`return document.querySelector('[data-testid=console-item-expert]')?.getClientRects().length`));
-      console.log('Menu: Все функции Pi-Star',await js('return location.href'));
+      console.log('Menu: Все функции GoSpot',await js('return location.href'));
     }
     await menu();
     const cfgLink='[data-testid=console-item-configuration] a';

@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-RECORD = "/run/pistar-qa/remotecontrold-calls"
+RECORD = "/run/gospot-qa/remotecontrold-calls"
 
 home = os.environ.get("HOME", "")
 conf = os.path.join(home, ".Remote Control")

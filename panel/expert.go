@@ -72,7 +72,7 @@ func quickValue(file, section, key, value string) string {
 	return value
 }
 
-var fullEditFiles = map[string]bool{"dmrgateway": true, "pistar-remote": true, "wpaconfig": true, "cron": true, "rssidat": true}
+var fullEditFiles = map[string]bool{"dmrgateway": true, "gospot-remote": true, "wpaconfig": true, "cron": true, "rssidat": true}
 
 // serveFullEdit: admin/expert/fulledit_*.php, the whole file in a textarea.
 func serveFullEdit(w http.ResponseWriter, r *http.Request, run configHelperFunc, name string) {

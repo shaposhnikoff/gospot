@@ -1,6 +1,6 @@
 <script lang="ts">
   // admin/expert/jitter_test.php?group=brandmeister|dmrplus|hblink (DMR+
-  // without a group): opening the page runs pistar-jittertest for that host
+  // without a group): opening the page runs gospot-jittertest for that host
   // group and follows its log. A run already in progress is followed instead.
   import { onMount } from 'svelte';
 
@@ -34,7 +34,7 @@
         if (!r.ok) throw new Error((await r.text()).trim());
         const { csrf }: { csrf: string } = await r.json();
         const s = await fetch('/manage/api/expert/jitter', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf }, body: JSON.stringify({ group }),
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'X-GoSpot-CSRF': csrf }, body: JSON.stringify({ group }),
         });
         if (s.status !== 202 && s.status !== 409) throw new Error((await s.text()).trim());
       } catch (e) {

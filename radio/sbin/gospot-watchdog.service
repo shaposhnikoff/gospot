@@ -1,12 +1,11 @@
 #!/bin/bash
-# pistar-remote service handler (start|stop|restart|status), as in Pi-Star.
-# Pi-Star's own handler runs "/usr/bin/python /usr/local/sbin/pistar-remote",
+# gospot-watchdog service handler (start|stop|restart|status), as in Pi-Star.
+# Pi-Star's own handler runs "/usr/bin/python /usr/local/sbin/pistar-watchdog",
 # which Python 3 systems lack; this one runs the Python 3 port that is
-# installed next to it and finds it by its command line. Like Pi-Star's, it
-# does not start the remote while CONF_PISTAR_REMOTE disables it.
+# installed next to it and finds it by its command line.
 set -u
-daemon=$(dirname "$(readlink -f "$0")")/pistar-remote
-name=pistar-remote
+daemon=$(dirname "$(readlink -f "$0")")/gospot-watchdog
+name=gospot-watchdog
 pattern="^[^ ]*python3 -I $daemon( |\$)"
 
 pids() { pgrep -f -- "$pattern" | tr '\n' ' '; }
@@ -28,18 +27,11 @@ stop() {
 	return 0
 }
 
-enabled() {
-	"$daemon" --enabled && return 0
-	echo "$name is disabled"
-	return 1
-}
-
 [[ -x $daemon ]] || exit 0
 
 case "${1:-}" in
 	start)
 		if [[ -n $(pids) ]]; then echo "$name is already running as PID $(pids)"; exit 0; fi
-		enabled || exit 0
 		start
 		;;
 	stop)
@@ -49,7 +41,6 @@ case "${1:-}" in
 		;;
 	restart)
 		if [[ -n $(pids) ]]; then echo "Killing $name PID $(pids)"; stop; else echo "$name is not running"; fi
-		enabled || exit 0
 		start
 		;;
 	status)

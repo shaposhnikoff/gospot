@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Kiosk (/kiosk) check against the real Go panel on loopback.
 
-Builds an isolated fixture (pistar.conf copy with every absolute path moved
+Builds an isolated fixture (gospot.conf copy with every absolute path moved
 under a temporary root, an MMDVMHost INI, MMDVM-<UTC date>.log with calls,
 DMRIds.dat and TGList_BM.txt), starts the panel and the operator listener,
 and drives headless Chromium through idle -> on air -> connection lost ->
@@ -132,9 +132,9 @@ def free_port():
 
 
 def fixture(root, dist, now):
-    """Copy pistar.conf with every absolute path below root."""
+    """Copy gospot.conf with every absolute path below root."""
     conf, ports = [], {"PANEL_PORT": free_port(), "OPERATOR_PORT": free_port(), "MANAGEMENT_PORT": free_port()}
-    for line in (ROOT / "pistar.conf").read_text().splitlines():
+    for line in (ROOT / "gospot.conf").read_text().splitlines():
         key, sep, value = line.partition("=")
         if not sep or line.startswith("#"):
             conf.append(line)
@@ -148,18 +148,18 @@ def fixture(root, dist, now):
         elif value.startswith("/"):
             value = str(root) + value
         conf.append(f"{key}={value}")
-    (root / "pistar.conf").write_text("\n".join(conf) + "\n")
+    (root / "gospot.conf").write_text("\n".join(conf) + "\n")
     files = {
-        "etc/mmdvmhost": MMDVM_INI, "etc/dstar-radio.mmdvmhost": "", "etc/hostname": "pistar-kiosk\n",
-        "etc/pistar-release": "[Pi-Star]\nVersion = 4.3.0\n",
+        "etc/mmdvmhost": MMDVM_INI, "etc/dstar-radio.mmdvmhost": "", "etc/hostname": "gospot-kiosk\n",
+        "etc/gospot-release": "[GoSpot]\nVersion = 4.3.0\n",
         "usr/local/etc/DMRIds.dat": DMR_IDS, "usr/local/etc/TGList_BM.txt": TG_LIST,
-        f"var/log/pi-star/MMDVM-{now:%Y-%m-%d}.log": "\n".join(calls(now)) + "\n",
+        f"var/log/gospot/MMDVM-{now:%Y-%m-%d}.log": "\n".join(calls(now)) + "\n",
     }
     for name, body in files.items():
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
-    return root / "pistar.conf", ports, root / f"var/log/pi-star/MMDVM-{now:%Y-%m-%d}.log"
+    return root / "gospot.conf", ports, root / f"var/log/gospot/MMDVM-{now:%Y-%m-%d}.log"
 
 
 def get_json(url):
@@ -170,7 +170,7 @@ def get_json(url):
 def metric(url):
     with HTTP.open(url + "/metrics", timeout=3) as r:
         for line in r.read().decode().splitlines():
-            if line.startswith("pistar_operator_requests_total "):
+            if line.startswith("gospot_operator_requests_total "):
                 return int(line.split()[1])
     raise AssertionError("no request counter")
 
@@ -190,7 +190,7 @@ def main():
         root = Path(tmp)
         now = datetime.now(timezone.utc)
         conf, ports, log = fixture(root, dist, now)
-        panel = root / "pistar-panel"
+        panel = root / "gospot-panel"
         subprocess.run(["go", "build", "-o", str(panel), "."], cwd=ROOT.parent / "panel", check=True)
         # A process named MMDVMHost, so the dashboard reports "Listening".
         fake = root / "bin" / "MMDVMHost"

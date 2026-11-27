@@ -1,4 +1,4 @@
-"""Wi-Fi commands of pistar-configure (admin/wifi.php) on isolated fixtures.
+"""Wi-Fi commands of gospot-configure (admin/wifi.php) on isolated fixtures.
 
 Every program the helper runs (nmcli, wpa_cli, ip, iw) is a recorder that
 logs its argv and prints canned output; sysfs is a temporary directory."""
@@ -16,7 +16,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-HELPER = Path(__file__).with_name("pistar-configure")
+HELPER = Path(__file__).with_name("gospot-configure")
 TMP = Path(tempfile.mkdtemp())
 BIN = TMP / "bin"
 BIN.mkdir()
@@ -26,12 +26,12 @@ WIFI_KEYS = {"WPA_SUPPLICANT_CONF": TMP / "etc" / "wpa_supplicant.conf", "DASHBO
              "NMCLI_BIN": BIN / "nmcli", "WPA_CLI_BIN": BIN / "wpa_cli", "IP_BIN": BIN / "ip", "IW_BIN": BIN / "iw"}
 (TMP / "etc").mkdir()
 lines = []
-for line in (ROOT / "Pi-Star_dash_new" / "pistar.conf").read_text().splitlines():
+for line in (ROOT / "Pi-Star_dash_new" / "gospot.conf").read_text().splitlines():
     key = line.partition("=")[0]
     if key in WIFI_KEYS:
         line = f"{key}={WIFI_KEYS[key]}"
     lines.append(line)
-SETTINGS = TMP / "pistar.conf"
+SETTINGS = TMP / "gospot.conf"
 SETTINGS.write_text("\n".join(lines) + "\n")
 os.chmod(SETTINGS, 0o644)
 
@@ -55,7 +55,7 @@ for name in ("nmcli", "wpa_cli", "ip", "iw"):
     (BIN / name).write_text(RECORDER)
     os.chmod(BIN / name, 0o755)
 
-os.environ["PISTAR_SETTINGS"] = str(SETTINGS)
+os.environ["GOSPOT_SETTINGS"] = str(SETTINGS)
 loader = importlib.machinery.SourceFileLoader("configure_wifi_helper", str(HELPER))
 helper = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
 loader.exec_module(helper)
@@ -387,7 +387,7 @@ class NetworkManagerTest(WifiBase):
             self.assertNotIn(NEW_THIRD, " ".join(call))
         self.assertNoSecret(reply)
         self.assertEqual(WIFI_KEYS["WIFI_REGDOM_CONF"].read_text(),
-                         "# Wi-Fi country set by the Pi-Star dashboard\noptions cfg80211 ieee80211_regdom=GB\n")
+                         "# Wi-Fi country set by the GoSpot\noptions cfg80211 ieee80211_regdom=GB\n")
 
     def test_unchanged_profiles_are_not_touched(self):
         state = helper.wifi_read()
@@ -449,7 +449,7 @@ class CommandLineTest(WifiBase):
     """The sudo entry point: JSON on stdout, exit 3 for a stale form, 2 for a refusal."""
 
     def run_helper(self, *args, stdin=b""):
-        env = dict(os.environ, PISTAR_SETTINGS=str(SETTINGS))
+        env = dict(os.environ, GOSPOT_SETTINGS=str(SETTINGS))
         return subprocess.run([sys.executable, "-I", str(HELPER), *args], input=stdin, env=env,
                               capture_output=True, timeout=60)
 

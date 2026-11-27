@@ -11,14 +11,14 @@ import (
 	"time"
 )
 
-// fakeRemoteControl installs a remotecontrold test double in PISTAR_BIN_DIR
+// fakeRemoteControl installs a remotecontrold test double in GOSPOT_BIN_DIR
 // that records its argv, environment and ".Remote Control" to record.
 func fakeRemoteControl(t *testing.T, reply string) (record string) {
 	t.Helper()
 	bin := t.TempDir()
-	saved := pistarBinDir
-	t.Cleanup(func() { pistarBinDir = saved })
-	pistarBinDir = bin
+	saved := gospotBinDir
+	t.Cleanup(func() { gospotBinDir = saved })
+	gospotBinDir = bin
 	record = filepath.Join(t.TempDir(), "calls")
 	script := `#!/bin/sh
 { echo "argc=$#"; for a in "$@"; do echo "arg=[$a]"; done
@@ -36,9 +36,9 @@ const accepted = `echo "remotecontrold: command accepted by the gateway/starnets
 func dstarManagerFixture(t *testing.T, controller string) {
 	t.Helper()
 	dir, _ := dstarFixture(t)
-	savedKeeper, savedRunning := pistarKeeperLog, keeperRunning
-	t.Cleanup(func() { pistarKeeperLog, keeperRunning = savedKeeper, savedRunning })
-	pistarKeeperLog = filepath.Join(dir, "pistar-keeper.log")
+	savedKeeper, savedRunning := gospotKeeperLog, keeperRunning
+	t.Cleanup(func() { gospotKeeperLog, keeperRunning = savedKeeper, savedRunning })
+	gospotKeeperLog = filepath.Join(dir, "gospot-keeper.log")
 	keeperRunning = func() bool { return false }
 	switch controller {
 	case "dstarrepeater":
@@ -82,12 +82,12 @@ func TestDStarManagerOptions(t *testing.T) {
 	if !reflect.DeepEqual(r.Reflectors, want) {
 		t.Fatalf("reflectors %v", r.Reflectors)
 	}
-	// PiStar-Keeper running: the last five logbook lines
+	// GoSpot-Keeper running: the last five logbook lines
 	var lines []string
 	for i := 1; i <= 7; i++ {
 		lines = append(lines, "2026-11-27 entry "+string(rune('0'+i)))
 	}
-	os.WriteFile(pistarKeeperLog, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	os.WriteFile(gospotKeeperLog, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 	keeperRunning = func() bool { return true }
 	w = httptest.NewRecorder()
 	serveDStarLinks(w, maintenanceRequest("GET", "/manage/api/links/dstar", "", false), runRemoteControl)
@@ -97,10 +97,10 @@ func TestDStarManagerOptions(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	serveDStarLinks(w, maintenanceRequest("GET", "/manage/api/links/dstar/keeper", "", false), runRemoteControl)
-	if w.Code != 200 || w.Body.String() != strings.Join(lines, "\n")+"\n" || !strings.Contains(w.Header().Get("Content-Disposition"), `"pistar-keeper.log"`) {
+	if w.Code != 200 || w.Body.String() != strings.Join(lines, "\n")+"\n" || !strings.Contains(w.Header().Get("Content-Disposition"), `"gospot-keeper.log"`) {
 		t.Fatalf("download %d %q", w.Code, w.Header())
 	}
-	os.Remove(pistarKeeperLog)
+	os.Remove(gospotKeeperLog)
 	w = httptest.NewRecorder()
 	serveDStarLinks(w, maintenanceRequest("GET", "/manage/api/links/dstar/keeper", "", false), runRemoteControl)
 	if w.Code != 404 {
@@ -263,24 +263,24 @@ func TestDStarManagerOutput(t *testing.T) {
 	noSecrets(t, w)
 	// not installed
 	fakeRemoteControl(t, accepted)
-	os.Remove(filepath.Join(pistarBinDir, "remotecontrold"))
+	os.Remove(filepath.Join(gospotBinDir, "remotecontrold"))
 	if w := dstarPost(link, true); w.Code != 502 {
 		t.Fatalf("missing tool %d", w.Code)
 	}
 }
 
 func TestDStarSettings(t *testing.T) {
-	if pistarKeeperLog != "/var/pistar-keeper/pistar-keeper.log" || filepath.Join(pistarBinDir, "remotecontrold") != "/usr/local/bin/remotecontrold" {
-		t.Fatalf("shipped D-Star paths: %s %s", pistarKeeperLog, pistarBinDir)
+	if gospotKeeperLog != "/var/gospot-keeper/gospot-keeper.log" || filepath.Join(gospotBinDir, "remotecontrold") != "/usr/local/bin/remotecontrold" {
+		t.Fatalf("shipped D-Star paths: %s %s", gospotKeeperLog, gospotBinDir)
 	}
 	s, _ := readSettings(shippedSettings)
-	for _, bad := range []string{"", "var/pistar-keeper.log", "/var/../keeper.log"} {
-		s["PISTAR_KEEPER_LOG"] = bad
-		if err := applySettings(s); err == nil || !strings.Contains(err.Error(), "PISTAR_KEEPER_LOG") {
+	for _, bad := range []string{"", "var/gospot-keeper.log", "/var/../keeper.log"} {
+		s["GOSPOT_KEEPER_LOG"] = bad
+		if err := applySettings(s); err == nil || !strings.Contains(err.Error(), "GOSPOT_KEEPER_LOG") {
 			t.Fatalf("%q accepted: %v", bad, err)
 		}
 	}
-	if pistarKeeperLog != "/var/pistar-keeper/pistar-keeper.log" {
+	if gospotKeeperLog != "/var/gospot-keeper/gospot-keeper.log" {
 		t.Fatal("a rejected settings file must not change the active paths")
 	}
 }

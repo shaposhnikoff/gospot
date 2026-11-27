@@ -59,7 +59,7 @@ type linksReply struct {
 
 // hostsFile reads whitespace- or semicolon-separated host lists, skipping comments.
 func hostsFile(name, sep string) [][]string {
-	rows, _ := cachedHostFile("hosts"+sep, filepath.Join(pistarHostsDir, name), func(f io.Reader) [][]string { return parseHostRows(f, sep) })
+	rows, _ := cachedHostFile("hosts"+sep, filepath.Join(gospotHostsDir, name), func(f io.Reader) [][]string { return parseHostRows(f, sep) })
 	return cloneRows(rows)
 }
 

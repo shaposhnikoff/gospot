@@ -3,7 +3,7 @@
 
 Serves HOSELINE_PAGE_URL (a page publishing a spotter token the way the real
 page does) and the spotter WebSocket at HOSELINE_SPOTTER_URL from the stand's
-pistar.conf, on one HTTPS port with the stand certificate. A spotter client
+gospot.conf, on one HTTPS port with the stand certificate. A spotter client
 must send the token, Origin of the page and the "spotter" subprotocol, then
 subscribe with msgpack [1, [TG]]; it then gets calls from --source on a loop:
 [11, call, source, TG], μ-law audio [20, <bin>] in real time, [13, call].

@@ -20,12 +20,12 @@ func dstarFixture(t *testing.T, logs ...string) (dir string, cfg iniData) {
 	loc := time.Local
 	time.Local = time.UTC
 	dir = t.TempDir()
-	savedLog, savedHosts := pistarLogDir, pistarHostsDir
+	savedLog, savedHosts := gospotLogDir, gospotHostsDir
 	savedINI, savedHost := ircddbINI.location(), mmdvmINI.location()
 	savedMarkers := []string{markerMMDVMHost, markerDStarRepeater}
 	t.Cleanup(func() {
 		time.Local = loc
-		pistarLogDir, pistarHostsDir = savedLog, savedHosts
+		gospotLogDir, gospotHostsDir = savedLog, savedHosts
 		ircddbINI.setPath(savedINI)
 		mmdvmINI.setPath(savedHost)
 		markerMMDVMHost, markerDStarRepeater = savedMarkers[0], savedMarkers[1]
@@ -40,7 +40,7 @@ func dstarFixture(t *testing.T, logs ...string) (dir string, cfg iniData) {
 			t.Fatal(err)
 		}
 	}
-	pistarLogDir, pistarHostsDir = dir, dir
+	gospotLogDir, gospotHostsDir = dir, dir
 	ircddbINI.setPath(filepath.Join(dir, "ircddbgateway"))
 	mmdvmINI.setPath(filepath.Join(dir, "mmdvmhost"))
 	markerMMDVMHost, markerDStarRepeater = filepath.Join(dir, "dstar-radio.mmdvmhost"), filepath.Join(dir, "dstar-radio.dstarrepeater")

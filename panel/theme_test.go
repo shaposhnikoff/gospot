@@ -12,15 +12,15 @@ import (
 
 func withCSSFile(t *testing.T, text string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "pistar-css.ini")
+	path := filepath.Join(t.TempDir(), "gospot-css.ini")
 	if text != "" {
 		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	old := pistarCSSFile
-	pistarCSSFile = path
-	t.Cleanup(func() { pistarCSSFile = old })
+	old := gospotCSSFile
+	gospotCSSFile = path
+	t.Cleanup(func() { gospotCSSFile = old })
 	return path
 }
 

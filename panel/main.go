@@ -28,7 +28,7 @@ type Status struct {
 }
 
 func main() {
-	config := flag.String("config", settingsPath, "dashboard settings file (pistar.conf)")
+	config := flag.String("config", settingsPath, "dashboard settings file (gospot.conf)")
 	listen := flag.String("listen", "", "HTTP status listen address (default :PANEL_PORT)")
 	admin := flag.String("admin-listen", "", "serve only the HTTPS settings wizard at this address")
 	operator := flag.String("operator-listen", "", "serve the native operator UI at this address")

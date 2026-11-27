@@ -43,7 +43,7 @@ def serve(dist, *, operator=False):
                                     callsign_suffix="", target="TG 99", src="RF", duration="3.0",
                                     loss="0%", bit_error_rate="0.2%", rssi="")]
             elif path == "/runtime.json":
-                payload = {"backend": "pistar-go", "wizardPort": 8788}
+                payload = {"backend": "gospot-go", "wizardPort": 8788}
             elif path == "/api/status":
                 state = case["state"]
                 if state == "api-offline":

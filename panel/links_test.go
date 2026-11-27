@@ -14,9 +14,9 @@ import (
 func linksFixture(t *testing.T, host string) {
 	t.Helper()
 	dir := t.TempDir()
-	saved := []string{pistarHostsDir, mmdvmINI.location(), dmrGWINI.location(), ysfGWINI.location(), p25GWINI.location(), m17GWINI.location(), bmKeyFile}
+	saved := []string{gospotHostsDir, mmdvmINI.location(), dmrGWINI.location(), ysfGWINI.location(), p25GWINI.location(), m17GWINI.location(), bmKeyFile}
 	t.Cleanup(func() {
-		pistarHostsDir = saved[0]
+		gospotHostsDir = saved[0]
 		mmdvmINI.setPath(saved[1])
 		dmrGWINI.setPath(saved[2])
 		ysfGWINI.setPath(saved[3])
@@ -29,7 +29,7 @@ func linksFixture(t *testing.T, host string) {
 		os.WriteFile(p, []byte(body), 0o644)
 		return p
 	}
-	pistarHostsDir = dir
+	gospotHostsDir = dir
 	write("YSFHosts.txt", "16710;GB SOUTH WEST;South West;1.2.3.4;42000;003;\n#comment\n")
 	write("FCSHosts.txt", "FCS00290;Germany 90;x\n")
 	write("P25Hosts.txt", "# TG address port\n10200\tp25.example 41000\n")

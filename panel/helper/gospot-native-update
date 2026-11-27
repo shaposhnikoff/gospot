@@ -1,11 +1,11 @@
 #!/bin/bash
 # Privileged entry point for the Update page. Replaces Pi-Star's pistar-update,
 # which pulls the PHP dashboard from git: refresh the Pi-Star data sets and
-# upgrade the OS packages, writing progress to PISTAR_UPDATE_LOG.
+# upgrade the OS packages, writing progress to GOSPOT_UPDATE_LOG.
 set -euo pipefail
-. /etc/pistar-dashboard/pistar.conf
-log=$PISTAR_UPDATE_LOG
-unit=pistar-native-update.service
+. /etc/gospot/gospot.conf
+log=$GOSPOT_UPDATE_LOG
+unit=gospot-native-update.service
 case "${1:-}" in
   start)
     if /usr/bin/systemctl is-active --quiet "$unit"; then echo "already running" >&2; exit 3; fi
@@ -18,9 +18,9 @@ case "${1:-}" in
   run)
     exec >>"$log" 2>&1
     export DEBIAN_FRONTEND=noninteractive
-    echo "Pi-Star update started $(date -u '+%F %T') UTC"
+    echo "GoSpot update started $(date -u '+%F %T') UTC"
     echo "== Updating host files and ID databases"
-    if "$PISTAR_SBIN_DIR/HostFilesUpdate.sh"; then echo "Host files updated"; else echo "HostFilesUpdate.sh failed"; fi
+    if "$GOSPOT_SBIN_DIR/HostFilesUpdate.sh"; then echo "Host files updated"; else echo "HostFilesUpdate.sh failed"; fi
     echo "== Updating package lists"
     apt-get update
     echo "== Upgrading packages"
@@ -28,5 +28,5 @@ case "${1:-}" in
     echo "Finished $(date -u '+%F %T') UTC"
     echo "Update complete"
     ;;
-  *) echo "usage: pistar-native-update start" >&2; exit 2 ;;
+  *) echo "usage: gospot-native-update start" >&2; exit 2 ;;
 esac

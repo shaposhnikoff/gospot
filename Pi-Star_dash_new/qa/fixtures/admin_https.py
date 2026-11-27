@@ -32,7 +32,7 @@ NETWORK_PASS = "qa-network-canary-764"
 TOKEN = "71aef004" * 8
 RECEIPT = "ab78cd12" * 8
 ARCHIVE_PASS = "qa-private-archive-canary"
-COOKIE = "__Host-pistar-csrf=" + TOKEN
+COOKIE = "__Host-gospot-csrf=" + TOKEN
 BASIC = "Basic " + b64encode(("admin:" + ADMIN_PASS).encode()).decode()
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
@@ -96,7 +96,7 @@ def serve(dist, tmp):
         def authenticated(self):
             state.requests.append((self.command, self.path))
             if self.headers.get("Authorization") != BASIC:
-                self.reply(401, headers=[("WWW-Authenticate", 'Basic realm="Pi-Star"')])
+                self.reply(401, headers=[("WWW-Authenticate", 'Basic realm="GoSpot"')])
                 return False
             return True
 
@@ -122,10 +122,10 @@ def serve(dist, tmp):
                 return self.json({"rows": ROWS})
             if self.path == LOG + "/download":
                 return self.reply(200, LOG_TEXT.encode(), "text/plain; charset=utf-8", [
-                    ("Content-Disposition", 'attachment; filename="pi-star-radio-log.txt"')])
+                    ("Content-Disposition", 'attachment; filename="gospot-radio-log.txt"')])
             if self.path == "/manage/api/backup":
                 return self.reply(200, ZIP, "application/zip", [
-                    ("Content-Disposition", 'attachment; filename="Pi-Star-PRIVATE.zip"')])
+                    ("Content-Disposition", 'attachment; filename="GoSpot-PRIVATE.zip"')])
             if self.path == "/manage/":
                 return self.reply(200, (dist / "index.html").read_bytes(), "text/html; charset=utf-8")
             if re.fullmatch(r"/manage/assets/[\w.-]+\.(js|css)", self.path):
@@ -141,11 +141,11 @@ def serve(dist, tmp):
             if not self.authenticated():
                 return
             if self.path == "/manage/api/restore":
-                action = self.headers.get("X-PiStar-Action")
+                action = self.headers.get("X-GoSpot-Action")
                 if (self.headers.get("Origin") != origin or self.headers.get("Content-Type") != "application/zip"
-                        or self.headers.get("X-PiStar-CSRF") != TOKEN or action not in ("preview", "apply")
+                        or self.headers.get("X-GoSpot-CSRF") != TOKEN or action not in ("preview", "apply")
                         or COOKIE not in self.headers.get("Cookie", "").split("; ")
-                        or self.headers.get("X-PiStar-Receipt") != (RECEIPT if action == "apply" else None)):
+                        or self.headers.get("X-GoSpot-Receipt") != (RECEIPT if action == "apply" else None)):
                     state.violations.append("unexpected restore origin/headers")
                     return self.reply(403)
                 state.restore_actions.append(action)

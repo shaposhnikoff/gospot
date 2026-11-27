@@ -1,4 +1,4 @@
-# PSTAR Dashboard New — локальный прототип
+# GoSpot — панель Pi-Star-совместимого хотспота
 
 [Отчёт о проверках](docs/TEST-REPORT.md) · [Hoseline и сравнение с Last Heard на `pistar3`](http://192.168.210.194:8789/hoseline.html) · [Полевой тест TG91](docs/RF-ACCEPTANCE.md)
 
@@ -46,7 +46,7 @@ npm run build
 
 Экран входящих вызовов для настенного монитора — `http://<плата>:8789/kiosk`
 (тот же `/api/dashboard` раз в секунду; имена операторов из `DMRIds.dat`,
-названия TG из `TGList_*.txt` в `PISTAR_HOSTS_DIR`). Проверка на реальном
+названия TG из `TGList_*.txt` в `GOSPOT_HOSTS_DIR`). Проверка на реальном
 Go-бэкенде с фикстурой и скриншоты 1920×1080, 1280×720, 1080×1920:
 `python3 -B qa/kiosk_screens.py --out <каталог>` после `npm run build`.
 
@@ -55,15 +55,15 @@ Go-бэкенде с фикстурой и скриншоты 1920×1080, 1280×
 `npm run package:native` собирает `build/release-*/ui` независимо от старого
 PHP-клона. `scripts/build-deb` добавляет Go-бинарник, ограниченные помощники
 и systemd-юниты в ARM-пакет. В пакете интерфейс находится в
-`/usr/share/pistar-dashboard/ui`; Go обслуживает операторскую панель на `:8789`
+`/usr/share/gospot/ui`; Go обслуживает операторскую панель на `:8789`
 и авторизованную HTTPS-админку на `:8788/manage/`. Python используется только
 существующими системными помощниками, не HTTP-сервером нового пакета.
 
 Сборка отклоняет PHP-код, классический docroot и PHP-зависимости.
-`bash scripts/test-deb-entry build/release-ID/pistar-dashboard_VERSION_armhf.deb`
+`bash scripts/test-deb-entry build/release-ID/gospot_VERSION_armhf.deb`
 проверяет распакованный пакет и запускает его точный ARM-бинарник через
 `qemu-arm-static` на x86. Проверка сверяет HTML/ресурсы и HTTPS-авторизацию,
 не меняя радио-INI и не запуская радиослужбы.
 
-Полный перенос функций отслеживается в [issue #1](https://github.com/shaposhnikoff/pi-star-dashboard-new/issues/1).
+Полный перенос функций отслеживается в [issue #1](https://github.com/shaposhnikoff/gospot/issues/1).
 Нативный пакет не означает завершение всех редакторов и сетевых операций.

@@ -179,7 +179,7 @@ func dsyLetters() []linkOption {
 
 // dsyLines reads a host list line by line (the classic fgets loops).
 func dsyLines(name string) []string {
-	lines, _ := cachedHostFile("lines", filepath.Join(pistarHostsDir, name), func(f io.Reader) []string {
+	lines, _ := cachedHostFile("lines", filepath.Join(gospotHostsDir, name), func(f io.Reader) []string {
 		var out []string
 		s := bufio.NewScanner(f)
 		for s.Scan() {
@@ -946,7 +946,7 @@ func applyYSFSection(c *cfgContext, form cfgForm, p *cfgPlan) error {
 // ysf2nxdn, ysf2p25 and dmr2ysf were written unconditionally). There are no
 // version probes; the gateways are taken to be newer than every threshold in
 // the classic page (Pi-Star 4 binaries), so the newest branch is applied.
-// Written paths derive from PISTAR_HOSTS_DIR and PISTAR_LOG_DIR.
+// Written paths derive from GOSPOT_HOSTS_DIR and GOSPOT_LOG_DIR.
 
 const (
 	dsyDT1 = "1,34,97,95,43,3,17,0,0,0"
@@ -954,7 +954,7 @@ const (
 )
 
 func planDStarYSFDefaults(c *cfgContext, p *cfgPlan) {
-	hostsPath := func(name string) string { return filepath.Join(pistarHostsDir, name) }
+	hostsPath := func(name string) string { return filepath.Join(gospotHostsDir, name) }
 
 	// ircDDBGateway (2913-2931). Deviation: the helper appends the line at
 	// the end of the flat file instead of right after ircddbEnabled=.
@@ -1027,7 +1027,7 @@ func planDStarYSFDefaults(c *cfgContext, p *cfgPlan) {
 		{"DMR Network", "EnableUnlink", "1"}, {"DMR Network", "TGUnlink", "4000"}, {"DMR Network", "PCUnlink", "0"},
 		{"DMR Network", "Debug", "0"},
 		{"DMR Id Lookup", "File", hostsPath("DMRIds.dat")}, {"DMR Id Lookup", "Time", "24"}, {"DMR Id Lookup", "DropUnknown", "0"},
-		{"Log", "FilePath", pistarLogDir}, {"Log", "FileRoot", "YSF2DMR"},
+		{"Log", "FilePath", gospotLogDir}, {"Log", "FileRoot", "YSF2DMR"},
 		{"aprs.fi", "Enable", "0"}, {"aprs.fi", "Port", "14580"}, {"aprs.fi", "Refresh", "240"},
 		{"Enabled", "Enabled", "0"},
 		{"YSF Network", "WiresXMakeUpper", "1"}, {"YSF Network", "DT1", dsyDT1}, {"YSF Network", "DT2", dsyDT2},
@@ -1067,7 +1067,7 @@ func planDStarYSFDefaults(c *cfgContext, p *cfgPlan) {
 		p.set(x.file, x.net, "TGListFile", hostsPath(x.tgList))
 		p.set(x.file, "Log", "DisplayLevel", "0")
 		p.set(x.file, "Log", "FileLevel", "0")
-		p.set(x.file, "Log", "FilePath", pistarLogDir)
+		p.set(x.file, "Log", "FilePath", gospotLogDir)
 		p.set(x.file, "Log", "FileRoot", x.root)
 		if x.file == "ysf2nxdn" {
 			dsyDefault(c, p, x.file, "aprs.fi", "Enable", "0")
@@ -1089,7 +1089,7 @@ func planDStarYSFDefaults(c *cfgContext, p *cfgPlan) {
 		}
 		p.set("dgidgateway", "Log", "DisplayLevel", "1")
 		p.set("dgidgateway", "Log", "FileLevel", "1")
-		p.set("dgidgateway", "Log", "FilePath", pistarLogDir)
+		p.set("dgidgateway", "Log", "FilePath", gospotLogDir)
 		p.set("dgidgateway", "Log", "FileRoot", "DGIdGateway")
 		p.set("dgidgateway", "Log", "FileRotate", "0")
 		p.set("dgidgateway", "YSF Network", "Hosts", hostsPath("YSFHosts.txt"))

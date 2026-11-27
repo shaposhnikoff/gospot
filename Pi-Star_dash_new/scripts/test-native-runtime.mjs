@@ -9,16 +9,16 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const root = resolve(process.argv[2]);
-// Paths come from the packaged pistar.conf, which must equal the repository copy.
-const packagedSettings = readFileSync(join(root, 'etc/pistar-dashboard/pistar.conf'), 'utf8');
-assert.equal(packagedSettings, readFileSync(new URL('../pistar.conf', import.meta.url), 'utf8'));
+// Paths come from the packaged gospot.conf, which must equal the repository copy.
+const packagedSettings = readFileSync(join(root, 'etc/gospot/gospot.conf'), 'utf8');
+assert.equal(packagedSettings, readFileSync(new URL('../gospot.conf', import.meta.url), 'utf8'));
 const settings = Object.fromEntries(packagedSettings.split('\n').map(l => l.trim())
   .filter(l => l && !l.startsWith('#')).map(l => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
 const binary = join(root, settings.DASHBOARD_LIB_DIR, 'panel');
 const ui = join(root, settings.DASHBOARD_UI_DIR);
-const work = mkdtempSync(join(tmpdir(), 'pistar-package-test-'));
+const work = mkdtempSync(join(tmpdir(), 'gospot-package-test-'));
 // The unpacked package lives under `root`; point the copy of the settings there.
-const testSettings = join(work, 'pistar.conf');
+const testSettings = join(work, 'gospot.conf');
 writeFileSync(testSettings, packagedSettings
   .replace(/^DASHBOARD_UI_DIR=.*$/m, 'DASHBOARD_UI_DIR=' + ui)
   .replace(/^DASHBOARD_LIB_DIR=.*$/m, 'DASHBOARD_LIB_DIR=' + join(root, settings.DASHBOARD_LIB_DIR)));
@@ -61,7 +61,7 @@ try {
   const index = readFileSync(join(ui, 'index.html'));
   assert.deepEqual(Buffer.from(await (await fetch(origin)).arrayBuffer()), index);
   const runtime = await (await fetch(origin + '/runtime.json')).json();
-  assert.equal(runtime.backend, 'pistar-go');
+  assert.equal(runtime.backend, 'gospot-go');
   assert.equal(runtime.classicHttpsPort, undefined);
   const resources = readdirSync(join(ui, 'assets')).map(name => './assets/' + name);
   assert(resources.length > 0);
@@ -86,7 +86,7 @@ try {
   function management(path, authenticated) {
     return new Promise((done, reject) => {
       const request = httpsRequest({ hostname: '127.0.0.1', port: adminPort, path, ca: readFileSync(cert),
-        headers: authenticated ? { Authorization: 'Basic ' + Buffer.from('pi-star:' + password).toString('base64') } : {} }, response => {
+        headers: authenticated ? { Authorization: 'Basic ' + Buffer.from('gospot:' + password).toString('base64') } : {} }, response => {
         const chunks = [];
         response.on('data', chunk => chunks.push(chunk));
         response.on('end', () => done({ status: response.statusCode, body: Buffer.concat(chunks) }));

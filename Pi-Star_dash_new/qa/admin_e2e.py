@@ -30,7 +30,7 @@ IMPORTED = dict(callsign="QA7IMPORT", radio_id=1234567, frequency=438250000,
 
 
 def backup(cfg):
-    return {"scope": "pi-star.station-settings", "version": 1, "config": cfg}
+    return {"scope": "gospot.station-settings", "version": 1, "config": cfg}
 
 
 def cdp(command, cmd, **params):
@@ -111,7 +111,7 @@ def config_flow(v, state, files):
     v.notice("error", "Порт")
     v.type_into(tid("settings-password"), NETWORK_PASS)
     v.settings("export")
-    download = files / ("pi-star-" + INITIAL["callsign"] + ".json")
+    download = files / ("gospot-" + INITIAL["callsign"] + ".json")
     wait("export did not download", download.is_file)
     equal("export exact saved public data, excluding dirty fields and secrets",
           json.loads(download.read_text()), backup(INITIAL))
@@ -204,7 +204,7 @@ def logs(v, state, files):
     v.type_into(tid("log-filter"), "no-event-matches")
     equal("empty log filter", messages(), [])
     v.click(tid("log-download"))
-    downloaded = files / "pi-star-radio-log.txt"
+    downloaded = files / "gospot-radio-log.txt"
     wait("authenticated log download missing", downloaded.is_file)
     equal("download contains both sources regardless of display filter", downloaded.read_text(), LOG_TEXT)
     v.type_into(tid("log-filter"), "WARN")
@@ -235,7 +235,7 @@ def test_size(dist, tmp, width, height):
             conn.request("GET", CONFIG)
             res = conn.getresponse()
             equal("unauthenticated config challenge", (res.status, res.getheader("WWW-Authenticate")),
-                  (401, 'Basic realm="Pi-Star"'))
+                  (401, 'Basic realm="GoSpot"'))
             res.read()
 
         # Native challenge/cache on a dedicated fixture-only document. Subsequent

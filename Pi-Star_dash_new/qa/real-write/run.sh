@@ -17,6 +17,7 @@ if [[ ${1:-} == --expert ]]; then scenario+=(--expert); shift; fi
 if [[ ${1:-} == --backup ]]; then scenario+=(--backup); shift; fi
 if [[ ${1:-} == --configure ]]; then scenario+=(--configure); shift; fi
 if [[ ${1:-} == --css ]]; then scenario+=(--css); shift; fi
+if [[ ${1:-} == --factory ]]; then scenario+=(--factory); shift; fi
 if (($#)); then
   [[ $# == 2 && $1 == --dist ]] || { echo "Usage: $0 [--dist build/release-.../ui]" >&2; exit 2; }
   dist=$(realpath -e "$2")
@@ -79,6 +80,11 @@ docker cp "$dist/." "$name:/usr/local/share/pistar-native-ui/"
 echo "Admin UI source: $dist; verifying container files against source hashes"
 docker exec -i -w /usr/local/share/pistar-native-ui "$name" sha256sum -c - <"$work/ui.sha256"
 for f in MMDVM-Host.ini DMRGateway.ini; do docker cp "$work/$f" "$name:/etc/$f"; done
+# Pi-Star default configurations for Factory Reset, where pistar-radio installs them.
+radio_share=$(sed -n 's/^RADIO_SHARE_DIR=//p' pistar.conf)
+bins=$(sed -n 's/^PISTAR_BINARIES_BIN_DIR=//p' pistar.conf)
+docker exec "$name" mkdir -p "$radio_share"
+docker cp "$bins/config_clean.zip" "$name:$radio_share/config_clean.zip"
 for h in pistar-config pistar-configure; do
   docker cp "../panel/helper/$h" "$name:/usr/local/libexec/$h"
   test "$(sha256sum "../panel/helper/$h"|cut -d' ' -f1)" = "$(docker exec "$name" sha256sum "/usr/local/libexec/$h"|cut -d' ' -f1)"

@@ -231,3 +231,33 @@ func serveClassicBackup(w http.ResponseWriter, r *http.Request, run configHelper
 		http.Error(w, "Метод не поддерживается", 405)
 	}
 }
+
+// serveFactoryReset: the Factory Reset link of configure.php (pistar-factory-reset --really).
+func serveFactoryReset(w http.ResponseWriter, r *http.Request, run configHelperFunc) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "Метод не поддерживается", 405)
+		return
+	}
+	var in struct {
+		Confirm string `json:"confirm"`
+	}
+	if !maintenancePost(w, r, &in) {
+		return
+	}
+	if in.Confirm != "RESET" {
+		http.Error(w, "Server-side confirmation did not match. Factory reset cancelled.", 422)
+		return
+	}
+	body, _ := json.Marshal(in)
+	out, err := run(r.Context(), "factory-reset", body)
+	var reply struct {
+		OK     bool     `json:"ok"`
+		Output []string `json:"output"`
+	}
+	if err != nil || json.Unmarshal(out, &reply) != nil {
+		http.Error(w, "Factory reset failed", 502)
+		return
+	}
+	writeJSON(w, 200, reply)
+}

@@ -444,6 +444,52 @@ def css_write(request):
     return {"ok": True}
 
 
+RADIO_SHARE = setting_path(_SETTINGS, "RADIO_SHARE_DIR")
+# The radio services the classic Apply restarts, gateways first (as in panel/configure_page.go).
+FACTORY_UNITS = ["dmrgateway.service", "ysfgateway.service", "ysf2dmr.service", "ysf2nxdn.service", "ysf2p25.service",
+                 "dgidgateway.service", "p25gateway.service", "nxdngateway.service", "m17gateway.service",
+                 "dmr2ysf.service", "dmr2nxdn.service", "dapnetgateway.service", "aprsgateway.service",
+                 "ircddbgateway.service", "timeserver.service", "pistar-remote.service",
+                 "mmdvmhost.service", "dstarrepeater.service"]
+
+
+def factory_reset(request, run=None, is_loaded=None):
+    """pistar-factory-reset without the PHP tree: every radio configuration back
+    to the Pi-Star defaults (config_clean.zip), controller markers and the CSS
+    override removed, Wi-Fi kept; then the installed radio services restart."""
+    import io
+    import zipfile
+    run = run or systemctl
+    is_loaded = is_loaded or loaded
+    require(type(request) is dict and request.get("confirm") == "RESET", "Server-side confirmation did not match")
+    blob = (RADIO_SHARE / "config_clean.zip").read_bytes()
+    output = ["Loading fresh configuration file(s)..."]
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        for name in z.namelist():
+            if name not in FILES:
+                continue
+            text = z.read(name).decode()
+            _, st = read_file(FILES[name])
+            if st is None:
+                class New:  # root:root under sudo; the running user in unprivileged tests
+                    st_uid, st_gid = (0, 0) if os.geteuid() == 0 else (os.geteuid(), os.getegid())
+                    st_mode = 0o644
+                st = New
+            replace(FILES[name], text, st)
+            output.append(f"Restored {FILES[name]}")
+    for path in list(MARKERS.values()) + [CSS_FILE]:
+        if path.exists():
+            path.unlink()
+            output.append(f"Removed {path}")
+    for unit in FACTORY_UNITS:
+        if is_loaded(unit):
+            try:
+                run("restart", unit)
+            except Exception:
+                output.append(f"{unit} did not restart")
+    return {"ok": True, "output": output}
+
+
 def css_reset(request):
     """Factory Reset of the CSS Tool: remove the file; the classic palette applies."""
     require(type(request) is dict, "invalid request")
@@ -841,6 +887,11 @@ def main():
     if len(sys.argv) == 2 and sys.argv[1] == "restore":
         blob = sys.stdin.buffer.read(ZIP_MAX + 1)
         print(json.dumps(restore(blob)))
+        return
+    if len(sys.argv) == 2 and sys.argv[1] == "factory-reset":
+        raw = sys.stdin.buffer.read(4097)
+        require(len(raw) <= 4096, "request too large")
+        print(json.dumps(factory_reset(json.loads(raw.decode()))))
         return
     if len(sys.argv) == 2 and sys.argv[1] in ("css-write", "css-reset"):
         raw = sys.stdin.buffer.read(65537)

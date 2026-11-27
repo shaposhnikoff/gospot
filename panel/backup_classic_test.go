@@ -52,3 +52,28 @@ func TestClassicBackupHandler(t *testing.T) {
 		t.Fatalf("%v", verbs)
 	}
 }
+
+func TestFactoryResetHandler(t *testing.T) {
+	var verbs []string
+	run := func(_ context.Context, verb string, input []byte) ([]byte, error) {
+		verbs = append(verbs, verb+" "+string(input))
+		return []byte(`{"ok":true,"output":["Loading fresh configuration file(s)..."]}`), nil
+	}
+	post := func(body string, csrf bool) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		serveFactoryReset(w, maintenanceRequest("POST", "/manage/api/configure/factory-reset", body, csrf), run)
+		return w
+	}
+	if w := post(`{"confirm":"RESET"}`, false); w.Code != 403 {
+		t.Fatalf("csrf %d", w.Code)
+	}
+	if w := post(`{"confirm":"yes"}`, true); w.Code != 422 {
+		t.Fatalf("confirm %d", w.Code)
+	}
+	if w := post(`{"confirm":"RESET"}`, true); w.Code != 200 || !strings.Contains(w.Body.String(), "Loading fresh") {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	if strings.Join(verbs, "|") != `factory-reset {"confirm":"RESET"}` {
+		t.Fatalf("%v", verbs)
+	}
+}

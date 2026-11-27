@@ -23,6 +23,18 @@ Main page done (`ClassicDashboard.svelte`, `/api/dashboard`, release `deb-10`). 
 5. **Expert**: Quick Edit (generic section editor per file), Full Edit (text editors), Tools (SSH, jitter, modem firmware, upgrade), API keys.
 6. **Wi-Fi, Power, Update (Go: host files + apt, no dashboard git pull), Backup/Restore, Live Logs, Calibration.**
 
+### Status 2026-11-27 (each closed with unit tests, a Chromium stand scenario and pistar3)
+
+- [x] Main page, Admin page, BM links/manager (BM profile numbers as strings fixed, deb-30)
+- [x] Live Logs, Power, Update, Expert Quick/Full Edit, API Keys (long BM JWT), FW, SSH
+- [x] Backup/Restore (classic zip), Configuration (all sections, untouched form writes nothing)
+- [x] CSS Tool + theme, Factory Reset (stand)
+- [x] `pistar-radio` 0.1.0-2 seeds missing configs from `config_clean.zip`
+- [ ] Wi-Fi (NetworkManager + wpa_supplicant backends) — in progress
+- [ ] Calibration (MMDVMCal) and Jitter test — in progress
+- [ ] TGIF manager (static TG API + legacy link manager) — in progress
+- [ ] D-Star stack for wxWidgets 3.2, Trixie image armhf → arm64, kiosk calls screen
+
 ### Deferred (user decision 2026-11-27)
 
 - **Displays (OLED, Nextion, HD44780, TFT): skipped, the user does not use screens.** The PS4 `MMDVMHost` still links `libArduiPi_OLED.so.1`, so `radio/build-libs.sh` ships the library only to let the binary start; no display configuration, `pistar-oledtext.py`/`pistar-nextiontext.py` handling, NextionDriver unit or display settings pages until requested.

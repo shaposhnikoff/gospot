@@ -10,3 +10,4 @@ pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-configure keys-rea
 pistar-wizard ALL=(root) NOPASSWD: @DASHBOARD_LIB_DIR@/pistar-modem list, @DASHBOARD_LIB_DIR@/pistar-modem flash *
 pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR@/pistar-configure backup, @DASHBOARD_LIB_DIR@/pistar-configure restore
 pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR@/pistar-configure css-write, @DASHBOARD_LIB_DIR@/pistar-configure css-reset
+pistar-wizard ALL=(root) NOPASSWD: NOLOG_INPUT: NOLOG_OUTPUT: @DASHBOARD_LIB_DIR@/pistar-configure factory-reset

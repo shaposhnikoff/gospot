@@ -139,6 +139,9 @@ func wizardHandler(helper wizardHelper, assetDir string) http.HandlerFunc {
 		case "/manage/api/links", "/manage/api/links/bm":
 			serveLinks(w, r, bm, sendRemoteCommand)
 			return
+		case "/manage/api/configure/factory-reset":
+			serveFactoryReset(w, r, runConfigureHelper)
+			return
 		case "/manage/api/backup/classic":
 			serveClassicBackup(w, r, runConfigureHelper, time.Now())
 			return

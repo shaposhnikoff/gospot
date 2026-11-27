@@ -5,10 +5,14 @@
   import { operatorOrigin } from './runtime';
   import { applyTheme } from './classic';
 
-  let { title, links, children, menu, footer = 'config' }: { title: string; links: string[]; children: Snippet; menu?: Snippet; footer?: 'config' | 'dashboard' } = $props();
+  let { title, links, children, menu, footer = 'config', actions = {} }: {
+    title: string; links: string[]; children: Snippet; menu?: Snippet; footer?: 'config' | 'dashboard';
+    actions?: Record<string, () => void>; // links that run a page action (configure.php "Factory Reset")
+  } = $props();
   const targets: Record<string, string> = {
     Dashboard: '', Admin: '/manage/', 'Live Logs': '/manage/#logs', Power: '/manage/#power', Update: '/manage/#update',
     'Backup/Restore': '/manage/#backup', Configuration: '/manage/#configuration', Expert: '/manage/#expert',
+    Calibrate: '/manage/#calibration',
   };
   let operator = $state('/');
   let versions = $state('');
@@ -32,7 +36,7 @@
     <div style="font-size: 8px; text-align: right; padding-right: 8px;">{versions}</div>
     <h1>Pi-Star Digital Voice - {title}</h1>
     <p style="padding-right: 5px; text-align: right; color: #ffffff;">
-      {#each links as label, i}<a href={label === 'Dashboard' ? operator : targets[label]} style="color: #ffffff;">{label}</a>{#if i < links.length - 1}{' | '}{/if}{/each}
+      {#each links as label, i}{#if actions[label]}<a href="#top" style="color: #ffffff;" onclick={e => { e.preventDefault(); actions[label](); }}>{label}</a>{:else}<a href={label === 'Dashboard' ? operator : targets[label]} style="color: #ffffff;">{label}</a>{/if}{#if i < links.length - 1}{' | '}{/if}{/each}
     </p>
     {#if menu}{@render menu()}{/if}
   </div>

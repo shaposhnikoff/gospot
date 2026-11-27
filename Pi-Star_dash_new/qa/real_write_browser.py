@@ -450,6 +450,40 @@ def exercise_css(v, stand, origin, original):
           "keeps the newer file; Factory Reset refuses a wrong confirmation and RESET removes the file, restoring the palette", flush=True)
 
 
+def exercise_factory(v, stand, origin, original):
+    """Configuration > Factory Reset through Chromium against the real helper and config_clean.zip."""
+    import io
+    marker, css = "/etc/dstar-radio.mmdvmhost", "/etc/pistar-css.ini"
+    share = stand.exec("sh", "-c", "ls /usr/share/pistar-radio/config_clean.zip").stdout.decode().strip()
+    zipped = ZipFile(io.BytesIO(stand.read(share)))
+    stand.exec("sh", "-c", f"printf '[Modem]\\nHardware=zumspotgpio\\n' > {marker}; printf '[Background]\\nPage=000000\\n' > {css}; rm -f /etc/ysfgateway")
+    modes = lambda: stand.exec("stat", "-c", "%U:%G %a", "/etc/MMDVM-Host.ini", "/etc/DMRGateway.ini").stdout.decode().split("\n")[:2]
+    before_modes = modes()
+    v.command("/url", {"url": origin + "/manage/#expert"})
+    v.command("/url", {"url": origin + "/manage/#configuration"})
+    wait("configuration did not load", lambda: v.js("return document.querySelectorAll('.section h2').length > 3"))
+    history = stand.restarts()
+    link = "[...document.querySelectorAll('.header a')].find(a => a.textContent === 'Factory Reset').click()"
+    # 1. Cancel in the confirmation writes nothing
+    v.js("window.confirm = () => false")
+    v.js(link)
+    same_pair("cancelled factory reset", stand.pair(), original)
+    equal("cancelled factory reset keeps the marker", stand.exists(marker), True)
+    # 2. OK restores every configuration from config_clean.zip
+    v.js("window.confirm = () => true")
+    v.js(link)
+    wait("factory reset not acknowledged", lambda: v.js("return document.body.innerText.includes('Loading fresh configuration file(s)...')"))
+    same_pair("factory configurations", stand.pair(), (zipped.read("mmdvmhost"), zipped.read("dmrgateway")))
+    equal("factory reset keeps owners and modes", modes(), before_modes)
+    equal("YSFGateway created from the defaults", stand.read("/etc/ysfgateway"), zipped.read("ysfgateway"))
+    equal("marker removed", stand.exists(marker), False)
+    equal("CSS override removed", stand.exists(css), False)
+    equal("factory reset restarts", stand.restarts(), history + ["dmrgateway.service ok", "mmdvmhost.service ok"])
+    print("PASS Chromium Factory Reset: Cancel writes nothing; OK restores MMDVMHost, DMRGateway and the missing YSFGateway "
+          "byte-for-byte from config_clean.zip with owners and modes kept, removes the controller marker and CSS override, "
+          "then restarts DMRGateway and MMDVMHost", flush=True)
+
+
 def exercise_backup(v, stand, origin, folder, original):
     """Classic Backup/Restore through Chromium against the real helper."""
     import base64
@@ -510,6 +544,7 @@ def main():
     parser.add_argument("--backup", action="store_true")
     parser.add_argument("--configure", action="store_true")
     parser.add_argument("--css", action="store_true")
+    parser.add_argument("--factory", action="store_true")
     parser.add_argument("--key", type=Path, required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--container", type=stand_name, required=True)
@@ -532,7 +567,7 @@ def main():
             v = Admin(command, args.origin + "/manage/", 1280, 900, False)
             # /manage/ is the classic admin page; the station settings, DMR
             # services and backup pages live under their own sections.
-            if not (args.expert or args.backup or args.configure or args.css):
+            if not (args.expert or args.backup or args.configure or args.css or args.factory):
                 command("/url", {"url": args.origin + "/manage/#settings"})
                 wait("workspace menu did not load", lambda: v.js("return !!document.querySelector('nav a[href=\"#services\"]')"))
             try:
@@ -555,6 +590,8 @@ def run_scenario(args, v, stand, folder, original, changed):
         exercise_configure(v, stand, args.origin, original)
     elif args.css:
         exercise_css(v, stand, args.origin, original)
+    elif args.factory:
+        exercise_factory(v, stand, args.origin, original)
     elif args.services:
         exercise_services(v, stand, original)
     else:

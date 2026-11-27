@@ -47,6 +47,21 @@
     await load();
   }
 
+  // configure.php factoryReset(): confirm, then pistar-factory-reset; Wi-Fi is kept.
+  async function factoryReset() {
+    if (!confirm('WARNING: This will set all your settings back to factory defaults. WiFi setup will be retained to maintain network access to this Pi.\n\nAre you SURE you want to do this?\n\nPress OK to restore the factory configuration\nPress Cancel to go back.')) return;
+    busy = true; message = ''; error = '';
+    const r = await fetch('/manage/api/configure/factory-reset', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-PiStar-CSRF': csrf }, body: JSON.stringify({ confirm: 'RESET' }),
+    }).catch(() => null);
+    busy = false;
+    if (!r || !r.ok) { error = r ? (await r.text()).trim() : 'No response from the board'; return; }
+    const d: { output: string[] } = await r.json();
+    message = d.output.join('\n');
+    sections = null;
+    setTimeout(() => { void load(); }, 5000);
+  }
+
   function toggled(name: string, e: Event) { form[name] = (e.currentTarget as HTMLInputElement).checked ? 'ON' : 'OFF'; }
 </script>
 
@@ -85,8 +100,8 @@
   {/if}
 {/snippet}
 
-<PiStarFrame title="Configuration" links={['Dashboard', 'Admin', 'Expert', 'Power', 'Update', 'Backup/Restore']}>
-  {#if message}<table><tbody><tr><td style="background:#1d1;">{message}</td></tr></tbody></table><br />{/if}
+<PiStarFrame title="Configuration" links={['Dashboard', 'Admin', 'Expert', 'Calibrate', 'Power', 'Update', 'Backup/Restore', 'Factory Reset']} actions={{ 'Factory Reset': () => { void factoryReset(); } }}>
+  {#if message}<table><tbody><tr><td style="background:#1d1; white-space: pre-line;">{message}</td></tr></tbody></table><br />{/if}
   {#if error}<table><tbody><tr><td style="background:#f33;">{error}</td></tr></tbody></table><br />{/if}
   {#if !sections}
     {#if !error}Loading configuration...{/if}

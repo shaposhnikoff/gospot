@@ -17,7 +17,7 @@ for line in conf.splitlines():
                                           "WPA_SUPPLICANT_CONF", "CRONTAB_FILE", "PISTAR_HOSTS_DIR",
                                           "BM_API_KEY_FILE", "DAPNET_API_KEY_FILE", "TGIF_API_KEY_FILE",
                                           "HOSTS_FILE", "HOSTAPD_CONF", "HOSTAP_OFF_FLAG", "PISTAR_UPNP_SCRIPT",
-                                          "WIZARD_CONFIG_DIR", "DHCPCD_CONF", "PISTAR_CSS_FILE"):
+                                          "WIZARD_CONFIG_DIR", "DHCPCD_CONF", "PISTAR_CSS_FILE", "RADIO_SHARE_DIR"):
         line = f"{key}={TMP / key.lower()}"
     lines.append(line)
 settings = TMP / "pistar.conf"
@@ -298,6 +298,36 @@ class CssToolTest(unittest.TestCase):
         self.assertTrue(helper.CSS_FILE.exists())
         helper.css_reset({"revision": self.rev()})
         self.assertFalse(helper.CSS_FILE.exists())
+
+
+class FactoryResetTest(unittest.TestCase):
+    def test_restores_defaults_removes_markers_keeps_owner(self):
+        import io, zipfile
+        helper.RADIO_SHARE.mkdir(exist_ok=True)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("mmdvmhost", "[General]\nCallsign=M1ABC\n")
+            z.writestr("ysfgateway", "[General]\nCallsign=M1ABC\n")
+            z.writestr("not-a-config", "x")
+        (helper.RADIO_SHARE / "config_clean.zip").write_bytes(buf.getvalue())
+        helper.FILES["mmdvmhost"].write_text("[General]\nCallsign=UT3UDX\n")
+        os.chmod(helper.FILES["mmdvmhost"], 0o640)
+        helper.FILES["ysfgateway"].unlink(missing_ok=True)
+        helper.MARKERS["mmdvmhost"].write_text("[Modem]\nHardware=zum\n")
+        helper.CSS_FILE.write_text("[Background]\n")
+        with self.assertRaises(helper.Error):
+            helper.factory_reset({"confirm": "reset"}, run=lambda *a: None, is_loaded=lambda u: True)
+        self.assertEqual(helper.FILES["mmdvmhost"].read_text(), "[General]\nCallsign=UT3UDX\n")
+        calls = []
+        out = helper.factory_reset({"confirm": "RESET"}, run=lambda *a: calls.append(a),
+                                   is_loaded=lambda u: u in ("mmdvmhost.service", "dmrgateway.service"))
+        self.assertTrue(out["ok"])
+        self.assertEqual(helper.FILES["mmdvmhost"].read_text(), "[General]\nCallsign=M1ABC\n")
+        self.assertEqual(stat.S_IMODE(helper.FILES["mmdvmhost"].stat().st_mode), 0o640)
+        self.assertEqual(helper.FILES["ysfgateway"].read_text(), "[General]\nCallsign=M1ABC\n")
+        self.assertFalse(helper.MARKERS["mmdvmhost"].exists() or helper.CSS_FILE.exists())
+        self.assertFalse((TMP / "not-a-config").exists())
+        self.assertEqual(calls, [("restart", "dmrgateway.service"), ("restart", "mmdvmhost.service")])
 
 
 def _settings_path(key):
